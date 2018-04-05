@@ -609,7 +609,7 @@ class CNMFViewer():
         print("update_components")
         print(active)
         print(uid)
-        if uid:
+        if uid is not None:
             cur_mask = self.cnmf.attrs['unit_mask']
             if active and uid not in cur_mask:
                 self.cnmf.attrs['unit_mask'] = np.append(cur_mask, uid)
@@ -619,7 +619,7 @@ class CNMFViewer():
         return json.dumps(dict(active=active, uid=uid))
 
     def _update_active(self, uid):
-        if not uid:
+        if uid is None:
             return True
         cur_mask = self.cnmf.attrs['unit_mask']
         if uid in cur_mask:
@@ -756,8 +756,6 @@ class CNMFViewer():
     def _update_spatial_unit(self, uid, rely1, rely2, rely3, rely4, rely5,
                              state):
         print('update_spatial_unit')
-        if not uid:
-            uid = []
         _initial = False
         _update = False
         if not state:
@@ -765,7 +763,7 @@ class CNMFViewer():
         elif not state['data'][0]['customdata'] == uid:
             _update = True
         if _initial or _update:
-            cur_A = self.cnmf['A'].sel(unit_id=uid)
+            cur_A = self.cnmf['A'].sel(unit_id=uid if not uid is None else [])
             trace = [
                 go.Heatmap(
                     x=cur_A.coords['width'].values,
@@ -780,8 +778,7 @@ class CNMFViewer():
                 state.update(data=trace)
         if _initial:
             layout = go.Layout(
-                title="Spatial Component of unit: {}".format(
-                    uid if uid else None),
+                title="Spatial Component of unit: {}".format(uid),
                 xaxis=dict(
                     title='width',
                     range=[0, self._w],
@@ -801,8 +798,7 @@ class CNMFViewer():
                     constraintoward='top'))
             state = go.Figure(data=trace, layout=layout)
         elif _update:
-            state['layout']['title'] = "Spatial Component of unit: {}".format(
-                uid if uid else None)
+            state['layout']['title'] = "Spatial Component of unit: {}".format(uid)
         state = self._sync_zoom([rely1, rely2, rely3, rely4, rely5], state)
         return state
 
@@ -951,11 +947,9 @@ class CNMFViewer():
 
     def _update_temporal_unit(self, uid, frm, rely1, state):
         print('update_temporal_unit')
-        if not uid:
-            uid = []
         cur_f = frm['points'][0]['x'] if frm else 0
-        cur_C = self.cnmf['C'].load().sel(unit_id=uid)
-        cur_S = self.cnmf['S'].load().sel(unit_id=uid)
+        cur_C = self.cnmf['C'].load().sel(unit_id=uid if not uid is None else [])
+        cur_S = self.cnmf['S'].load().sel(unit_id=uid if not uid is None else [])
         trace = []
         trace.append(
             go.Scatter(
@@ -976,8 +970,7 @@ class CNMFViewer():
                 name='C - {}'.format(uid),
                 line=dict(width=1.5)))
         layout = go.Layout(
-            title="Temporal Components of unit: {}".format(
-                uid if uid else None),
+            title="Temporal Components of unit: {}".format(uid),
             hovermode='x',
             xaxis=dict(title='frame', range=[0, self._f]),
             yaxis=dict(title='Temporal Component', nticks=5),
