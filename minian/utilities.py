@@ -10,6 +10,7 @@ import numpy as np
 import functools as fct
 import holoviews as hv
 import dask as da
+from copy import deepcopy
 from scipy import ndimage as ndi
 from scipy.io import loadmat
 from natsort import natsorted
@@ -439,50 +440,46 @@ def update_meta(dpath, pattern=r'^varr_mc_int.nc$', meta_dict=None):
         for fname in fnames:
             f_path = os.path.join(dirpath, fname)
             pathlist = os.path.normpath(dirpath).split(os.sep)
+            new_ds = xr.Dataset()
             with xr.open_dataset(f_path) as old_ds:
-                ds = old_ds.load().copy()
-            try:
-                ds = ds.rename(
-                    dict(__xarray_dataarray_variable__='varr_mc_int'))
-            except ValueError:
-                pass
-            ds = ds.assign_coords(
+                new_ds.attrs = deepcopy(old_ds.attrs)
+            new_ds = new_ds.assign_coords(
                 **dict([(cdname, pathlist[cdval])
                         for cdname, cdval in meta_dict.items()]))
-            ds = ds.assign_attrs(dict(file_path=f_path))
-            ds.to_netcdf(f_path, mode='w')
+            new_ds = new_ds.assign_attrs(dict(file_path=f_path))
+            new_ds.to_netcdf(f_path, mode='a')
             print("updated: {}".format(f_path))
 
 
-def resave_varr_again(dpath, pattern=r'^varr_mc_int.nc$'):
-    for dirpath, dirnames, fnames in os.walk(dpath):
-        fnames = filter(lambda fn: re.search(pattern, fn), fnames)
-        for fname in fnames:
-            f_path = os.path.join(dirpath, fname)
-            with xr.open_dataset(f_path) as old_ds:
-                vname = list(old_ds.data_vars.keys())[0]
-                if vname == 'varr_mc_int':
-                    continue
-                print("resaving {}".format(f_path))
-                ds = old_ds.load().copy()
-                ds = ds.rename({vname: 'varr_mc_int'})
-            ds.to_netcdf(f_path, mode='w')
+# def resave_varr_again(dpath, pattern=r'^varr_mc_int.nc$'):
+#     for dirpath, dirnames, fnames in os.walk(dpath):
+#         fnames = filter(lambda fn: re.search(pattern, fn), fnames)
+#         for fname in fnames:
+#             f_path = os.path.join(dirpath, fname)
+#             with xr.open_dataset(f_path) as old_ds:
+#                 vname = list(old_ds.data_vars.keys())[0]
+#                 if vname == 'varr_mc_int':
+#                     continue
+#                 print("resaving {}".format(f_path))
+#                 ds = old_ds.load().copy()
+#                 ds = ds.rename({vname: 'varr_mc_int'})
+#             ds.to_netcdf(f_path, mode='w')
 
 
-def resave_cnmf(dpath, pattern=r'^cnm.nc$'):
-    for dirpath, fdpath, fpath in os.walk(dpath):
-        f_list = filter(lambda fn: re.search(pattern, fn), fpath)
-        for cnm_path in f_list:
-            cnm_path = os.path.join(dirpath, cnm_path)
-            cur_cnm = xr.open_dataset(cnm_path)
-            newds = xr.Dataset()
-            newds.assign_coords(session=cur_cnm.coords['session'])
-            newds.assign_coords(animal=cur_cnm.coords['animal'])
-            newds.assign_coords(session_id=cur_cnm.coords['session_id'])
-            fpath = str(cur_cnm.attrs['file_path'])
-            cur_cnm.close()
-            print("writing to ".format(fpath))
-            # newds.to_netcdf(fpath, mode='a')
+# def resave_cnmf(dpath, pattern=r'^cnm.nc$'):
+#     for dirpath, fdpath, fpath in os.walk(dpath):
+#         f_list = filter(lambda fn: re.search(pattern, fn), fpath)
+#         for cnm_path in f_list:
+#             cnm_path = os.path.join(dirpath, cnm_path)
+#             cur_cnm = xr.open_dataset(cnm_path)
+#             newds = xr.Dataset()
+#             newds.assign_coords(session=cur_cnm.coords['session'])
+#             newds.assign_coords(animal=cur_cnm.coords['animal'])
+#             newds.assign_coords(session_id=cur_cnm.coords['session_id'])
+#             fpath = str(cur_cnm.attrs['file_path'])
+#             cur_cnm.close()
+#             print("writing to ".format(fpath))
+#             newds.to_netcdf(fpath, mode='a')
 
 
 def save_movies(cnmf, dpath, Y=None, mask=None, Y_only=True, order='C'):
