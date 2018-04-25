@@ -132,7 +132,7 @@ def calculate_centroids(cnmds, grp_dim=['animal', 'session']):
     cnt_list = []
     for anm, cur_anm in cnmds.groupby('animal'):
         for ss, cur_ss in cur_anm.groupby('session'):
-            cnt = da.delayed(centroids)(cur_ss['A'])
+            cnt = da.delayed(centroids)(cur_ss['A_shifted'])
             cnt_list.append(cnt)
     with ProgressBar():
         cnt_list, = da.compute(cnt_list)
