@@ -71,21 +71,24 @@ def estimate_shifts(cnm_list,
         with xr.open_dataset(cnm_path) as cnm:
             cur_path = os.path.dirname(
                 cnm.attrs['file_path']) + os.sep + 'varr_mc_int.nc'
-        with xr.open_dataset(cur_path)['varr_mc_int'] as cur_va:
-            if temp_list[icnm] == 'first':
-                cur_temp = cur_va.sel(
-                    frame=cur_va.coords['frame'][0]).load().copy()
-                temps.append(cur_temp)
-            elif temp_list[icnm] == 'last':
-                cur_temp = cur_va.sel(
-                    frame=cur_va.coords['frame'][-1]).load().copy()
-                temps.append(cur_temp)
-            elif temp_list[icnm] == 'mean':
-                cur_va = cur_va.load().chunk(dict(width=50, height=50))
-                cur_temp = cur_va.mean('frame').compute()
-                temps.append(cur_temp)
-            else:
-                print("unrecognized template")
+        try:
+            with xr.open_dataset(cur_path)['varr_mc_int'] as cur_va:
+                if temp_list[icnm] == 'first':
+                    cur_temp = cur_va.sel(
+                        frame=cur_va.coords['frame'][0]).load().copy()
+                    temps.append(cur_temp)
+                elif temp_list[icnm] == 'last':
+                    cur_temp = cur_va.sel(
+                        frame=cur_va.coords['frame'][-1]).load().copy()
+                    temps.append(cur_temp)
+                elif temp_list[icnm] == 'mean':
+                    cur_va = cur_va.load().chunk(dict(width=50, height=50))
+                    cur_temp = cur_va.mean('frame').compute()
+                    temps.append(cur_temp)
+                else:
+                    print("unrecognized template")
+        except KeyError:
+            print("no varr found for path {}".format(cnm_path))
     shifts = []
     corrs = []
     for itemp, temp_dst in enumerate(temps):
