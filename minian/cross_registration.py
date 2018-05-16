@@ -130,12 +130,12 @@ def apply_shifts(var, shifts, inplace=False, dim='session'):
     return var_sh.rename(var.name + '_shifted')
 
 
-def calculate_centroids(cnmds, grp_dim=['animal', 'session']):
+def calculate_centroids(cnmds, window, grp_dim=['animal', 'session']):
     print("computing centroids")
     cnt_list = []
     for anm, cur_anm in cnmds.groupby('animal'):
         for ss, cur_ss in cur_anm.groupby('session'):
-            cnt = da.delayed(centroids)(cur_ss['A_shifted'])
+            cnt = da.delayed(centroids)(cur_ss['A_shifted'], window.sel(animal=anm))
             cnt_list.append(cnt)
     with ProgressBar():
         cnt_list, = da.compute(cnt_list)
@@ -143,9 +143,10 @@ def calculate_centroids(cnmds, grp_dim=['animal', 'session']):
     return cnts_ds
 
 
-def centroids(A):
+def centroids(A, window=None):
     A = A.load().dropna('unit_id', how='all')
-    window = A.isnull().sum('unit_id') == 0
+    if window is None:
+        window = A.isnull().sum('unit_id') == 0
     A = A.where(window, drop=True)
     A = A.fillna(0)
     meta_dims = set(A.coords.keys()) - set(A.dims)
