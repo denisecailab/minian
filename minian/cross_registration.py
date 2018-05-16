@@ -140,6 +140,12 @@ def calculate_centroids(cnmds, window, grp_dim=['animal', 'session']):
     with ProgressBar():
         cnt_list, = da.compute(cnt_list)
     cnts_ds = pd.concat(cnt_list, ignore_index=True)
+    cnts_ds.height = cnts_ds.height.astype(float)
+    cnts_ds.width = cnts_ds.width.astype(float)
+    cnts_ds.unit_id = cnts_ds.unit_id.astype(int)
+    cnts_ds.animal = cnts_ds.animal.astype(str)
+    cnts_ds.session = cnts_ds.session.astype(str)
+    cnts_ds.session_id = cnts_ds.session_id.astype(str)
     return cnts_ds
 
 
