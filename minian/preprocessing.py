@@ -191,7 +191,8 @@ def remove_background(varray, window=51):
     print("creating parallel schedule")
     varr_ft = varray.astype(np.float32)
     compute_list = []
-    for fid, fm in varr_ft.rolling(frame=1):
+    for fid in varr_ft.coords['frame'].values:
+        fm = varr_ft.loc[dict(frame=fid)]
         _ = delayed(remove_background_perframe)(fid, fm, varr_ft, window)
         compute_list.append(_)
     with ProgressBar():

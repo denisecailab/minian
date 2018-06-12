@@ -4,13 +4,16 @@ import holoviews as hv
 import xarray as xr
 import ipywidgets as iwgt
 import seaborn as sns
+import pandas as pd
 import colorsys
 import param
 from .utilities import scale_varr
+from .motion_correction import shift_fft
 from collections import OrderedDict
-from holoviews.streams import Stream, Pipe, RangeXY, DoubleTap, Tap, Selection1D
+from holoviews.streams import Stream, Pipe, RangeXY, DoubleTap, Tap, Selection1D, BoxEdit
 from holoviews.operation import contours, threshold
 from holoviews.operation.datashader import datashade, regrid
+from holoviews.util import Dynamic
 from datashader.colors import Sets1to3
 from datashader import count_cat
 from IPython.core.display import display, clear_output
@@ -22,14 +25,14 @@ from bokeh.application import Application
 from bokeh.application.handlers import FunctionHandler
 from matplotlib.colors import rgb_to_hsv
 from scipy.ndimage.measurements import center_of_mass
+from IPython.core.debugger import set_trace
 
-
-def update_override(self, **kwargs):
-    self._set_stream_parameters(**kwargs)
-    transformed = self.transform()
-    if transformed:
-        self._set_stream_parameters(**transformed)
-    self.trigger([self])
+# def update_override(self, **kwargs):
+#     self._set_stream_parameters(**kwargs)
+#     transformed = self.transform()
+#     if transformed:
+#         self._set_stream_parameters(**transformed)
+#     self.trigger([self])
 
 
 class VArrayViewer():
@@ -73,14 +76,14 @@ class VArrayViewer():
                 c_keys = OrderedDict()
                 legends = OrderedDict()
                 c_keys['mean'] = Sets1to3[0]
-                legends['mean'] = hv.Points([0, 0]).opts(
-                    style=dict(color=Sets1to3[0]))
+                legends['mean'] = hv.Points(
+                    [0, 0]).opts(style=dict(color=Sets1to3[0]))
                 c_keys['max'] = Sets1to3[1]
-                legends['max'] = hv.Points([0, 0]).opts(
-                    style=dict(color=Sets1to3[1]))
+                legends['max'] = hv.Points(
+                    [0, 0]).opts(style=dict(color=Sets1to3[1]))
                 c_keys['min'] = Sets1to3[2]
-                legends['min'] = hv.Points([0, 0]).opts(
-                    style=dict(color=Sets1to3[2]))
+                legends['min'] = hv.Points(
+                    [0, 0]).opts(style=dict(color=Sets1to3[2]))
                 mean = datashade(
                     mean,
                     aggregator=count_cat('variable'),
@@ -247,9 +250,10 @@ class CNMFViewer():
                 },
                 style={'cmap': ['white']})
             cur_text = hv.Text(cur_cent[1], cur_cent[0], str(int(uid)))
-            cur_text = cur_text(
-                style={'color': 'white',
-                       'text_font_size': '8pt'})
+            cur_text = cur_text(style={
+                'color': 'white',
+                'text_font_size': '8pt'
+            })
             cont_dict[int(uid)] = cur_cont * cur_text
         ovly = hv.NdOverlay(cont_dict, kdims=['unit_id'])
         self.strm_uid.source = ovly
@@ -273,11 +277,12 @@ class CNMFViewer():
         img_bdf = hv.DynamicMap(fim, streams=[self.pipbdf])
         img_bdf = regrid(
             img_bdf, height=int(self._h / 10), width=int(self._w / 10))
-        img_bdf = img_bdf(plot={
-            'height': self._h,
-            'width': self._w,
-            'title_format': "b dot f (Background)"
-        })
+        img_bdf = img_bdf(
+            plot={
+                'height': self._h,
+                'width': self._w,
+                'title_format': "b dot f (Background)"
+            })
         img_Yr = hv.DynamicMap(fim, streams=[self.pipYr])
         img_Yr = regrid(
             img_Yr, height=int(self._h / 10), width=int(self._w / 10))
@@ -471,3 +476,123 @@ class CNMFViewer():
             iwgt.HBox([w_frame, w_play, w_update_mov]),
             iwgt.HBox([w_select, w_update, w_overlay])
         ])
+
+
+class AlignViewer():
+    def __init__(self, shiftds, sampling=2):
+        self.shiftds = shiftds
+        self.temps = shiftds['temps']
+        self.mask = xr.zeros_like(self.temps, dtype=bool)
+        self.ls_anm = np.unique(shiftds.coords['animal'].values)
+        self.ls_ss = np.unique(shiftds.coords['session'].values)
+        Selection = Stream.define(
+            'selection',
+            anm=param.Selector(self.ls_anm),
+            ss=param.Selector(self.ls_ss))
+        self.str_sel = Selection(anm=self.ls_anm[0], ss=self.ls_ss[0])
+        self.sampling = sampling
+        self.str_box = BoxEdit()
+        self.box = hv.DynamicMap(self._box, streams=[self.str_box])
+        self.box = self.box.opts(
+            style=dict(fill_alpha=0.3, line_color='white'))
+        self.wgts = self._widgets()
+        self.hvobjs = self._get_objs()
+
+    def show(self):
+        display(self.wgts)
+        display(self.hvobjs)
+
+    def _box(self, data):
+        if data is None:
+            return hv.Polygons([])
+        else:
+            diag = pd.DataFrame(data)
+            corners = []
+            for ir, r in diag.iterrows():
+                corners.append(
+                    np.array([(r['x0'], r['y0']), (r['x0'], r['y1']),
+                              (r['x1'], r['y1']), (r['x1'], r['y0'])]))
+            return hv.Polygons([{
+                ('x', 'y'): cnr.squeeze()
+            } for cnr in corners])
+
+    def _temps(self, anm, ss):
+        ims = hv.Image(
+            self.temps.sel(animal=anm, session=ss), ['width', 'height'])
+        return ims
+
+    def _temp0(self, anm, ss):
+        im0 = hv.Image(
+            self.temps.sel(animal=anm).isel(session=0), ['width', 'height'])
+        return im0
+
+    def _re(self, anm, ss):
+        re = hv.Image(self.shiftds['temps_shifted'].sel(
+            animal=anm, session=ss), ['width', 'height'])
+        return re
+
+    def _widgets(self):
+        sel_anm = iwgt.Dropdown(options=self.ls_anm, description='Animal:')
+        sel_ss = iwgt.Dropdown(options=self.ls_ss, description='Session:')
+        bt_mask0 = iwgt.Button(description="Update Template")
+        bt_mask = iwgt.Button(description="Update Target")
+        bt_mask0.on_click(self._save_mask0)
+        bt_mask.on_click(self._save_mask)
+        iwgt.interactive(self.str_sel.event, anm=sel_anm, ss=sel_ss)
+        return iwgt.HBox([sel_anm, sel_ss, bt_mask0, bt_mask])
+
+    def _get_objs(self):
+        im0 = regrid(hv.DynamicMap(self._temp0, streams=[self.str_sel]))
+        ims = regrid(hv.DynamicMap(self._temps, streams=[self.str_sel]))
+        re = regrid(hv.DynamicMap(self._re, streams=[self.str_sel]))
+        return ims * self.box.clone(link_inputs=False) + im0 * self.box + re
+
+    def _save_mask0(self, _):
+        cur_anm = self.str_sel.anm
+        cur_ss = self.str_sel.ss
+        h0, hd = self.str_box.data['y0'][-1], np.round(
+            self.str_box.data['y1'][-1] - self.str_box.data['y0'][-1])
+        w0, wd = self.str_box.data['x0'][-1], np.round(
+            self.str_box.data['x1'][-1] - self.str_box.data['x0'][-1])
+        self.mask[dict(session=0)].loc[dict(animal=self.str_sel.anm)] = False
+        self.mask[dict(session=0)].loc[dict(
+            animal=self.str_sel.anm,
+            height=slice(h0, h0 + hd),
+            width=slice(w0, w0 + wd))] = True
+
+    def _save_mask(self, _):
+        cur_anm = self.str_sel.anm
+        cur_ss = self.str_sel.ss
+        h1, hd = self.str_box.data['y0'][-1], np.round(
+            self.str_box.data['y1'][-1] - self.str_box.data['y0'][-1])
+        w1, wd = self.str_box.data['x0'][-1], np.round(
+            self.str_box.data['x1'][-1] - self.str_box.data['x0'][-1])
+        self.mask.loc[dict(animal=self.str_sel.anm,
+                           session=self.str_sel.ss)] = False
+        self.mask.loc[dict(
+            animal=self.str_sel.anm,
+            session=self.str_sel.ss,
+            height=slice(h1, h1 + hd),
+            width=slice(w1, w1 + wd))] = True
+        temp_src = self.temps.sel(animal=cur_anm).isel(session=0)
+        mask_src = self.mask.sel(animal=cur_anm).isel(session=0)
+        temp_dst = self.temps.sel(animal=cur_anm, session=cur_ss)
+        mask_dst = self.mask.sel(animal=cur_anm, session=cur_ss)
+        temp_src = temp_src.where(mask_src, drop=True)
+        temp_dst = temp_dst.where(mask_dst, drop=True)
+        man_sh_w = temp_src.coords['width'][0].values - temp_dst.coords['width'][0].values
+        man_sh_h = temp_src.coords['height'][0].values - temp_dst.coords['height'][0].values
+        man_sh = xr.DataArray(
+            [man_sh_w, man_sh_h],
+            coords=dict(shift_dim=['width', 'height']),
+            dims=['shift_dim'])
+        cur_sh, cur_cor = shift_fft(temp_src, temp_dst)
+        cur_sh = xr.DataArray(
+            np.round(cur_sh),
+            coords=dict(shift_dim=list(temp_dst.dims)),
+            dims=['shift_dim'])
+        cur_sh = cur_sh + man_sh
+        sh_dict = cur_sh.astype(int).to_series().to_dict()
+        self.shiftds['temps_shifted'].loc[dict(
+            animal=cur_anm, session=cur_ss)] = self.temps.sel(
+                animal=cur_anm, session=cur_ss).shift(**sh_dict)

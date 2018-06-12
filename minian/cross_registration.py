@@ -7,6 +7,7 @@ import pandas as pd
 import dask as da
 from dask.diagnostics import ProgressBar
 from scipy.ndimage.measurements import center_of_mass
+from scipy.stats import pearsonr
 from .motion_correction import shift_fft
 from IPython.core.debugger import set_trace
 
@@ -74,12 +75,10 @@ def estimate_shifts(cnm_list,
         try:
             with xr.open_dataset(cur_path)['varr_mc_int'] as cur_va:
                 if temp_list[icnm] == 'first':
-                    cur_temp = cur_va.sel(
-                        frame=cur_va.coords['frame'][0]).load().copy()
+                    cur_temp = cur_va.isel(frame=0).load().copy()
                     temps.append(cur_temp)
                 elif temp_list[icnm] == 'last':
-                    cur_temp = cur_va.sel(
-                        frame=cur_va.coords['frame'][-1]).load().copy()
+                    cur_temp = cur_va.isel(frame=-1).load().copy()
                     temps.append(cur_temp)
                 elif temp_list[icnm] == 'mean':
                     cur_va = cur_va.load().chunk(dict(width=50, height=50))
@@ -135,7 +134,9 @@ def calculate_centroids(cnmds, window, grp_dim=['animal', 'session']):
     cnt_list = []
     for anm, cur_anm in cnmds.groupby('animal'):
         for ss, cur_ss in cur_anm.groupby('session'):
-            cnt = da.delayed(centroids)(cur_ss['A_shifted'], window.sel(animal=anm))
+            # cnt = centroids(cur_ss['A_shifted'], window.sel(animal=anm))
+            cnt = da.delayed(centroids)(
+                cur_ss['A_shifted'], window.sel(animal=anm))
             cnt_list.append(cnt)
     with ProgressBar():
         cnt_list, = da.compute(cnt_list)
@@ -151,9 +152,14 @@ def calculate_centroids(cnmds, window, grp_dim=['animal', 'session']):
 
 def centroids(A, window=None):
     A = A.load().dropna('unit_id', how='all')
+    if not A.size > 0:
+        return pd.DataFrame()
     if window is None:
         window = A.isnull().sum('unit_id') == 0
-    A = A.where(window, drop=True)
+    try:
+        A = A.where(window, drop=True)
+    except:
+        set_trace()
     A = A.fillna(0)
     meta_dims = set(A.coords.keys()) - set(A.dims)
     meta_dict = {dim: A.coords[dim].values for dim in meta_dims}
@@ -176,24 +182,35 @@ def centroids(A, window=None):
     return cts_df
 
 
-def calculate_centroid_distance(cents, grp_dim=['animal'], tile=(50, 50)):
+def calculate_centroid_distance(cents,
+                                cnmds,
+                                window,
+                                grp_dim=['animal'],
+                                tile=(50, 50),
+                                shift=True,
+                                hamming=True):
     dist_list = []
     for cur_anm, cur_grp in cents.groupby('animal'):
         print("processing animal: {}".format(cur_anm))
-        dist = centroids_distance(cur_grp, tile)
+        cur_cnm = cnmds.sel(animal=cur_anm)
+        cur_wnd = window.sel(animal=cur_anm)
+        dist = centroids_distance(cur_grp, cur_cnm, cur_wnd, shift, hamming,
+                                  tile)
         dist['meta', 'animal'] = cur_anm
         dist_list.append(dist)
     dist = pd.concat(dist_list, ignore_index=True)
     return dist
 
 
-def centroids_distance(cents, tile=(50, 50)):
+def centroids_distance(cents, cnmds, window, shift, hamming, tile=(50, 50)):
     sessions = cents['session'].unique()
     dim_h = (np.min(cents['height']), np.max(cents['height']))
     dim_w = (np.min(cents['width']), np.max(cents['width']))
     dist_list = []
     for ssA, ssB in itt.combinations(sessions, 2):
-        dist = da.delayed(_calc_cent_dist)(ssA, ssB, cents, tile, dim_h, dim_w)
+        # dist = _calc_cent_dist(ssA, ssB, cents, cnmds, window, tile, dim_h, dim_w)
+        dist = da.delayed(_calc_cent_dist)(ssA, ssB, cents, cnmds, window,
+                                           tile, dim_h, dim_w, shift, hamming)
         dist_list.append(dist)
     with ProgressBar():
         dist_list, = da.compute(dist_list)
@@ -201,7 +218,8 @@ def centroids_distance(cents, tile=(50, 50)):
     return dists
 
 
-def _calc_cent_dist(ssA, ssB, cents, tile, dim_h, dim_w):
+def _calc_cent_dist(ssA, ssB, cents, cnmds, window, tile, dim_h, dim_w, shift,
+                    hamming):
     ssA_df = cents[cents['session'] == ssA]
     ssB_df = cents[cents['session'] == ssB]
     ssA_uids = ssA_df['unit_id'].unique()
@@ -228,15 +246,41 @@ def _calc_cent_dist(ssA, ssB, cents, tile, dim_h, dim_w):
             pairs.add(pair)
     dist_list = []
     for ip, (uidA, uidB) in enumerate(pairs):
-        idxarr = [['session', 'session', 'variable'], [ssA, ssB, 'distance']]
+        idxarr = [[
+            'session', 'session', 'variable', 'variable', 'variable',
+            'variable'
+        ], [ssA, ssB, 'distance', 'coeff', 'p', 'hamming']]
         mulidx = pd.MultiIndex.from_arrays(
             idxarr, names=('var_class', 'var_name'))
-        centA = ssA_df[ssA_df['unit_id'] == uidA][['height',
-                                                   'width']].values.squeeze()
-        centB = ssB_df[ssB_df['unit_id'] == uidB][['height',
-                                                   'width']].values.squeeze()
-        cur_dist = np.sqrt(np.sum((centA - centB)**2))
-        dist = pd.Series([uidA, uidB, cur_dist], index=mulidx)
+        centA = ssA_df[ssA_df['unit_id'] == uidA][['height', 'width']]
+        centB = ssB_df[ssB_df['unit_id'] == uidB][['height', 'width']]
+        diff = centA.reset_index(drop=True) - centB.reset_index(drop=True)
+        diff = diff.T.squeeze()
+        cur_dist = np.sqrt((diff**2).sum())
+        cur_A_A = cnmds.sel(
+            session=ssA, unit_id=uidA)['A_shifted'].where(
+                window, drop=True)
+        cur_A_B = cnmds.sel(
+            session=ssB, unit_id=uidB)['A_shifted'].where(
+                window, drop=True)
+        if shift:
+            cur_A_B = cur_A_B.shift(**diff.round().astype(int).to_dict())
+            # wnd_new = cur_A_B.notnull()
+            wnd_new = (cur_A_B + cur_A_B) > 0
+            cur_A_A = cur_A_A.where(wnd_new, drop=True).fillna(0)
+            cur_A_B = cur_A_B.where(wnd_new, drop=True).fillna(0)
+        cur_coef, cur_p = pearsonr(cur_A_A.values.flatten(),
+                                   cur_A_B.values.flatten())
+        if hamming:
+            ham = xr.apply_ufunc(
+                np.absolute, (cur_A_A > 0) - (cur_A_B > 0),
+                dask='allowed').sum()
+            uni = ((cur_A_A + cur_A_B) > 0).sum()
+            ham = np.asscalar((ham / uni).values)
+        else:
+            ham = 0
+        dist = pd.Series(
+            [uidA, uidB, cur_dist, cur_coef, cur_p, ham], index=mulidx)
         dist_list.append(dist)
     dists = pd.concat(dist_list, axis=1, ignore_index=True).T
     return dists

@@ -451,8 +451,8 @@ def apply_shifts(varray, shifts, aggregate=False):
         try:
             cur_sh = dict([(dim, int(np.around(cur_shift.sel(shift_dim=dim))))
                            for dim in cur_shift.coords['shift_dim'].values])
-            fm = varr_mc.sel(frame=fid)
-            varr_mc.loc[dict(frame=fid)] = fm.roll(**cur_sh)
+            fm = varr_mc.loc[dict(frame=fid)]
+            varr_mc.loc[dict(frame=fid)].values = fm.roll(**cur_sh).values
         except ValueError:
             pass
         shifts_final.append(cur_shift)
