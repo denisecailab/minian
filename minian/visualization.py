@@ -233,7 +233,7 @@ class CNMFViewer():
 
     def get_plot(self):
         cur_sel = (self._cur_sel[0], self._cur_sel[1])
-        cur_units = self.cnmf_vld.sel(
+        cur_units = self.cnmf_vld.isel(
             unit_id=slice(*cur_sel)).coords['unit_id'].values
         cont_dict = OrderedDict()
         A = self.cnmf_vld['A']

@@ -122,6 +122,7 @@ def estimate_shifts(cnm_list,
 
 
 def apply_shifts(var, shifts, inplace=False, dim='session'):
+    shifts = shifts.dropna(dim)
     var_sh = var.astype('O', copy=not inplace)
     for dim_n, sh in shifts.groupby(dim):
         sh_dict = sh.astype(int).to_series().to_dict()
@@ -188,21 +189,28 @@ def calculate_centroid_distance(cents,
                                 grp_dim=['animal'],
                                 tile=(50, 50),
                                 shift=True,
-                                hamming=True):
+                                hamming=True,
+                                corr=False):
     dist_list = []
     for cur_anm, cur_grp in cents.groupby('animal'):
         print("processing animal: {}".format(cur_anm))
         cur_cnm = cnmds.sel(animal=cur_anm)
         cur_wnd = window.sel(animal=cur_anm)
         dist = centroids_distance(cur_grp, cur_cnm, cur_wnd, shift, hamming,
-                                  tile)
+                                  corr, tile)
         dist['meta', 'animal'] = cur_anm
         dist_list.append(dist)
     dist = pd.concat(dist_list, ignore_index=True)
     return dist
 
 
-def centroids_distance(cents, cnmds, window, shift, hamming, tile=(50, 50)):
+def centroids_distance(cents,
+                       cnmds,
+                       window,
+                       shift,
+                       hamming,
+                       corr,
+                       tile=(50, 50)):
     sessions = cents['session'].unique()
     dim_h = (np.min(cents['height']), np.max(cents['height']))
     dim_w = (np.min(cents['width']), np.max(cents['width']))
@@ -210,7 +218,8 @@ def centroids_distance(cents, cnmds, window, shift, hamming, tile=(50, 50)):
     for ssA, ssB in itt.combinations(sessions, 2):
         # dist = _calc_cent_dist(ssA, ssB, cents, cnmds, window, tile, dim_h, dim_w)
         dist = da.delayed(_calc_cent_dist)(ssA, ssB, cents, cnmds, window,
-                                           tile, dim_h, dim_w, shift, hamming)
+                                           tile, dim_h, dim_w, shift, hamming,
+                                           corr)
         dist_list.append(dist)
     with ProgressBar():
         dist_list, = da.compute(dist_list)
@@ -219,7 +228,7 @@ def centroids_distance(cents, cnmds, window, shift, hamming, tile=(50, 50)):
 
 
 def _calc_cent_dist(ssA, ssB, cents, cnmds, window, tile, dim_h, dim_w, shift,
-                    hamming):
+                    hamming, corr):
     ssA_df = cents[cents['session'] == ssA]
     ssB_df = cents[cents['session'] == ssB]
     ssA_uids = ssA_df['unit_id'].unique()
@@ -257,20 +266,24 @@ def _calc_cent_dist(ssA, ssB, cents, cnmds, window, tile, dim_h, dim_w, shift,
         diff = centA.reset_index(drop=True) - centB.reset_index(drop=True)
         diff = diff.T.squeeze()
         cur_dist = np.sqrt((diff**2).sum())
-        cur_A_A = cnmds.sel(
-            session=ssA, unit_id=uidA)['A_shifted'].where(
-                window, drop=True)
-        cur_A_B = cnmds.sel(
-            session=ssB, unit_id=uidB)['A_shifted'].where(
-                window, drop=True)
+        if corr or hamming:
+            cur_A_A = cnmds.sel(
+                session=ssA, unit_id=uidA)['A_shifted'].where(
+                    window, drop=True)
+            cur_A_B = cnmds.sel(
+                session=ssB, unit_id=uidB)['A_shifted'].where(
+                    window, drop=True)
         if shift:
             cur_A_B = cur_A_B.shift(**diff.round().astype(int).to_dict())
             # wnd_new = cur_A_B.notnull()
             wnd_new = (cur_A_B + cur_A_B) > 0
             cur_A_A = cur_A_A.where(wnd_new, drop=True).fillna(0)
             cur_A_B = cur_A_B.where(wnd_new, drop=True).fillna(0)
-        cur_coef, cur_p = pearsonr(cur_A_A.values.flatten(),
-                                   cur_A_B.values.flatten())
+        if corr:
+            cur_coef, cur_p = pearsonr(cur_A_A.values.flatten(),
+                                       cur_A_B.values.flatten())
+        else:
+            cur_coef, cur_p = np.nan, np.nan
         if hamming:
             ham = xr.apply_ufunc(
                 np.absolute, (cur_A_A > 0) - (cur_A_B > 0),
@@ -278,7 +291,7 @@ def _calc_cent_dist(ssA, ssB, cents, cnmds, window, tile, dim_h, dim_w, shift,
             uni = ((cur_A_A + cur_A_B) > 0).sum()
             ham = np.asscalar((ham / uni).values)
         else:
-            ham = 0
+            ham = np.nan
         dist = pd.Series(
             [uidA, uidB, cur_dist, cur_coef, cur_p, ham], index=mulidx)
         dist_list.append(dist)
@@ -327,7 +340,7 @@ def resolve(mapping):
     for ss in map_ss.columns:
         del_idx = []
         for ss_uid, ss_grp in mapping.groupby(mapping['session', ss]):
-            if ss_grp.shape[0] > 1:
+            if ss_grp.shnape[0] > 1:
                 del_idx.extend(ss_grp.index)
                 new_sess = []
                 for s in ss_grp['session']:
@@ -345,3 +358,32 @@ def resolve(mapping):
                     mapping = mapping.append(new_row, ignore_index=True)
         mapping = mapping.drop(del_idx).reset_index(drop=True)
     return group_by_session(mapping)
+
+
+def fill_mapping(mappings,
+                 cents,
+                 id_dims=[('meta', 'animal')],
+                 fill_dim=('session', )):
+    for cur_id, cur_grp in mappings.groupby([mappings[i] for i in id_dims]):
+        for cur_ss in cur_grp[fill_dim]:
+            cur_ss_grp = cur_grp[fill_dim][cur_ss].dropna()
+            if cur_ss_grp.duplicated().sum() > 0:
+                print(
+                    "WARNING: duplicated values with group {} and column {}. skipping".
+                    format(cur_id, cur_ss))
+                continue
+            else:
+                cur_ss_all = cents[(cents['animal'] == cur_id)
+                                   & (cents['session'] == cur_ss)][
+                                       'unit_id'].dropna()
+                cur_fill_set = set(cur_ss_all.unique()) - set(
+                    cur_ss_grp.unique())
+                cur_fill_df = pd.DataFrame({
+                    ('session', cur_ss):
+                    list(cur_fill_set),
+                    ('meta', 'animal'):
+                    cur_id
+                })
+                mappings = pd.concat(
+                    [mappings, cur_fill_df], ignore_index=True)
+    return mappings
