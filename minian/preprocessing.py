@@ -3,10 +3,14 @@ import xarray as xr
 import itertools as itt
 import functools as fct
 import cv2
+import skimage as ski
+import scipy.ndimage as ndi
 from dask import delayed, compute
 from dask.diagnostics import ProgressBar
 from collections import OrderedDict
 from scipy.ndimage import uniform_filter
+from skimage.morphology import white_tophat, opening, diamond, disk, square
+from medpy.filter.smoothing import anisotropic_diffusion
 from scipy.stats import zscore
 from warnings import warn
 from .utilities import scale_varr
@@ -39,7 +43,6 @@ def corr_coeff_pixelwise(varray):
 #     np.apply_along_axis(lambda f: np.place(f, mask_re, vals), 1, mov_masked)
 #     return mov_masked.reshape(mov.shape)
 
-
 # def zscore_xr(xarr, dim=None):
 #     mean = xarr.mean(dim=dim)
 #     std = xarr.std(dim=dim)
@@ -48,8 +51,8 @@ def corr_coeff_pixelwise(varray):
 
 def detect_brightspot(varray, thres=None, window=50, step=10):
     print("detecting brightspot")
-    spots = xr.DataArray(varray.sel(frame=0)).reset_coords(
-        drop=True).astype(int)
+    spots = xr.DataArray(
+        varray.sel(frame=0)).reset_coords(drop=True).astype(int)
     spots.values = np.zeros_like(spots.values)
     meanfm = varray.mean(dim='frame')
     for ih, ph in meanfm.rolling(height=window):
@@ -137,15 +140,16 @@ def correct_brightspot(varray, spots, window=2, spot_thres=10, inplace=True):
     ]
     sur_list = []
     for ibrt, brt_cord in enumerate(brt_list):
-        cur_sur = [(dim, list(
-            set(range(co - window, co + window + 1)).intersection(
-                set(varr_ds.coords[dim].values.tolist()))))
+        cur_sur = [(dim,
+                    list(
+                        set(range(co - window, co + window + 1)).intersection(
+                            set(varr_ds.coords[dim].values.tolist()))))
                    for dim, co in brt_cord.items()]
         cur_sur_list = []
-        for cord in itt.product(* [cord_rg[1] for cord_rg in cur_sur]):
+        for cord in itt.product(*[cord_rg[1] for cord_rg in cur_sur]):
             cur_sur_list.append(
-                HashableDict((cur_sur[i][0], cord[i]) for i in range(
-                    len(cord))))
+                HashableDict(
+                    (cur_sur[i][0], cord[i]) for i in range(len(cord))))
         cur_sur = list(set(cur_sur_list) - set(brt_list))
         sur_list.append(cur_sur)
     for ibrt, cur_brt in enumerate(brt_list):
@@ -154,8 +158,8 @@ def correct_brightspot(varray, spots, window=2, spot_thres=10, inplace=True):
             end='\r')
         if len(sur_list[ibrt]) > 0:
             cur_sur = xr.DataArray(
-                np.zeros((len(sur_list[ibrt]), ) + tuple(
-                    [varr_ds.sizes[rd] for rd in red_dim])),
+                np.zeros((len(sur_list[ibrt]), ) +
+                         tuple([varr_ds.sizes[rd] for rd in red_dim])),
                 dims=('sample', ) + red_dim,
                 coords=dict({
                     'sample': range(len(sur_list[ibrt]))
@@ -172,28 +176,12 @@ def correct_brightspot(varray, spots, window=2, spot_thres=10, inplace=True):
 
 
 def remove_background_old(varray, window=51):
-    print("removing background")
-    varr_ft = varray.astype(np.float32)
-    for fid, fm in varr_ft.rolling(frame=1):
-        print(
-            "processing frame {} of {}".format(
-                int(fid), int(varray.sizes['frame'])),
-            end='\r')
-        varr_ft.loc[{'frame': fid}] = fm - uniform_filter(fm, window)
-    print("\nbackground removal done")
-    return scale_varr(
-        varr_ft.rename(varray.name + "_Filtered"), (0, 255),
-        inplace=True).astype(
-            np.uint8, copy=False)
-
-
-def remove_background(varray, window=51):
     print("creating parallel schedule")
     varr_ft = varray.astype(np.float32)
     compute_list = []
     for fid in varr_ft.coords['frame'].values:
         fm = varr_ft.loc[dict(frame=fid)]
-        _ = delayed(remove_background_perframe)(fid, fm, varr_ft, window)
+        _ = delayed(remove_background_perframe_old)(fid, fm, varr_ft, window)
         compute_list.append(_)
     with ProgressBar():
         print("removing background")
@@ -204,9 +192,30 @@ def remove_background(varray, window=51):
     return varr_ft.rename(varray.name + "_Filtered")
 
 
-def remove_background_perframe(fid, fm, varr, window):
+def remove_background_perframe_old(fid, fm, varr, window):
     f = fm - uniform_filter(fm, window)
     varr.loc[dict(frame=fid)] = f
+
+
+def remove_background(varr, method, wnd):
+    selem = disk(wnd)
+    return xr.apply_ufunc(
+        remove_background_perframe,
+        varr,
+        input_core_dims=[['height', 'width']],
+        output_core_dims=[['height', 'width']],
+        vectorize=True,
+        dask='parallelized',
+        output_dtypes=[varr.dtype],
+        kwargs=dict(method=method, wnd=wnd,
+                    selem=selem)).rename(varr.name + "_subtracted")
+
+
+def remove_background_perframe(fm, method, wnd, selem):
+    if method == 'uniform':
+        return fm - uniform_filter(fm, wnd)
+    elif method == 'tophat':
+        return white_tophat(fm, selem)
 
 
 def stripe_correction(varray, reduce_dim='height'):
@@ -222,3 +231,65 @@ def stripe_correction(varray, reduce_dim='height'):
 def gaussian_blur(varray, ksize=(3, 3), sigmaX=0):
     return varray.groupby('frame').apply(
         lambda fm: cv2.GaussianBlur(fm.values, ksize, sigmaX))
+
+
+def denoise(varr, method, **kwargs):
+    kwargs['method'] = method
+    return xr.apply_ufunc(
+        denoise_perframe,
+        varr,
+        input_core_dims=[['height', 'width']],
+        output_core_dims=[['height', 'width']],
+        vectorize=True,
+        dask='parallelized',
+        output_dtypes=[varr.dtype],
+        kwargs=kwargs).rename(varr.name + "_denoised")
+
+
+def denoise_perframe(fm, method, **kwargs):
+    if method == 'gaussian':
+        return cv2.GaussianBlur(fm, **kwargs)
+    elif method == 'anisotropic':
+        return anisotropic_diffusion(fm, **kwargs)
+
+
+def gradient_norm(varr):
+    return xr.apply_ufunc(
+        gradient_norm_perframe,
+        varr,
+        input_core_dims=[['height', 'width']],
+        output_core_dims=[['height', 'width']],
+        vectorize=True,
+        dask='parallelized',
+        output_dtypes=[varr.dtype]).rename(varr.name + '_gradient')
+
+
+def gradient_norm_perframe(f):
+    x, y = np.gradient(f)
+    return np.sqrt(x**2 + y**2)
+
+
+def remove_brightspot(varr, thres=3):
+    k_mean = ski.morphology.diamond(1)
+    k_mean[1, 1] = 0
+    k_mean = k_mean / 4
+    return xr.apply_ufunc(
+        remove_brightspot_perframe,
+        varr,
+        input_core_dims=[['height', 'width']],
+        output_core_dims=[['height', 'width']],
+        vectorize=True,
+        dask='parallelized',
+        kwargs=dict(k_mean=k_mean, thres=thres),
+        output_dtypes=[varr.dtype]).rename(varr.name + '_clean')
+
+
+def remove_brightspot_perframe(fm, k_mean, thres):
+    f_mean = ndi.convolve(fm, k_mean)
+    f_diff = zscore(fm - f_mean)
+    if thres == 'min':
+        f_mask = f_diff > -np.min(f_diff)
+    else:
+        f_mask = f_diff > thres
+    return np.ma.masked_where(f_mask, fm).filled(0) + np.ma.masked_where(
+        ~f_mask, f_mean).filled(0)
