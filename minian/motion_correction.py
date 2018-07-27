@@ -3,6 +3,7 @@ import xarray as xr
 import cv2
 import sys
 import itertools as itt
+import pyfftw.interfaces.numpy_fft as npfft
 from scipy.stats import zscore
 from scipy.ndimage import center_of_mass
 from collections import OrderedDict
@@ -376,11 +377,11 @@ def estimate_shift_fft(varray, z_thres=None, on='first', pad_f=1):
         elif on == 'perframe':
             im_src = varray.sel(frame=fid_src)
         im_dst = varray.sel(frame=fid_dst)
-        res = delayed(shift_fft)(im_src, im_dst, pad_s, pad_f)
+        res = shift_fft(im_src, im_dst, pad_s, pad_f)
         results.append(res)
-    print("estimating shifts with fft on frame: {}".format(on))
-    with ProgressBar():
-        results, = compute(results)
+    # print("estimating shifts with fft on frame: {}".format(on))
+    # with ProgressBar():
+    #     results, = compute(results)
     shifts = [res[0] for res in results]
     corr = [res[1] for res in results]
     shifts = xr.DataArray(
@@ -429,9 +430,6 @@ def shift_fft(im_src, im_dst, pad_s=None, pad_f=1):
     cor = np.log(np.where(iprod_sh.real > 1, iprod_sh.real, 1))
     cor_cent = np.where(cor > np.percentile(cor, 99.9), cor, 0)
     cur_sh = center_of_mass(cor_cent) - np.ceil(np.array(dims) / 2.0 * pad_f)
-    # cur_sh = np.unravel_index(np.argmax(iprod_sh.real),
-    #                           iprod.real.shape) - np.ceil(
-    #                               np.array(dims) / 2.0)
     cur_corr = np.max(iprod.real)
     return cur_sh, cur_corr
 
@@ -452,9 +450,9 @@ def apply_shifts(varray, shifts, aggregate=False):
             cur_sh = dict([(dim, int(np.around(cur_shift.sel(shift_dim=dim))))
                            for dim in cur_shift.coords['shift_dim'].values])
             fm = varr_mc.loc[dict(frame=fid)]
-            varr_mc.loc[dict(frame=fid)].values = fm.roll(**cur_sh).values
+            varr_mc.loc[dict(frame=fid)] = fm.shift(**cur_sh).fillna(0)
         except ValueError:
-            pass
+            print("error!")
         shifts_final.append(cur_shift)
     print("\ndone")
     return varr_mc.rename(varr_mc.name + "_MotionCorrected"), xr.concat(
