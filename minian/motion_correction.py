@@ -367,12 +367,14 @@ def estimate_shift_fft(varray, z_thres=None, on='first', pad_f=1):
         src_fft = np.fft.fft2(varray.sel(frame=fm_idx[0]), pad_s)
     elif on == 'last':
         src_fft = np.fft.fft2(varray.sel(frame=fm_idx[-1]), pad_s)
+    elif on == 'perframe':
+        pass
     else:
         print("template not understood. returning")
         return
     print("creating parallel schedule", end='\r')
     for fid_src, fid_dst in zip(fm_idx[:-1], fm_idx[1:]):
-        if on == 'mean' or 'first':
+        if on in ('mean', 'first', 'last'):
             im_src = src_fft
         elif on == 'perframe':
             im_src = varray.sel(frame=fid_src)
