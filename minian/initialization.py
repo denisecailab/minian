@@ -4,8 +4,10 @@ import pandas as pd
 import dask
 import pyfftw.interfaces.numpy_fft as npfft
 import graph_tool.all as gt
+from dask import delayed, compute
 from dask.diagnostics import ProgressBar
 from scipy.ndimage.filters import maximum_filter
+from scipy.ndimage.measurements import label
 from scipy.stats import zscore, kstest
 from scipy.spatial.distance import pdist, squareform
 from sklearn.mixture import GaussianMixture
@@ -191,3 +193,55 @@ def seeds_merge(varr, seeds, thres_dist=5, thres_corr=0.6):
         seeds_final.add(max_seed)
     seeds_ref = seeds_ref.isel(sample=list(seeds_final))
     return seeds_ref.unstack('sample').fillna(0)
+
+
+def initialize(varr, seeds, thres_corr=0.9, wnd=20):
+    old_err = np.seterr(divide='raise')
+    varr_flt = varr.stack(sample=('height', 'width'))
+    seeds_ref = seeds.where(seeds > 0).stack(sample=('height',
+                                                     'width')).dropna('sample')
+    res = []
+    print("creating parallel schedule")
+    for cur_crd, cur_sd in seeds_ref.groupby('sample'):
+        cur_sur = (slice(cur_crd[0] - wnd, cur_crd[0] + wnd),
+                   slice(cur_crd[1] - wnd, cur_crd[1] + wnd))
+        cur_res = delayed(initialize_perseed)(varr_flt, cur_crd, cur_sur, thres_corr)
+        res.append(cur_res)
+    print("computing roi")
+    with ProgressBar():
+        res = compute(res)[0]
+    print("concatenating results")
+    A = xr.concat([r[0] for r in res],
+                  'unit_id').assign_coords(unit_id=np.arange(len(res)))
+    C = xr.concat([r[1] for r in res],
+                  'unit_id').assign_coords(unit_id=np.arange(len(res)))
+    np.seterr(**old_err)
+    return A.reindex_like(varr), C
+
+
+def initialize_perseed(varr, sd_id, sur_id, thres_corr):
+    sd = varr.sel(sample=sd_id)
+    sur = varr.sel(sample=sur_id)
+    sd_id_flt = np.nonzero([s == sd_id for s in sur.coords['sample'].data])[0]
+    sur = sur.where(sur.std('frame') > 0, drop=True)
+    corr = xr.apply_ufunc(
+        np.corrcoef,
+        sur,
+        input_core_dims=[['sample', 'frame']],
+        output_core_dims=[['sample', 'sampleflt']],
+        dask='forbidden').isel(sampleflt=sd_id_flt).squeeze()
+    mask = (corr > thres_corr).unstack('sample')
+    mask = mask.where(mask > 0, drop=True).fillna(0)
+    mask_lb = xr.apply_ufunc(lambda m: label(m)[0], mask, dask='forbidden')
+    sd_lb = mask_lb.sel(height=sd_id[0], width=sd_id[1])
+    mask = mask_lb.where(
+        mask_lb == sd_lb,
+        drop=True).fillna(0).stack(sample=('height', 'width'))
+    sur = sur.where(mask, drop=True)
+    try:
+        _A = sur.dot(sd, 'frame') / np.linalg.norm(sd)
+        _A = _A / np.linalg.norm(_A)
+    except FloatingPointError:
+        set_trace()
+    _C = sur.dot(_A, 'sample')
+    return _A.unstack('sample').fillna(0), _C
