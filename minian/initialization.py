@@ -156,6 +156,7 @@ def seeds_merge(varr, seeds, thres_dist=5, thres_corr=0.6):
     varr_max = varr.max('frame').where(seeds > 0).stack(
         sample=('height', 'width')).dropna('sample')
     crds = seeds_ref.coords
+    nsmp = len(crds['sample'])
     hwarr = xr.concat([crds['height'], crds['width']], dim='dim')
     dist = xr.apply_ufunc(
         lambda a: squareform(pdist(a)),
@@ -163,7 +164,9 @@ def seeds_merge(varr, seeds, thres_dist=5, thres_corr=0.6):
         input_core_dims=[['sample', 'dim']],
         output_core_dims=[['sampleA', 'sampleB']],
         dask='parallelized',
-        output_dtypes=[float]).assign_coords(
+        output_dtypes=[float],
+        output_sizes=dict(sampleA=nsmp, sampleB=nsmp)
+    ).assign_coords(
             sampleA=np.arange(len(crds['sample'])),
             sampleB=np.arange(len(crds['sample'])))
     corr = xr.apply_ufunc(
@@ -172,11 +175,12 @@ def seeds_merge(varr, seeds, thres_dist=5, thres_corr=0.6):
         input_core_dims=[['sample', 'frame']],
         output_core_dims=[['sampleA', 'sampleB']],
         dask='parallelized',
+        output_sizes=dict(sampleA=nsmp, sampleB=nsmp),
         output_dtypes=[float]).assign_coords(
             sampleA=np.arange(len(crds['sample'])),
             sampleB=np.arange(len(crds['sample'])))
     adj = np.logical_and(dist < thres_dist, corr > thres_corr)
-    np.fill_diagonal(adj.data, 0)
+    np.fill_diagonal(adj.values, 0)
     iso = adj.sum('sampleB')
     iso = iso.where(iso == 0).dropna('sampleA')
     adj = xr.apply_ufunc(np.triu, adj)
@@ -195,7 +199,7 @@ def seeds_merge(varr, seeds, thres_dist=5, thres_corr=0.6):
     return seeds_ref.unstack('sample').fillna(0)
 
 
-def initialize(varr, seeds, thres_corr=0.9, wnd=20):
+def initialize(varr, seeds, thres_corr=0.8, wnd=20):
     old_err = np.seterr(divide='raise')
     varr_flt = varr.stack(sample=('height', 'width'))
     seeds_ref = seeds.where(seeds > 0).stack(sample=('height',
