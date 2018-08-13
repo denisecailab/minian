@@ -4,6 +4,7 @@ import pandas as pd
 import dask
 import pyfftw.interfaces.numpy_fft as npfft
 import graph_tool.all as gt
+import dask.array.fft as dafft
 from dask import delayed, compute
 from dask.diagnostics import ProgressBar
 from scipy.ndimage.filters import maximum_filter
@@ -15,8 +16,9 @@ from IPython.core.debugger import set_trace
 
 
 def seeds_init(varr, wnd_size=500, method='rolling', stp_size=200, nchunk=100):
+    print("constructing chunks")
     idx_fm = varr.coords['frame']
-    nfm = len(idx_fm.values)
+    nfm = len(idx_fm)
     if method == 'rolling':
         nstp = np.ceil(nfm / stp_size)
         centers = np.linspace(0, nfm - 1, nstp)
@@ -60,15 +62,31 @@ def local_max(fm, wnd):
     return (fm == fm_max).astype(np.uint8)
 
 
-def gmm_refine(varr, seeds):
+def gmm_refine(varr, seeds, q=(0.1, 99.9)):
     varr_sub = varr.where(seeds > 0).stack(sample=('height',
                                                    'width')).dropna('sample')
     seeds_ref = seeds.where(seeds > 0).stack(sample=('height',
                                                      'width')).dropna('sample')
-    varr_pv = varr_sub.quantile(
-        0.999, dim='frame') - varr_sub.quantile(
-            0.001, dim='frame')
-    dat = varr_pv.data.reshape(-1, 1)
+    print("computing peak-valley values")
+    varr_valley = xr.apply_ufunc(
+        np.percentile,
+        varr_sub.chunk(dict(frame=-1)),
+        input_core_dims=[['frame']],
+        kwargs=dict(q=q[0], axis=-1),
+        dask='parallelized',
+        output_dtypes=[varr_sub.dtype])
+    varr_peak = xr.apply_ufunc(
+        np.percentile,
+        varr_sub.chunk(dict(frame=-1)),
+        input_core_dims=[['frame']],
+        kwargs=dict(q=q[1], axis=-1),
+        dask='parallelized',
+        output_dtypes=[varr_sub.dtype])
+    varr_pv = varr_peak - varr_valley
+    with ProgressBar():
+        varr_pv = varr_pv.compute()
+    print("fitting GMM models")
+    dat = varr_pv.values.reshape(-1, 1)
     gmm = GaussianMixture(n_components=2)
     gmm.fit(dat)
     idg = gmm.means_.argmax()
@@ -82,12 +100,12 @@ def pnr_refine(varr, seeds, thres=1.5):
                                                    'width')).dropna('sample')
     seeds_ref = seeds.where(seeds > 0).stack(sample=('height',
                                                      'width')).dropna('sample')
+    print("computing peak-noise ratio")
     varr_fft = xr.apply_ufunc(
-        npfft.fft,
-        varr_sub,
+        dafft.fft,
+        varr_sub.chunk(dict(frame=-1)),
         input_core_dims=[['frame']],
         output_core_dims=[['frame']],
-        vectorize=True,
         dask='parallelized',
         output_dtypes=[np.complex128])
     fidx = varr_fft.coords['frame']
@@ -96,28 +114,27 @@ def pnr_refine(varr, seeds, thres=1.5):
     varr_fft.loc[dict(frame=slice(0, cut25))] = 0
     varr_fft.loc[dict(frame=slice(cut75, len(fidx)))] = 0
     varr_ifft = xr.apply_ufunc(
-        npfft.ifft,
-        varr_fft,
+        dafft.ifft,
+        varr_fft.chunk(dict(frame=-1)),
         input_core_dims=[['frame']],
         output_core_dims=[['frame']],
-        vectorize=True,
         dask='parallelized',
         output_dtypes=[np.complex128])
     varr_sub_ptp = xr.apply_ufunc(
         np.ptp,
-        varr_sub,
+        varr_sub.chunk(dict(frame=-1)),
         input_core_dims=[['frame']],
-        vectorize=True,
         dask='parallelized',
         output_dtypes=[varr_sub.dtype])
     varr_ifft_ptp = xr.apply_ufunc(
         np.ptp,
-        varr_ifft.real,
+        varr_ifft.chunk(dict(frame=-1)).real,
         input_core_dims=[['frame']],
-        vectorize=True,
         dask='parallelized',
         output_dtypes=[varr_sub.dtype])
     mask = (varr_sub_ptp / varr_ifft_ptp) > thres
+    with ProgressBar():
+        mask = mask.compute()
     seeds_ref = seeds_ref.where(mask).dropna('sample')
     return seeds_ref.unstack('sample').fillna(0)
 
@@ -165,8 +182,7 @@ def seeds_merge(varr, seeds, thres_dist=5, thres_corr=0.6):
         output_core_dims=[['sampleA', 'sampleB']],
         dask='parallelized',
         output_dtypes=[float],
-        output_sizes=dict(sampleA=nsmp, sampleB=nsmp)
-    ).assign_coords(
+        output_sizes=dict(sampleA=nsmp, sampleB=nsmp)).assign_coords(
             sampleA=np.arange(len(crds['sample'])),
             sampleB=np.arange(len(crds['sample'])))
     corr = xr.apply_ufunc(
@@ -209,7 +225,8 @@ def initialize(varr, seeds, thres_corr=0.8, wnd=20):
     for cur_crd, cur_sd in seeds_ref.groupby('sample'):
         cur_sur = (slice(cur_crd[0] - wnd, cur_crd[0] + wnd),
                    slice(cur_crd[1] - wnd, cur_crd[1] + wnd))
-        cur_res = delayed(initialize_perseed)(varr_flt, cur_crd, cur_sur, thres_corr)
+        cur_res = delayed(initialize_perseed)(delayed(varr_flt), cur_crd,
+                                              cur_sur, thres_corr)
         res.append(cur_res)
     print("computing roi")
     with ProgressBar():
@@ -219,8 +236,12 @@ def initialize(varr, seeds, thres_corr=0.8, wnd=20):
                   'unit_id').assign_coords(unit_id=np.arange(len(res)))
     C = xr.concat([r[1] for r in res],
                   'unit_id').assign_coords(unit_id=np.arange(len(res)))
+    A = A.reindex_like(varr).fillna(0)
+    Yr = varr - A.dot(C, 'unit_id')
+    b = Yr.mean('frame')
+    f = Yr.mean('height').mean('width')
     np.seterr(**old_err)
-    return A.reindex_like(varr), C
+    return A, C, b, f
 
 
 def initialize_perseed(varr, sd_id, sur_id, thres_corr):
