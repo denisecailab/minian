@@ -353,6 +353,7 @@ def apply_translation(img, shift):
 
 
 def estimate_shift_fft(varray, z_thres=None, on='first', pad_f=1):
+    varray = varray.chunk(dict(height=-1, width=-1))
     fm_idx = varray.coords['frame'].values
     dims = list(varray.dims)
     dims.remove('frame')
@@ -372,18 +373,18 @@ def estimate_shift_fft(varray, z_thres=None, on='first', pad_f=1):
     else:
         print("template not understood. returning")
         return
-    print("creating parallel schedule", end='\r')
+    print("creating parallel schedule")
     for fid_src, fid_dst in zip(fm_idx[:-1], fm_idx[1:]):
         if on in ('mean', 'first', 'last'):
             im_src = src_fft
         elif on == 'perframe':
             im_src = varray.sel(frame=fid_src)
         im_dst = varray.sel(frame=fid_dst)
-        res = shift_fft(im_src, im_dst, pad_s, pad_f)
+        res = delayed(shift_fft)(im_src, im_dst, pad_s, pad_f)
         results.append(res)
-    # print("estimating shifts with fft on frame: {}".format(on))
-    # with ProgressBar():
-    #     results, = compute(results)
+    print("estimating shifts with fft on frame: {}".format(on))
+    with ProgressBar():
+        results, = compute(results)
     shifts = [res[0] for res in results]
     corr = [res[1] for res in results]
     shifts = xr.DataArray(
@@ -422,13 +423,13 @@ def estimate_shift_fft(varray, z_thres=None, on='first', pad_f=1):
 def shift_fft(im_src, im_dst, pad_s=None, pad_f=1):
     dims = list(im_dst.sizes.values())
     if not np.iscomplex(im_src).any():
-        fft_src = np.fft.fft2(im_src, pad_s)
+        fft_src = npfft.fft2(im_src, pad_s)
     else:
         fft_src = im_src
-    fft_dst = np.fft.fft2(im_dst, pad_s)
+    fft_dst = npfft.fft2(im_dst, pad_s)
     prod = fft_src * fft_dst.conj()
-    iprod = np.fft.ifft2(prod)
-    iprod_sh = np.fft.fftshift(iprod)
+    iprod = npfft.ifft2(prod)
+    iprod_sh = npfft.fftshift(iprod)
     cor = np.log(np.where(iprod_sh.real > 1, iprod_sh.real, 1))
     cor_cent = np.where(cor > np.percentile(cor, 99.9), cor, 0)
     cur_sh = center_of_mass(cor_cent) - np.ceil(np.array(dims) / 2.0 * pad_f)
