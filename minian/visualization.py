@@ -204,8 +204,8 @@ class MCViewer():
 class CNMFViewer():
     def __init__(self, cnmf, Y, framerate=30):
         self.cnmf = cnmf
-        self.cnmf_vld = cnmf.sel(unit_id=cnmf.attrs['unit_mask'])
-        # self.cnmf_vld = cnmf
+        # self.cnmf_vld = cnmf.sel(unit_id=cnmf.attrs['unit_mask'])
+        self.cnmf_vld = cnmf
         # self.ds = hv.Dataset(cnmf)
         # self.ds_vld = hv.Dataset(self.cnmf_vld)
         self.framerate = framerate

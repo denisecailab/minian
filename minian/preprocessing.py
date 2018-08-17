@@ -197,18 +197,21 @@ def remove_background_perframe_old(fid, fm, varr, window):
     varr.loc[dict(frame=fid)] = f
 
 
-def remove_background(varr, method, wnd):
+def remove_background(varr, method, wnd, compute=True):
     selem = disk(wnd)
-    return xr.apply_ufunc(
+    res = xr.apply_ufunc(
         remove_background_perframe,
-        varr,
+        varr.chunk(dict(height=-1, width=-1)),
         input_core_dims=[['height', 'width']],
         output_core_dims=[['height', 'width']],
         vectorize=True,
         dask='parallelized',
         output_dtypes=[varr.dtype],
-        kwargs=dict(method=method, wnd=wnd,
-                    selem=selem)).rename(varr.name + "_subtracted")
+        kwargs=dict(method=method, wnd=wnd, selem=selem))
+    if compute:
+        with ProgressBar():
+            res = res.persist()
+    return res.rename(varr.name + "_subtracted")
 
 
 def remove_background_perframe(fm, method, wnd, selem):
@@ -233,9 +236,9 @@ def gaussian_blur(varray, ksize=(3, 3), sigmaX=0):
         lambda fm: cv2.GaussianBlur(fm.values, ksize, sigmaX))
 
 
-def denoise(varr, method, **kwargs):
+def denoise(varr, method, compute=True, **kwargs):
     kwargs['method'] = method
-    return xr.apply_ufunc(
+    res = xr.apply_ufunc(
         denoise_perframe,
         varr,
         input_core_dims=[['height', 'width']],
@@ -243,7 +246,11 @@ def denoise(varr, method, **kwargs):
         vectorize=True,
         dask='parallelized',
         output_dtypes=[varr.dtype],
-        kwargs=kwargs).rename(varr.name + "_denoised")
+        kwargs=kwargs)
+    if compute:
+        with ProgressBar():
+            res = res.persist()
+    return res.rename(varr.name + "_denoised")
 
 
 def denoise_perframe(fm, method, **kwargs):
@@ -275,7 +282,7 @@ def remove_brightspot(varr, thres=3):
     k_mean = k_mean / 4
     return xr.apply_ufunc(
         remove_brightspot_perframe,
-        varr,
+        varr.chunk(dict(height=-1, width=-1)),
         input_core_dims=[['height', 'width']],
         output_core_dims=[['height', 'width']],
         vectorize=True,
