@@ -434,6 +434,20 @@ def save_varr(varr, dpath, name='varr_mc_int', meta_dict=None):
     return ds
 
 
+def save_variable(var, fpath, fname, meta_dict=None):
+    fpath = os.path.normpath(fpath)
+    ds = var.to_dataset()
+    if meta_dict is not None:
+        pathlist = os.path.normpath(fpath).split(os.sep)
+        ds = ds.assign_coords(**dict([(cdname, pathlist[cdval])
+                                      for cdname, cdval in meta_dict.items()]))
+    try:
+        ds.to_netcdf(os.path.join(fpath, fname + '.nc'), mode='a')
+    except FileNotFoundError:
+        ds.to_netcdf(os.path.join(fpath, fname + '.nc'), mode='w')
+    return ds
+
+
 def update_meta(dpath, pattern=r'^varr_mc_int.nc$', meta_dict=None):
     for dirpath, dirnames, fnames in os.walk(dpath):
         fnames = filter(lambda fn: re.search(pattern, fn), fnames)
