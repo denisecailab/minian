@@ -271,7 +271,7 @@ def initialize_perseed(sd_id, sd, sur, thres_corr):
     mask = mask.where(mask > 0, drop=True).fillna(0)
     mask_lb = xr.apply_ufunc(
         lambda m: label(m)[0], mask).compute()
-    sd_lb = mask_lb.sel(height=sd_id[0], width=sd_id[1])
+    sd_lb = mask_lb.transpose('height', 'width').sel(height=sd_id[0], width=sd_id[1])
     mask = mask_lb.where(
         mask_lb == sd_lb,
         drop=True).fillna(0).stack(sample=('height', 'width'))
