@@ -29,6 +29,9 @@ from scipy.ndimage.measurements import center_of_mass
 from IPython.core.debugger import set_trace
 from dask.diagnostics import ProgressBar
 from skvideo.io import FFmpegWriter, vwrite
+from scipy import linalg
+from bokeh import models
+from bokeh.io import export_svgs
 
 # def update_override(self, **kwargs):
 #     self._set_stream_parameters(**kwargs)
@@ -653,3 +656,110 @@ def generate_videos(minian, vpath, chk=None):
 #         print("writing frame {}".format(fid.values), end='\r')
 #         vwrite(vpath, fm.values)
 #     vwrt.close()
+
+def construct_G(g, T):
+    cur_c, cur_r = np.zeros(T), np.zeros(T)
+    cur_c[0] = 1
+    cur_r[0] = 1
+    cur_c[1:len(g) + 1] = -g
+    return linalg.toeplitz(cur_c, cur_r)
+
+def normalize(a): return np.interp(a, (np.nanmin(a), np.nanmax(a)), (0, +1))
+
+def convolve_G(s, g):
+    G = construct_G(g, len(s))
+    try:
+        c = linalg.inv(G).dot(s)
+    except LinAlgError:
+        c = s.copy()
+    return c
+
+def construct_pulse_response(g):
+    s = np.zeros(500)
+    s[10] = 1
+    c = convolve_G(s, g)
+    return s, c
+
+def visualize_temporal_update(YA, C, S, g, sig, norm=True):
+    if norm:
+        C_norm = xr.apply_ufunc(
+            normalize, C, input_core_dims=[['frame']], output_core_dims=[['frame']],
+            vectorize=True, dask='parallelized', output_dtypes=[C.dtype])
+        S_norm = xr.apply_ufunc(
+            normalize, S, input_core_dims=[['frame']], output_core_dims=[['frame']],
+            vectorize=True, dask='parallelized', output_dtypes=[S.dtype])
+        YA_norm = xr.apply_ufunc(
+            normalize, YA.compute(), input_core_dims=[['frame']], output_core_dims=[['frame']],
+            vectorize=True, dask='parallelized', output_dtypes=[YA.dtype])
+        sig_norm = xr.apply_ufunc(
+            normalize, sig, input_core_dims=[['frame']], output_core_dims=[['frame']],
+            vectorize=True, dask='parallelized', output_dtypes=[sig.dtype])
+    else:
+        C_norm = C
+        S_norm = S
+        YA_norm = YA
+        sig_norm = sig
+    s_pul, c_pul = xr.apply_ufunc(
+        construct_pulse_response, g.compute(),
+        input_core_dims=[['lag']], output_core_dims=[['frame'], ['frame']],
+        vectorize=True, output_sizes=dict(t=500))
+    s_pul = s_pul.assign_coords(frame=np.arange(500))
+    c_pul = c_pul.assign_coords(frame=np.arange(500))
+    hv_s_pul = hv.Dataset(s_pul.rename('s_pul'), kdims=['unit_id', 'frame'])
+    hv_c_pul = hv.Dataset(c_pul.rename('c_pul'), kdims=['unit_id', 'frame'])
+    with ProgressBar():
+        hv_C = hv.Dataset(C_norm.compute().rename('Calcium trace'), kdims=['unit_id', 'frame'])
+        hv_S = hv.Dataset(S_norm.compute().rename('Spike'), kdims=['unit_id', 'frame'])
+        hv_YA = hv.Dataset(YA_norm.compute().rename('Raw'), kdims=['unit_id', 'frame'])
+        hv_sig = hv.Dataset(sig_norm.compute().rename('Fitted'), kdims=['unit_id', 'frame'])
+    hv_obj = hv_YA.to(hv.Curve, kdims=['frame'], label='Raw Signal').opts(style=dict(alpha=0.7))\
+    * hv_C.to(hv.Curve, kdims=['frame'], label='Fitted Calcium Trace')\
+    * hv_S.to(hv.Curve, kdims=['frame'], label='Fitted Spikes')\
+    * hv_sig.to(hv.Curve, kdims=['frame'], label='Fitted Signal')\
+    + hv_c_pul.to(hv.Curve, kdims=['frame'], label='Simulated Calcium')\
+    * hv_s_pul.to(hv.Curve, kdims=['frame'], label='Simultaed Spike')
+    return hv_obj.cols(1)
+
+
+def flatten(l):
+    for el in l:
+        if isinstance(el, collections.Iterable) and not isinstance(el, basestring):
+            for sub in flatten(el):
+                yield sub
+        else:
+            yield el
+
+def _get_figures_core(objs):
+    if isinstance(objs, list):
+        objs = [_get_figures_core(plot) for plot in objs]
+    elif isinstance(objs, (models.Column, models.Row)):
+        objs = [_get_figures_core(child) for child in objs.children
+                if not isinstance(child, (models.ToolbarBox,
+                                          models.WidgetBox))]
+    return objs
+
+def _get_figures(objs):
+    try:
+        return list(flatten(_get_figures_core(objs)))
+    except TypeError:
+        return [_get_figures_core(objs)]
+
+def _save_to_svg(hv_obj, save):
+    bokeh_obj = hv.renderer('bokeh').get_plot(hv_obj).state
+    figures = _get_figures(bokeh_obj)
+    for i, figure in enumerate(figures):
+        figure.output_backend = 'svg'
+
+        if len(figures) != 1:
+            if not os.path.exists(save):
+                os.makedirs(save)
+            tidied_title = figure.title.text
+            save_fp = os.path.join(
+                save, '{0}_{1}'.format(tidied_title, i))
+        else:
+            save_fp = save
+
+        if not save_fp.endswith('svg'):
+            save_fp = '{0}.{1}'.format(save_fp, 'svg')
+
+        export_svgs(figure, save_fp)
