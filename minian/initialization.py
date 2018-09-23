@@ -241,7 +241,7 @@ def initialize(varr, seeds, thres_corr=0.8, wnd=10, schd='processes', chk=None):
         sd = varr_flt.sel(sample=cur_crd).load()
         sur = varr_flt.sel(sample=cur_sur).load()
         cur_res = delayed(initialize_perseed)(cur_crd, sd, sur, thres_corr)
-        # cur_res = initialize_perseed(varr_flt, cur_crd, cur_sur, thres_corr)
+        # cur_res = initialize_perseed(cur_crd, sd, sur, thres_corr)
         res.append(cur_res)
     print("computing roi")
     with ProgressBar(), dask.config.set(scheduler=schd):
@@ -278,9 +278,9 @@ def initialize(varr, seeds, thres_corr=0.8, wnd=10, schd='processes', chk=None):
 def initialize_perseed(sd_id, sd, sur, thres_corr):
     # sd = varr.sel(sample=sd_id)
     # sur = varr.sel(sample=sur_id)
-    sd_id_flt = np.nonzero([s == sd_id for s in sur.coords['sample'].data])[0]
     sur = sur.where(sur.std('frame') > 0, drop=True)
     smp_idxs = sur.coords['sample']
+    sd_id_flt = np.nonzero([s == sd_id for s in smp_idxs.data])[0]
     corr = xr.apply_ufunc(
         np.corrcoef,
         sur,
