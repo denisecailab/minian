@@ -13,8 +13,9 @@ from dask.distributed import progress
 from IPython.core.debugger import set_trace
 from scipy.ndimage import gaussian_filter, label
 from scipy.signal import welch, butter, lfilter
-from scipy.sparse import diags
+from scipy.sparse import diags, dia_matrix
 from scipy.linalg import toeplitz, lstsq
+from scipy.spatial.distance import pdist, squareform
 from sklearn.linear_model import LassoLars
 from sklearn.externals.joblib import parallel_backend
 from numba import jit, guvectorize
@@ -22,11 +23,16 @@ from skimage import morphology as moph
 from statsmodels.tsa.stattools import acovf
 import cvxpy as cvx
 from timeit import timeit
+import warnings
 
 
 def get_noise_fft(varr, noise_range=(0.25, 0.5), noise_method='logmexp'):
     _T = len(varr.coords['frame'])
-    freq_crd = np.arange(0, 0.5 + 1 / _T, 1 / _T)
+    ns = _T // 2 + 1
+    if _T % 2 == 0:
+        freq_crd = np.linspace(0, 0.5, ns)
+    else:
+        freq_crd = np.linspace(0, 0.5 * (_T - 1) / _T, ns)
     print("computing fft of input")
     with ProgressBar():
         varr_fft = xr.apply_ufunc(
@@ -35,7 +41,7 @@ def get_noise_fft(varr, noise_range=(0.25, 0.5), noise_method='logmexp'):
             input_core_dims=[['frame']],
             output_core_dims=[['freq']],
             dask='allowed',
-            output_sizes=dict(freq=len(freq_crd)),
+            output_sizes=dict(freq=ns),
             output_dtypes=[np.complex_]).persist()
     print("computing power of noise")
     varr_fft = varr_fft.assign_coords(freq=freq_crd)
@@ -115,9 +121,10 @@ def update_spatial(Y,
     #     with ProgressBar():
     #         A_gs = A_gs.persist()
     print("estimating penalty parameter")
+    cct = C.dot(C, 'frame')
+    alpha = sparse_penal * sn * np.sqrt(np.max(np.diag(cct))) / _T
     with ProgressBar():
-        cct = C.dot(C, 'frame')
-        alpha = sparse_penal * sn * np.sqrt(np.max(np.diag(cct))) / _T
+        alpha = alpha.compute()
     print("computing subsetting matrix")
     if update_background:
         A = xr.concat([A, b.assign_coords(unit_id=-1)], 'unit_id')
@@ -190,37 +197,89 @@ def update_temporal(Y,
                     noise_freq=0.25,
                     p=None,
                     add_lag='p',
+                    jac_thres = 0.1,
                     use_spatial=False,
                     sparse_penal=1,
-                    max_iters=500,
+                    max_iters=200,
                     use_smooth=True,
-                    compute=True):
+                    compute=True,
+                    chk=None,
+                    cvx_sched='processes'):
+    nunits = len(A.coords['unit_id'])
+    if not chk:
+        chk = dict(height='auto', width='auto', frame='auto', unit_id='auto')
     print("grouping overlaping units")
-    with ProgressBar():
-        AA = A.dot(A.rename(dict(unit_id='unit_id_cp')), ['height', 'width'])
-        unit_labels = xr.apply_ufunc(
-            label_connected,
-            AA.compute() > 0,
-            input_core_dims=[['unit_id', 'unit_id_cp']],
-            kwargs=dict(only_connected=True),
-            output_core_dims=[['unit_id']])
+    A_bl = (A > 0).compute()
+    A_bl_flt = A_bl.stack(spatial=('height', 'width'))
+    A_jac = xr.apply_ufunc(
+        lambda x: squareform(pdist(x, 'jaccard')),
+        A_bl_flt,
+        input_core_dims=[['unit_id', 'spatial']],
+        output_core_dims=[['unit_id', 'unit_id_cp']])
+    A_jac = 1 - A_jac
+    unit_labels = xr.apply_ufunc(
+        label_connected,
+        A_jac > jac_thres,
+        input_core_dims=[['unit_id', 'unit_id_cp']],
+        kwargs=dict(only_connected=True),
+        output_core_dims=[['unit_id']])
     print("computing trace")
-    YA = Y.dot(A, ['height', 'width']).rename(dict(unit_id='unit_id_cp'))
-    nA = (A**2).sum(['height', 'width'])
+    A = A.chunk(dict(height=-1, width=-1, unit_id=chk['unit_id']))
+    AA = xr.apply_ufunc(
+        da.array.tensordot, A, A.rename(dict(unit_id='unit_id_cp')),
+        input_core_dims=[['unit_id', 'height', 'width'], ['height', 'width', 'unit_id_cp']],
+        output_core_dims=[['unit_id', 'unit_id_cp']],
+        dask='allowed',
+        kwargs=dict(axes=([1, 2], [0, 1])),
+        output_dtypes=[A.dtype])
+    nA = (A**2).sum(['height', 'width']).chunk(dict(unit_id=-1))
     nA_inv = xr.apply_ufunc(
         lambda x: np.asarray(diags(x).todense()),
         1 / nA,
         input_core_dims=[['unit_id']],
         output_core_dims=[['unit_id', 'unit_id_cp']],
         dask='parallelized',
-        output_dtypes=[nA.dtype])
+        output_dtypes=[nA.dtype],
+        output_sizes=dict(unit_id_cp = nunits))
     nA_inv = nA_inv.assign_coords(unit_id_temp=AA.coords['unit_id_cp'])
-    YrA = YA.dot(nA_inv, 'unit_id_cp') - C.dot(AA, 'unit_id').dot(
-        nA_inv, 'unit_id_cp')
-    YrA = YrA + C
     if compute:
         with ProgressBar():
-            YrA = YrA.persist()
+            nA_inv = (nA_inv.compute()
+                      .chunk(dict(unit_id=chk['unit_id'], unit_id_cp=-1)))
+    Y = Y.chunk(dict(height=-1, width=-1, frame=chk['frame']))
+    YA = (xr.apply_ufunc(
+        da.array.tensordot, Y, A,
+        input_core_dims=[['frame', 'height', 'width'], ['height', 'width', 'unit_id']],
+        output_core_dims=[['frame', 'unit_id']],
+        dask='allowed',
+        kwargs=dict(axes=([1, 2], [0, 1])),
+        output_dtypes=[A.dtype])
+          .rename(dict(unit_id='unit_id_cp')))
+    YA = YA.chunk(dict(frame=chk['frame'], unit_id_cp=-1))
+    YA_norm = xr.apply_ufunc(
+        da.array.dot, YA, nA_inv,
+        input_core_dims=[['frame', 'unit_id_cp'], ['unit_id_cp', 'unit_id']],
+        output_core_dims=[['frame', 'unit_id']],
+        dask='allowed',
+        output_dtypes=[YA.dtype])
+    C = C.chunk(dict(frame=chk['frame'], unit_id=-1))
+    AA = AA.chunk(dict(unit_id=-1, unit_id_cp=-1))
+    CA = xr.apply_ufunc(
+        da.array.dot, C, AA,
+        input_core_dims=[['frame', 'unit_id'], ['unit_id', 'unit_id_cp']],
+        output_core_dims=[['frame', 'unit_id_cp']],
+        dask='allowed',
+        output_dtypes=[C.dtype])
+    CA_norm = xr.apply_ufunc(
+        da.array.dot, CA, nA_inv,
+        input_core_dims=[['frame', 'unit_id_cp'], ['unit_id_cp', 'unit_id']],
+        output_core_dims=[['frame', 'unit_id']],
+        dask='allowed',
+        output_dtypes=[CA.dtype])
+    YrA = YA_norm - CA_norm + C
+    if compute:
+        with ProgressBar():
+            YrA = YrA.compute()
             YrA = YrA.assign_coords(unit_labels=unit_labels)
     sn_temp = get_noise_welch(YrA, noise_range=(noise_freq, 1))
     sn_temp = sn_temp.assign_coords(unit_labels=unit_labels)
@@ -243,7 +302,7 @@ def update_temporal(Y,
             output_dtypes=[YrA.dtype])
         if compute:
             with ProgressBar():
-                YrA_smth = YrA_smth.persist()
+                YrA_smth = YrA_smth.compute()
                 sn_temp_smth = get_noise_welch(
                     YrA_smth, noise_range=(noise_freq, 1))
     else:
@@ -260,7 +319,7 @@ def update_temporal(Y,
             output_dtypes=[np.int]).clip(1)
         if compute:
             with ProgressBar():
-                p = p.persist()
+                p = p.compute()
         p_max = p.max().values
     else:
         p_max = p
@@ -280,7 +339,7 @@ def update_temporal(Y,
     g = g.assign_coords(lag=np.arange(1, p_max + 1), unit_labels=unit_labels)
     if compute:
         with ProgressBar():
-            g = g.persist()
+            g = g.compute()
     print("updating isolated temporal components")
     if use_spatial is 'full':
         result_iso = xr.apply_ufunc(
@@ -295,27 +354,31 @@ def update_temporal(Y,
             vectorize=True,
             dask='parallelized',
             kwargs=dict(sparse_penal=sparse_penal, max_iters=max_iters),
-            output_sizes=dict(trace=4),
+            output_sizes=dict(trace=5),
             output_dtypes=[YrA.dtype])
     else:
         result_iso = xr.apply_ufunc(
             update_temporal_cvxpy,
-            YrA.where(unit_labels == -1, drop=True).chunk(dict(frame=-1)),
-            g.where(unit_labels == -1, drop=True).chunk(dict(lag=-1)),
-            sn_temp.where(unit_labels == -1, drop=True),
+            YrA.where(unit_labels == -1, drop=True).chunk(dict(frame=-1, unit_id=5)),
+            g.where(unit_labels == -1, drop=True).chunk(dict(lag=-1, unit_id=5)),
+            sn_temp.where(unit_labels == -1, drop=True).chunk(dict(unit_id=5)),
             input_core_dims=[['frame'], ['lag'], []],
             output_core_dims=[['trace', 'frame']],
             vectorize=True,
             dask='parallelized',
             kwargs=dict(sparse_penal=sparse_penal, max_iters=max_iters),
-            output_sizes=dict(trace=4),
+            output_sizes=dict(trace=5),
             output_dtypes=[YrA.dtype])
     if compute:
-        with ProgressBar():
+        with ProgressBar(), da.config.set(scheduler=cvx_sched):
             result_iso = result_iso.compute()
     print("updating overlapping temporal components")
     res_list = []
     g_ovlp = g.where(unit_labels >= 0, drop=True)
+    try:
+        gg = g_ovlp.groupby('unit_labels')
+    except:
+        set_trace()
     for cur_labl, cur_g in g_ovlp.groupby('unit_labels'):
         if use_spatial:
             cur_A = A_flt_ovlp.where(unit_labels == cur_labl, drop=True)
@@ -330,33 +393,34 @@ def update_temporal(Y,
                 output_core_dims=[['trace', 'unit_id', 'frame']],
                 dask='parallelized',
                 kwargs=dict(sparse_penal=sparse_penal, max_iters=max_iters),
-                output_sizes=dict(trace=4),
+                output_sizes=dict(trace=5),
                 output_dtypes=[YrA.dtype])
         else:
             cur_YrA = YrA.where(unit_labels == cur_labl, drop=True)
             cur_sn_temp = sn_temp.where(unit_labels == cur_labl, drop=True)
             cur_res = delayed(xr.apply_ufunc)(
                 update_temporal_cvxpy,
-                cur_YrA.chunk(dict(unit_id=-1, frame=-1)),
-                cur_g.chunk(dict(unit_id=-1, lag=-1)),
-                cur_sn_temp.chunk(dict(unit_id=-1)),
+                cur_YrA,
+                cur_g,
+                cur_sn_temp,
                 input_core_dims=[['unit_id', 'frame'], ['unit_id', 'lag'],
                                  ['unit_id']],
                 output_core_dims=[['trace', 'unit_id', 'frame']],
-                dask='parallelized',
+                dask='forbidden',
                 kwargs=dict(sparse_penal=sparse_penal, max_iters=max_iters),
-                output_sizes=dict(trace=4),
+                output_sizes=dict(trace=5),
                 output_dtypes=[YrA.dtype])
         res_list.append(cur_res)
     if compute:
-        with ProgressBar():
+        with ProgressBar(), da.config.set(scheduler=cvx_sched):
             result_ovlp, = da.compute(res_list)
-    result = xr.concat(result_ovlp + [result_iso], 'unit_id')
-    C_new = result.isel(trace=0)
-    S_new = result.isel(trace=1)
-    B_new = result.isel(trace=2)
-    C0_new = result.isel(trace=3)
-    return YrA, C_new, S_new, B_new, C0_new, g
+    result = xr.concat(result_ovlp + [result_iso], 'unit_id').sortby('unit_id')
+    C_new = result.isel(trace=0).drop('unit_labels').dropna('unit_id')
+    S_new = result.isel(trace=1).drop('unit_labels').dropna('unit_id')
+    B_new = result.isel(trace=2).drop('unit_labels').dropna('unit_id')
+    C0_new = result.isel(trace=3).drop('unit_labels').dropna('unit_id')
+    sig = result.isel(trace=4).drop('unit_labels').dropna('unit_id')
+    return YrA, C_new, S_new, B_new, C0_new, sig, g
 
 
 def get_ar_coef(y, sn, p, add_lag, pad=None):
@@ -414,8 +478,8 @@ def update_temporal_cvxpy(y, g, sn, A=None, **kwargs):
     if A is not None:
         _d = A.shape[0]
     # construct G matrix and decay vector per unit
-    G = np.zeros((_u, _T, _T))
     dc_vec = np.zeros((_u, _T))
+    G_ls = []
     for cur_u in range(_u):
         cur_g = g[cur_u, :]
         # construct first column and row
@@ -424,7 +488,7 @@ def update_temporal_cvxpy(y, g, sn, A=None, **kwargs):
         cur_r[0] = 1
         cur_c[1:len(cur_g) + 1] = -cur_g
         # update G with toeplitz matrix
-        G[cur_u, :, :] = toeplitz(cur_c, cur_r)
+        G_ls.append(cvx.Constant(dia_matrix(toeplitz(cur_c, cur_r))))
         # update dc_vec
         cur_gr = np.roots(cur_c)
         dc_vec[cur_u, :] = np.max(cur_gr.real)**np.arange(_T)
@@ -435,17 +499,17 @@ def update_temporal_cvxpy(y, g, sn, A=None, **kwargs):
     c0 = cvx.Variable(_u)  # initial fluorescence per unit
     c = cvx.Variable((_u, _T))  # calcium trace per unit
     s = cvx.vstack(
-        [G[u, :, :] * c[u, :] for u in range(_u)])  # spike train per unit
+        [G_ls[u] * c[u, :] for u in range(_u)])  # spike train per unit
     # residual noise per unit
     if A is not None:
-        noise = cvx.vstack([
-            y[px, :] - (A * c)[px, :] - (A * b)[px, :] -
-            (A * cvx.diag(c0) * dc_vec)[px, :] for px in range(_d)
-        ])
+        sig = cvx.vstack([
+            (A * c)[px, :]
+            + (A * b)[px, :]
+            + (A * cvx.diag(c0) *dc_vec)[px, :] for px in range(_d)])
+        noise = y - sig
     else:
-        noise = cvx.vstack([
-            y[u, :] - c[u, :] - b[u] - c0[u] * dc_vec[u, :] for u in range(_u)
-        ])
+        sig = cvx.vstack([c[u, :] + b[u] + c0[u] * dc_vec[u, :] for u in range(_u)])
+        noise = y - sig
     noise = cvx.vstack(
         [cvx.norm(noise[i, :], 2) for i in range(noise.shape[0])])
     # construct constraints
@@ -454,36 +518,47 @@ def update_temporal_cvxpy(y, g, sn, A=None, **kwargs):
     cons.append(c0 >= 0)  # initial fluorescence larger than 0
     cons.append(s >= 0)  # spike train non-negativity
     # noise constraints
-    cons_noise = [noise[i] <= thres_sn[i] for i in range(thres_sn.shape[0])]
+    #cons_noise = [noise[i] <= thres_sn[i] for i in range(thres_sn.shape[0])]
     # objective
     # try:
-    #     obj = cvx.Minimize(cvx.norm(s, 1))
-    #     prob = cvx.Problem(obj, cons + cons_noise)
-    #     res = prob.solve(solver='ECOS', max_iters=max_iters)
-    #     if not (prob.status == 'optimal'
-    #             or prob.status == 'optimal_inaccurate'):
-    #         print("constrained version of problem infeasible")
-    #         raise ValueError
+        # obj = cvx.Minimize(cvx.sum(cvx.norm(s, 1, axis=1)))
+        # obj = cvx.Minimize(cvx.norm(c, 1))
+        # prob = cvx.Problem(obj, cons)
+        # res = prob.solve(solver='ECOS', verbose=True)
+        # res = prob.solve(solver='SCS', verbose=True)
+        # if not (prob.status == 'optimal'
+        #         or prob.status == 'optimal_inaccurate'):
+        #     print("constrained version of problem infeasible")
+        #     raise ValueError
     # except (ValueError, cvx.SolverError):
+        # pass
     # Pr = np.zeros(_T)
     # Pr[1:10] = 1
     # P = toeplitz(Pr)
     # sPs = cvx.vstack([s * P * s.T for u in range(s.shape[0])])
     lam = sn * sparse_penal
-    obj = cvx.Minimize(cvx.sum(noise) + lam * cvx.norm(s, 1, axis=1))
+    obj = cvx.Minimize(cvx.sum(cvx.sum(noise, axis=1) + lam * cvx.norm(s, 1, axis=1)))
     prob = cvx.Problem(obj, cons)
     try:
         res = prob.solve(solver='ECOS', max_iters=max_iters)
-        if not prob.status is 'optimal':
-            print(
-                "problem solved sub-optimally or unfeasible, trying SCS solver"
-            )
+        if prob.status in ["infeasible", "unbounded", None]:
             raise ValueError
-    except (ValueError, cvx.SolverError):
-        res = prob.solve(solver='SCS', verbose=True)
-    return np.stack(
+    except (cvx.SolverError, ValueError):
+        try:
+            # res = prob.solve(solver='SCS')
+            if prob.status in ["infeasible", "unbounded", None]:
+                raise ValueError
+        except (cvx.SolverError, ValueError):
+            warnings.warn("problem infeasible, returning null", RuntimeWarning)
+            return np.full((5, c.shape[0], c.shape[1]), np.nan).squeeze()
+    if not prob.status is 'optimal':
+        warnings.warn("problem solved sub-optimally", RuntimeWarning)
+    try:
+        return np.stack(
         np.broadcast_arrays(c.value, s.value, b.value.reshape((-1, 1)),
-                            c0.value.reshape((-1, 1)))).squeeze()
+                            c0.value.reshape((-1, 1)), sig.value)).squeeze()
+    except:
+        set_trace()
 
 
 def unit_merge(A, C, thres_corr=0.9):

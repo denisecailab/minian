@@ -49,57 +49,58 @@ def load_cnm_dataset(path, pattern=r'^cnm.nc$', concat_dim='session'):
         return None
 
 
-def get_cnm_list(path, pattern=r'^cnm.nc$'):
+def get_minian_list(path, pattern=r'^minian.nc$'):
     path = os.path.normpath(path)
-    cnmlist = []
+    mnlist = []
     for dirpath, dirnames, fnames in os.walk(path):
-        cnmnames = filter(lambda fn: re.search(pattern, fn), fnames)
-        cnm_paths = [os.path.join(dirpath, cnm) for cnm in cnmnames]
-        cnmlist += cnm_paths
-    return cnmlist
+        mnames = filter(lambda fn: re.search(pattern, fn), fnames)
+        mn_paths = [os.path.join(dirpath, mn) for mn in mnames]
+        mnlist += mn_paths
+    return mnlist
 
 
-def estimate_shifts(cnm_list,
+def estimate_shifts(mn_list,
                     temp_list,
                     z_thres=None,
                     method='first',
                     concat_dim='session'):
     temps = []
-    for icnm, cnm_path in enumerate(cnm_list):
+    for imn, mn_path in enumerate(mn_list):
         print(
-            "loading template: {:2d}/{:2d}".format(icnm, len(cnm_list)),
-            end='\r')
-        with xr.open_dataset(cnm_path) as cnm:
-            cur_path = os.path.dirname(
-                cnm.attrs['file_path']) + os.sep + 'varr_mc_int.nc'
+            "loading template: {:2d}/{:2d}".format(imn, len(mn_list)))
         try:
-            with xr.open_dataset(cur_path)['varr_mc_int'] as cur_va:
-                if temp_list[icnm] == 'first':
+            with xr.open_dataset(
+                mn_path, chunks=dict(width='auto', height='auto'))['org'] as cur_va:
+                if temp_list[imn] == 'first':
                     cur_temp = cur_va.isel(frame=0).load().copy()
                     temps.append(cur_temp)
-                elif temp_list[icnm] == 'last':
+                elif temp_list[imn] == 'last':
                     cur_temp = cur_va.isel(frame=-1).load().copy()
                     temps.append(cur_temp)
-                elif temp_list[icnm] == 'mean':
-                    cur_va = cur_va.load().chunk(dict(width=50, height=50))
-                    cur_temp = cur_va.mean('frame').compute()
+                elif temp_list[imn] == 'mean':
+                    cur_temp = (cur_va.astype(np.float32).mean('frame'))
+                    with ProgressBar():
+                        cur_temp = cur_temp.compute()
                     temps.append(cur_temp)
                 else:
                     print("unrecognized template")
         except KeyError:
-            print("no varr found for path {}".format(cnm_path))
+            print("no video found for path {}".format(mn_path))
     shifts = []
     corrs = []
     for itemp, temp_dst in enumerate(temps):
         print(
-            "estimating shifts: {:2d}/{:2d}".format(itemp, len(temps)),
-            end='\r')
+            "estimating shifts: {:2d}/{:2d}".format(itemp, len(temps)))
         if method == 'first':
             temp_src = temps[0]
-        common = (temp_src.isnull() + temp_dst.isnull())
-        temp_src = temp_src.reindex_like(common)
-        temp_dst = temp_dst.reindex_like(common)
-        cur_sh, cur_cor = shift_fft(temp_src, temp_dst)
+        # common = (temp_src.isnull() + temp_dst.isnull())
+        # temp_src = temp_src.reindex_like(common)
+        # temp_dst = temp_dst.reindex_like(common)
+        src_fft = np.fft.fft2(temp_src)
+        dst_fft = np.fft.fft2(temp_dst)
+        cur_res = shift_fft(src_fft, dst_fft)
+        cur_sh = cur_res[0:2]
+        cur_cor = cur_res[2]
         cur_anm = temp_dst.coords['animal']
         cur_ss = temp_dst.coords['session']
         cur_ssid = temp_dst.coords['session_id']
@@ -340,7 +341,7 @@ def resolve(mapping):
     for ss in map_ss.columns:
         del_idx = []
         for ss_uid, ss_grp in mapping.groupby(mapping['session', ss]):
-            if ss_grp.shnape[0] > 1:
+            if ss_grp.shape[0] > 1:
                 del_idx.extend(ss_grp.index)
                 new_sess = []
                 for s in ss_grp['session']:

@@ -5,6 +5,7 @@ import dask
 import pyfftw.interfaces.numpy_fft as npfft
 import graph_tool.all as gt
 import dask.array.fft as dafft
+import dask.array as da
 from dask import delayed, compute
 from dask.diagnostics import ProgressBar
 from scipy.ndimage.filters import maximum_filter
@@ -150,7 +151,11 @@ def intensity_refine(varr, seeds):
     bins = np.around(
         fm_max.sizes['height'] * fm_max.sizes['width'] / 10).astype(int)
     hist, edges = np.histogram(fm_max, bins=bins)
-    thres = edges[np.argmax(hist) * 2]
+    try:
+        thres = edges[np.argmax(hist) * 2]
+    except IndexError:
+        print("threshold out of bound, returning input")
+        return seeds
     seeds_ref = seeds.where(fm_max > thres).fillna(0)
     return seeds_ref
 
@@ -162,7 +167,7 @@ def ks_refine(varr, seeds, sig=0.05):
                                                      'width')).dropna('sample')
     ks = xr.apply_ufunc(
         lambda x: kstest(zscore(x), 'norm')[1],
-        varr_sub,
+        varr_sub.chunk(dict(frame=-1, sample='auto')),
         input_core_dims=[['frame']],
         vectorize=True,
         dask='parallelized',
@@ -177,7 +182,7 @@ def seeds_merge(varr, seeds, thres_dist=5, thres_corr=0.6):
     seeds_ref = seeds.where(seeds > 0).stack(sample=('height',
                                                      'width')).dropna('sample')
     varr_max = varr.max('frame').where(seeds > 0).stack(
-        sample=('height', 'width')).dropna('sample')
+        sample=('height', 'width')).dropna('sample').compute()
     crds = seeds_ref.coords
     nsmp = len(crds['sample'])
     hwarr = xr.concat([crds['height'], crds['width']], dim='dim')
@@ -193,7 +198,7 @@ def seeds_merge(varr, seeds, thres_dist=5, thres_corr=0.6):
             sampleB=np.arange(len(crds['sample'])))
     corr = xr.apply_ufunc(
         np.corrcoef,
-        varr_sub,
+        varr_sub.chunk(dict(sample=-1, frame=-1)),
         input_core_dims=[['sample', 'frame']],
         output_core_dims=[['sampleA', 'sampleB']],
         dask='parallelized',
@@ -202,6 +207,7 @@ def seeds_merge(varr, seeds, thres_dist=5, thres_corr=0.6):
             sampleA=np.arange(len(crds['sample'])),
             sampleB=np.arange(len(crds['sample'])))
     adj = np.logical_and(dist < thres_dist, corr > thres_corr)
+    adj = adj.compute()
     np.fill_diagonal(adj.values, 0)
     iso = adj.sum('sampleB')
     iso = iso.where(iso == 0).dropna('sampleA')
@@ -221,7 +227,7 @@ def seeds_merge(varr, seeds, thres_dist=5, thres_corr=0.6):
     return seeds_ref.unstack('sample').fillna(0)
 
 
-def initialize(varr, seeds, thres_corr=0.8, wnd=20):
+def initialize(varr, seeds, thres_corr=0.8, wnd=10, schd='processes', chk=None):
     print("reshaping video array")
     old_err = np.seterr(divide='raise')
     varr_flt = varr.stack(sample=('height', 'width'))
@@ -238,7 +244,7 @@ def initialize(varr, seeds, thres_corr=0.8, wnd=20):
         # cur_res = initialize_perseed(varr_flt, cur_crd, cur_sur, thres_corr)
         res.append(cur_res)
     print("computing roi")
-    with ProgressBar():
+    with ProgressBar(), dask.config.set(scheduler=schd):
         res = compute(res)[0]
     print("concatenating results")
     A = xr.concat([r[0] for r in res],
@@ -247,9 +253,24 @@ def initialize(varr, seeds, thres_corr=0.8, wnd=20):
                   'unit_id').assign_coords(unit_id=np.arange(len(res)))
     A = A.reindex_like(varr).fillna(0)
     print("initializing backgrounds")
-    Yr = varr - A.dot(C, 'unit_id')
-    b = Yr.mean('frame').persist()
-    f = Yr.mean('height').mean('width').persist()
+    if not chk:
+        chk = dict(height='auto', width='auto', frame='auto', unit_id='auto')
+    A = A.chunk(dict(height=chk['height'], width=chk['width'], unit_id=-1))
+    C = C.chunk(dict(frame=chk['frame'], unit_id=-1))
+    varr = varr.chunk(dict(frame=chk['frame'], height=chk['height'], width=chk['width']))
+    AC = xr.apply_ufunc(
+        da.dot, A, C,
+        input_core_dims=[['height', 'width', 'unit_id'], ['unit_id', 'frame']],
+        output_core_dims=[['height', 'width', 'frame']],
+        dask='allowed',
+        output_dtypes=[A.dtype])
+    Yr = varr - AC
+    with ProgressBar():
+        Yr = Yr.compute()
+        b = (Yr.chunk(dict(frame=-1, height=chk['height'], width=chk['width']))
+             .mean('frame').compute())
+        f = (Yr.chunk(dict(frame=chk['frame'], height=-1, width=-1))
+             .mean('height').mean('width').compute())
     np.seterr(**old_err)
     return A, C, b, f
 
@@ -283,3 +304,9 @@ def initialize_perseed(sd_id, sd, sur, thres_corr):
         set_trace()
     _C = sur.dot(_A, 'sample')
     return _A.unstack('sample').fillna(0), _C
+
+
+def initialize_new(varr, seeds, thres_cor, wnd=20):
+    print("reshaping")
+    varr_flt = varr.stack(sample=['height', 'width'])
+    xr.apply_ufunc(da.corrcoef, varr_flt, input_core_dims=['sample', 'frame'], output_core_dims=['sample', 'sample_cp'])

@@ -21,14 +21,21 @@ from tifffile import imsave, imread
 from pandas import Timestamp
 from IPython.core.debugger import set_trace
 
-# import caiman as cm
-# from caiman import motion_correction
-# from caiman.components_evaluation import estimate_components_quality
-# from caiman.miniscope.plot import plot_components
-# from caiman.source_extraction import cnmf
+try:
+    import pycuda.autoinit
+    import pycuda.gpuarray as gpuarray
+    import skcuda.linalg as culin
+    
+except:
+    print("cannot use cuda accelerate")
 
 
-def load_videos(vpath, pattern='msCam[0-9]+\.avi$'):
+def load_videos(vpath,
+                pattern='msCam[0-9]+\.avi$',
+                dtype=np.float64,
+                in_memory=False,
+                overwrite=False,
+                resample=None):
     """Load videos from a folder.
 
     Load videos from the folder specified in `vpath` and according to the regex
@@ -55,27 +62,54 @@ def load_videos(vpath, pattern='msCam[0-9]+\.avi$'):
 
     """
     vpath = os.path.normpath(vpath)
+    ssname = os.path.basename(vpath)
     vlist = natsorted([
         vpath + os.sep + v for v in os.listdir(vpath) if re.search(pattern, v)
     ])
     if not vlist:
-        print("No data with pattern {} found in the specified folder {}".
-              format(pattern, vpath))
+        print(
+            "No data with pattern {} found in the specified folder {}".format(
+                pattern, vpath))
         return
     else:
         print("loading {} videos in folder {}".format(len(vlist), vpath))
-        varray = [sio.vread(v, as_grey=True) for v in vlist]
-        varray = np.squeeze(np.concatenate(varray))
-        return xr.DataArray(
-            varray,
-            dims=['frame', 'height', 'width'],
-            coords={
-                'frame': range(varray.shape[0]),
-                'height': range(varray.shape[1]),
-                'width': range(varray.shape[2])
-            },
-            name=os.path.basename(vpath))
-
+        f_start = 0
+        dat_list = []
+        for vname in vlist:
+            ncname = vname + '.nc'
+            if (not in_memory) and os.path.isfile(ncname) and (not overwrite):
+                print("file exsist, directly loading {}".format(ncname), end='\r')
+                dat_list.append(ncname)
+            else:
+                print("processing {}".format(vname), end='\r')
+                cur_v = sio.vread(vname, as_grey=True).astype(dtype).squeeze()
+                crd_f = np.arange(cur_v.shape[0]) + f_start
+                f_start = f_start + cur_v.shape[0]
+                cur_varr = xr.DataArray(
+                    cur_v, dims=['frame', 'height', 'width'],
+                    coords=dict(
+                        frame=crd_f,
+                        height=np.arange(cur_v.shape[1]),
+                        width=np.arange(cur_v.shape[2])),
+                    name=ssname)
+                if resample:
+                    for dim, binw in resample.items():
+                        binw = int(binw)
+                        crd = cur_varr.coords[dim]
+                        bin_eg = np.arange(crd.values[0], crd.values[-1] + binw, binw)
+                        cur_varr = (cur_varr
+                                    .groupby_bins(dim, bin_eg, labels=bin_eg[:-1], include_lowest=True)
+                                    .mean(dim).rename({dim + '_bins': dim}))
+                if in_memory:
+                    dat_list.append(cur_varr)
+                else:
+                    cur_varr.to_dataset().to_netcdf(ncname)
+                    dat_list.append(ncname)
+        if in_memory:
+            return xr.concat(dat_list, 'frame').rename(ssname)
+        else:
+            return xr.open_mfdataset(dat_list, concat_dim='frame', autoclose=True)[ssname]
+            
 
 def create_fig(varlist, nrows, ncols, **kwargs):
     if not isinstance(varlist, list):
@@ -226,8 +260,10 @@ def save_mp4(filename, dat):
     vw = sio.FFmpegWriter(
         filename,
         inputdict={'-framerate': '30'},
-        outputdict={'-r': '30',
-                    '-vcodec': 'rawvideo'})
+        outputdict={
+            '-r': '30',
+            '-vcodec': 'rawvideo'
+        })
     for fid, f in enumerate(dat):
         print("writing frame: {}".format(fid), end='\r')
         vw.writeFrame(f)
@@ -288,20 +324,18 @@ def varr_to_float32(varr):
     return varr_norm
 
 
-def scale_varr(varr, scale=(0, 1), inplace=True):
-    copy = not inplace
-    if np.issubdtype(varr.dtype, np.floating):
-        dtype = varr.dtype
+def scale_varr(varr, scale=(0, 1), copy=False):
+    if copy:
+        varr_norm = varr.copy()
     else:
-        dtype = np.float32
-    varr_norm = varr.astype(dtype, copy=copy)
+        varr_norm = varr
     varr_max = varr_norm.max()
     varr_min = varr_norm.min()
     varr_norm -= varr_min
     varr_norm *= 1 / (varr_max - varr_min)
     varr_norm *= (scale[1] - scale[0])
     varr_norm += scale[0]
-    return varr_norm.astype(varr.dtype, copy=False)
+    return varr_norm
 
 
 def varray_to_tif(filename, varr):
@@ -365,27 +399,35 @@ def save_cnmf(cnmf,
     dims = cnmf.dims
     A = xr.DataArray(
         cnmf.A.toarray().reshape(dims + (-1, ), order=order),
-        coords={'height': h,
-                'width': w,
-                'unit_id': range(cnmf.A.shape[-1])},
+        coords={
+            'height': h,
+            'width': w,
+            'unit_id': range(cnmf.A.shape[-1])
+        },
         dims=['height', 'width', 'unit_id'],
         name='A')
     C = xr.DataArray(
         cnmf.C,
-        coords={'unit_id': range(cnmf.C.shape[0]),
-                'frame': f},
+        coords={
+            'unit_id': range(cnmf.C.shape[0]),
+            'frame': f
+        },
         dims=['unit_id', 'frame'],
         name='C')
     S = xr.DataArray(
         cnmf.S,
-        coords={'unit_id': range(cnmf.S.shape[0]),
-                'frame': f},
+        coords={
+            'unit_id': range(cnmf.S.shape[0]),
+            'frame': f
+        },
         dims=['unit_id', 'frame'],
         name='S')
     YrA = xr.DataArray(
         cnmf.YrA,
-        coords={'unit_id': range(cnmf.S.shape[0]),
-                'frame': f},
+        coords={
+            'unit_id': range(cnmf.S.shape[0]),
+            'frame': f
+        },
         dims=['unit_id', 'frame'],
         name='YrA')
     b = xr.DataArray(
@@ -399,8 +441,10 @@ def save_cnmf(cnmf,
         name='b')
     f = xr.DataArray(
         cnmf.f,
-        coords={'background_id': range(cnmf.f.shape[0]),
-                'frame': f},
+        coords={
+            'background_id': range(cnmf.f.shape[0]),
+            'frame': f
+        },
         dims=['background_id', 'frame'],
         name='f')
     ds = xr.merge([A, C, S, YrA, b, f])
@@ -411,9 +455,9 @@ def save_cnmf(cnmf,
             unit_mask = np.arange(ds.sizes['unit_id'])
         if meta_dict is not None:
             pathlist = os.path.normpath(dpath).split(os.sep)
-            ds = ds.assign_coords(
-                **dict([(cdname, pathlist[cdval])
-                        for cdname, cdval in meta_dict.items()]))
+            ds = ds.assign_coords(**dict([(
+                cdname,
+                pathlist[cdval]) for cdname, cdval in meta_dict.items()]))
         ds = ds.assign_attrs({
             'unit_mask': unit_mask,
             'file_path': dpath + os.sep + "cnm.nc"
@@ -457,9 +501,9 @@ def update_meta(dpath, pattern=r'^varr_mc_int.nc$', meta_dict=None):
             new_ds = xr.Dataset()
             with xr.open_dataset(f_path) as old_ds:
                 new_ds.attrs = deepcopy(old_ds.attrs)
-            new_ds = new_ds.assign_coords(
-                **dict([(cdname, pathlist[cdval])
-                        for cdname, cdval in meta_dict.items()]))
+            new_ds = new_ds.assign_coords(**dict([(
+                cdname,
+                pathlist[cdval]) for cdname, cdval in meta_dict.items()]))
             new_ds = new_ds.assign_attrs(dict(file_path=f_path))
             new_ds.to_netcdf(f_path, mode='a')
             print("updated: {}".format(f_path))
@@ -478,7 +522,6 @@ def update_meta(dpath, pattern=r'^varr_mc_int.nc$', meta_dict=None):
 #                 ds = old_ds.load().copy()
 #                 ds = ds.rename({vname: 'varr_mc_int'})
 #             ds.to_netcdf(f_path, mode='w')
-
 
 # def resave_cnmf(dpath, pattern=r'^cnm.nc$'):
 #     for dirpath, fdpath, fpath in os.walk(dpath):
@@ -599,14 +642,18 @@ def save_cnmf_from_mat(matpath,
         name='A')
     C = xr.DataArray(
         cnmf.C,
-        coords={'unit_id': range(cnmf.C.shape[0]),
-                'frame': T_coord},
+        coords={
+            'unit_id': range(cnmf.C.shape[0]),
+            'frame': T_coord
+        },
         dims=['unit_id', 'frame'],
         name='C')
     S = xr.DataArray(
         cnmf.S,
-        coords={'unit_id': range(cnmf.S.shape[0]),
-                'frame': T_coord},
+        coords={
+            'unit_id': range(cnmf.S.shape[0]),
+            'frame': T_coord
+        },
         dims=['unit_id', 'frame'],
         name='S')
     if cnmf.b.any():
@@ -629,8 +676,10 @@ def save_cnmf_from_mat(matpath,
     if cnmf.f.any():
         f = xr.DataArray(
             cnmf.f,
-            coords={'background_id': range(cnmf.f.shape[0]),
-                    'frame': T_coord},
+            coords={
+                'background_id': range(cnmf.f.shape[0]),
+                'frame': T_coord
+            },
             dims=['background_id', 'frame'],
             name='f')
     else:

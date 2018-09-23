@@ -4,6 +4,7 @@ import cv2
 import sys
 import itertools as itt
 import pyfftw.interfaces.numpy_fft as npfft
+import numba as nb
 from scipy.stats import zscore
 from scipy.ndimage import center_of_mass
 from collections import OrderedDict
@@ -352,52 +353,67 @@ def apply_translation(img, shift):
     return np.roll(img, shift, axis=(1, 0))
 
 
-def estimate_shift_fft(varray, z_thres=None, on='first', pad_f=1):
-    varray = varray.chunk(dict(height=-1, width=-1))
-    fm_idx = varray.coords['frame'].values
-    dims = list(varray.dims)
+def estimate_shift_fft(varr, on='first', pad_f=1, pct_thres=None):
+    varr = varr.chunk(dict(height=-1, width=-1, frame='auto'))
+    dims = list(varr.dims)
     dims.remove('frame')
-    sizes = [varray.sizes[d] for d in dims]
+    sizes = [varr.sizes[d] for d in dims]
+    if not pct_thres:
+        pct_thres = (1 - 10 / (sizes[0] * sizes[1])) * 100
+    print(pct_thres)
     pad_s = np.array(sizes) * pad_f
     pad_s = pad_s.astype(int)
     results = []
+    print("computing fft on array")
+    varr_fft = xr.apply_ufunc(
+        np.fft.fft2,
+        varr,
+        input_core_dims=[['height', 'width']],
+        output_core_dims=[['height', 'width']],
+        vectorize=True,
+        dask='parallelized',
+        kwargs=dict(s=pad_s),
+        output_dtypes=[np.complex64])
+    with ProgressBar():
+        varr_fft = varr_fft
     if on == 'mean':
-        meanfm = varray.mean('frame')
+        meanfm = varr.mean('frame')
         src_fft = np.fft.fft2(meanfm, pad_s)
     elif on == 'first':
-        src_fft = np.fft.fft2(varray.sel(frame=fm_idx[0]), pad_s)
+        src_fft = varr_fft.isel(frame=0)
     elif on == 'last':
-        src_fft = np.fft.fft2(varray.sel(frame=fm_idx[-1]), pad_s)
+        src_fft = varr_fft.isel(frame=-1)
     elif on == 'perframe':
-        pass
+        src_fft = varr_fft.shift(frame=1)
     else:
         print("template not understood. returning")
         return
-    print("creating parallel schedule")
-    for fid_src, fid_dst in zip(fm_idx[:-1], fm_idx[1:]):
-        if on in ('mean', 'first', 'last'):
-            im_src = src_fft
-        elif on == 'perframe':
-            im_src = varray.sel(frame=fid_src)
-        im_dst = varray.sel(frame=fid_dst)
-        res = delayed(shift_fft)(im_src, im_dst, pad_s, pad_f)
-        results.append(res)
-    print("estimating shifts with fft on frame: {}".format(on))
-    with ProgressBar():
-        results, = compute(results)
-    shifts = [res[0] for res in results]
-    corr = [res[1] for res in results]
-    shifts = xr.DataArray(
-        shifts,
-        coords=dict(frame=fm_idx[1:], shift_dim=dims),
-        dims=['frame', 'shift_dim'])
-    corr = xr.DataArray(corr, coords=dict(frame=fm_idx[1:]), dims=['frame'])
-    if z_thres:
-        mask = xr.apply_ufunc(zscore, corr) > z_thres
-    else:
-        mask = xr.apply_ufunc(np.ones_like, corr).astype(bool)
+    print("estimating shifts")
+    res = xr.apply_ufunc(
+        shift_fft,
+        src_fft,
+        varr_fft,
+        input_core_dims=[['height', 'width'], ['height', 'width']],
+        output_core_dims=[['variable']],
+        kwargs=dict(pct_thres=pct_thres),
+        vectorize=True,
+        dask='parallelized',
+        output_dtypes=[float],
+        output_sizes=dict(variable=3))
+    res = res.assign_coords(variable=['height', 'width', 'corr'])
+    shifts = res.sel(variable = ['height', 'width'])
+    corr = res.sel(variable='corr')
+    return varr_fft, res
+    
+def mask_shifts(varr_fft, corr, shifts, z_thres, perframe=True, pad_f=1):
+    dims = list(varr_fft.dims)
+    dims.remove('frame')
+    sizes = [varr_fft.sizes[d] for d in dims]
+    pad_s = np.array(sizes) * pad_f
+    pad_s = pad_s.astype(int)
+    mask = xr.apply_ufunc(zscore, corr.fillna(0)) > z_thres
     shifts = shifts.where(mask)
-    if on == 'perframe':
+    if perframe:
         mask_diff = xr.DataArray(
             np.diff(mask.astype(int)),
             coords=dict(frame=mask.coords['frame'][1:]),
@@ -409,57 +425,45 @@ def estimate_shift_fft(varray, z_thres=None, on='first', pad_f=1):
             try:
                 next_good = gb_diff[gb_diff > 0].min() + cur_bad
                 last_good = gb_diff[gb_diff < 0].max() + cur_bad
-                cur_src = varray.sel(frame=last_good)
-                cur_dst = varray.sel(frame=next_good)
-            except KeyError or ValueError:
-                print(
-                    "unable to correct for bad frame: {}".format(int(cur_bad)))
-            cur_sh, _corr = shift_fft(cur_src, cur_dst, pad_s, pad_f)
-            shifts.loc[dict(frame=next_good)] = cur_sh
-    print("done")
-    return shifts, corr, mask
+                cur_src = varr_fft.sel(frame=last_good)
+                cur_dst = varr_fft.sel(frame=next_good)
+                res = shift_fft(cur_src, cur_dst, pad_s, pad_f)
+                shifts.loc[dict(frame=next_good.values)] = res[0:2]
+            except (KeyError, ValueError):
+                print("unable to correct for bad frame: {}".format(int(cur_bad)))
+    return shifts, mask
 
 
-def shift_fft(im_src, im_dst, pad_s=None, pad_f=1):
-    dims = list(im_dst.sizes.values())
-    if not np.iscomplex(im_src).any():
-        fft_src = npfft.fft2(im_src, pad_s)
-    else:
-        fft_src = im_src
-    fft_dst = npfft.fft2(im_dst, pad_s)
-    prod = fft_src * fft_dst.conj()
-    iprod = npfft.ifft2(prod)
-    iprod_sh = npfft.fftshift(iprod)
-    cor = np.log(np.where(iprod_sh.real > 1, iprod_sh.real, 1))
-    cor_cent = np.where(cor > np.percentile(cor, 99.9), cor, 0)
-    cur_sh = center_of_mass(cor_cent) - np.ceil(np.array(dims) / 2.0 * pad_f)
-    cur_corr = np.max(iprod.real)
-    return cur_sh, cur_corr
+def shift_fft(fft_src, fft_dst, pad_s=None, pad_f=1, pct_thres=99.99):
+    if np.isnan(fft_src).any() or np.isnan(fft_dst).any():
+        return np.array([0, 0, np.nan])
+    dims = fft_dst.shape
+    prod = fft_src * np.conj(fft_dst)
+    iprod = np.fft.ifft2(prod)
+    iprod_sh = np.fft.fftshift(iprod)
+    cor = iprod_sh.real
+    # cor = np.log(np.where(iprod_sh.real > 1, iprod_sh.real, 1))
+    cor_cent = np.where(cor > np.percentile(cor, pct_thres), cor, 0)
+    sh = center_of_mass(cor_cent) - np.ceil(np.array(dims) / 2.0 * pad_f)
+    # sh = np.unravel_index(cor.argmax(), cor.shape) - np.ceil(np.array(dims) / 2.0 * pad_f)
+    corr = np.max(iprod.real)
+    return np.concatenate([sh, corr], axis=None)
 
 
-def apply_shifts(varray, shifts, aggregate=False):
-    varr_mc = varray.copy()
-    frm_idx = shifts.coords['frame']
-    shifts_final = []
-    for i, fid in enumerate(frm_idx.values):
-        print("applying shift on frame {:5d}, progress: {:5d}/{:5d}".format(
-            fid, i, len(frm_idx.values)), end='\r')
-        if aggregate:
-            cur_sh_hist = shifts.sel(frame=slice(frm_idx[0], fid))
-            cur_shift = cur_sh_hist.sum('frame')
-        else:
-            cur_shift = shifts.sel(frame=fid)
-        try:
-            cur_sh = dict([(dim, int(np.around(cur_shift.sel(shift_dim=dim))))
-                           for dim in cur_shift.coords['shift_dim'].values])
-            fm = varr_mc.loc[dict(frame=fid)]
-            varr_mc.loc[dict(frame=fid)] = fm.shift(**cur_sh).fillna(0)
-        except ValueError:
-            print("error!")
-        shifts_final.append(cur_shift)
-    print("\ndone")
-    return varr_mc.rename(varr_mc.name + "_MotionCorrected"), xr.concat(
-        shifts_final, dim=frm_idx)
+def apply_shifts(varr, shifts):
+    sh_dim = shifts.coords['variable'].values.tolist()
+    varr_sh = xr.apply_ufunc(
+        shift_perframe, varr, shifts,
+        input_core_dims=[sh_dim, ['variable']],
+        output_core_dims=[sh_dim],
+        vectorize=True,
+        dask = 'parallelized',
+        output_dtypes = [varr.dtype])
+    return varr_sh
+
+
+def shift_perframe(fm, sh):
+    return np.roll(fm, sh, axis=np.arange(fm.ndim))
 
 
 def interpolate_frame(varr, drop_idx):

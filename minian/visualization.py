@@ -7,6 +7,7 @@ import seaborn as sns
 import pandas as pd
 import colorsys
 import param
+import dask.array as da
 from .utilities import scale_varr
 from .motion_correction import shift_fft
 from collections import OrderedDict
@@ -26,6 +27,8 @@ from bokeh.application.handlers import FunctionHandler
 from matplotlib.colors import rgb_to_hsv
 from scipy.ndimage.measurements import center_of_mass
 from IPython.core.debugger import set_trace
+from dask.diagnostics import ProgressBar
+from skvideo.io import FFmpegWriter, vwrite
 
 # def update_override(self, **kwargs):
 #     self._set_stream_parameters(**kwargs)
@@ -36,11 +39,15 @@ from IPython.core.debugger import set_trace
 
 
 class VArrayViewer():
-    def __init__(self, varr, framerate=30):
+    def __init__(self, varr, framerate=30, rerange=None):
         if isinstance(varr, list):
             varr = xr.merge(varr)
         self.ds = hv.Dataset(varr)
         self.framerate = framerate
+        self._f = varr.coords['frame'].values.tolist()
+        self._h = varr.sizes['height']
+        self._w = varr.sizes['width']
+        self.rerange = rerange
         CStream = Stream.define(
             'CStream',
             f=param.Integer(default=0, bounds=self.ds.range('frame')))
@@ -57,13 +64,15 @@ class VArrayViewer():
             cur_d = self.ds.reindex(vdims=[dim.name])
             fim = fct.partial(self._img, dat=cur_d)
             im = hv.DynamicMap(fim, streams=[self.stream])
-            im = regrid(im, height=480, width=752)
-            im = im(plot={'width': 752, 'height': 480})
+            im = regrid(im, height=self._h, width=self._w)
+            im = im(plot={'width': self._w, 'height': self._h})
+            if self.rerange:
+                im = im.redim.range(**{dim.name: self.rerange})
             xyrange = RangeXY(source=im)
             xyrange = xyrange.rename(x_range='w', y_range='h')
             fhist = fct.partial(self._hist, dat=cur_d)
             hist = hv.DynamicMap(fhist, streams=[self.stream, xyrange])
-            hist = hist(plot={'width': 200})
+            hist = hist(plot={'width': int(np.around(self._w * 0.35)), 'height': self._h})
             cur_mdict = OrderedDict()
             dmean = hv.Curve(ds_mean, kdims='frame', vdims=dim.name)
             cur_mdict['mean'] = dmean(plot={'tools': ['hover']})
@@ -91,9 +100,9 @@ class VArrayViewer():
                     width=752,
                     color_key=c_keys)
                 leg = hv.NdOverlay(legends)
-                leg = leg(plot={'width': 752, 'height': 300})
+                leg = leg(plot={'width': self._w, 'height': int(np.around(self._h * 0.6))})
                 mean = mean * leg
-            mean = mean(plot={'width': 752, 'height': 300})
+            mean = mean(plot={'width': self._w, 'height': int(np.around(self._h * 0.6))})
             vl = hv.DynamicMap(lambda f: hv.VLine(f), streams=[self.stream])
             vl = vl(style={'color': 'red'})
             image = im.relabel(group=dim.name, label='Image')
@@ -105,19 +114,18 @@ class VArrayViewer():
             len(self.ds.vdims))
 
     def _widgets(self):
-        dfrange = self.ds.range('frame')
-        w_frame = iwgt.IntSlider(
-            value=0,
-            min=dfrange[0],
-            max=dfrange[1],
-            continuous_update=False,
-            description="Frame:")
         w_paly = iwgt.Play(
-            value=0,
-            min=dfrange[0],
-            max=dfrange[1],
+            value=self._f[0],
+            min=self._f[0],
+            max=self._f[-1],
             interval=1000 / self.framerate)
-        iwgt.jslink((w_paly, 'value'), (w_frame, 'value'))
+        w_frame = iwgt.SelectionSlider(
+            value = self._f[0],
+            options = self._f,
+            continuous_update=False,
+            description="Frame:"
+        )
+        iwgt.link((w_paly, 'value'), (w_frame, 'value'))
         iwgt.interactive(self.stream.event, f=w_frame)
         return iwgt.HBox([w_paly, w_frame])
 
@@ -548,6 +556,7 @@ class AlignViewer():
         return ims * self.box.clone(link_inputs=False) + im0 * self.box + re
 
     def _save_mask0(self, _):
+        print("save mask 0")
         cur_anm = self.str_sel.anm
         cur_ss = self.str_sel.ss
         h0, hd = self.str_box.data['y0'][-1], np.round(
@@ -561,6 +570,7 @@ class AlignViewer():
             width=slice(w0, w0 + wd))] = True
 
     def _save_mask(self, _):
+        print("entering")
         cur_anm = self.str_sel.anm
         cur_ss = self.str_sel.ss
         h1, hd = self.str_box.data['y0'][-1], np.round(
@@ -586,13 +596,60 @@ class AlignViewer():
             [man_sh_w, man_sh_h],
             coords=dict(shift_dim=['width', 'height']),
             dims=['shift_dim'])
-        cur_sh, cur_cor = shift_fft(temp_src, temp_dst)
+        print("done selection")
+        temp_src_fft = np.fft.fft2(temp_src)
+        temp_dst_fft = np.fft.fft2(temp_dst)
+        cur_res = shift_fft(temp_src_fft, temp_dst_fft)
+        cur_sh = cur_res[0:2]
+        cur_cor = cur_res[2]
         cur_sh = xr.DataArray(
             np.round(cur_sh),
             coords=dict(shift_dim=list(temp_dst.dims)),
             dims=['shift_dim'])
         cur_sh = cur_sh + man_sh
         sh_dict = cur_sh.astype(int).to_series().to_dict()
+        print(sh_dict)
         self.shiftds['temps_shifted'].loc[dict(
             animal=cur_anm, session=cur_ss)] = self.temps.sel(
                 animal=cur_anm, session=cur_ss).shift(**sh_dict)
+        self.shiftds['shifts'].loc[dict(
+            animal=cur_anm, session=cur_ss)] = cur_sh
+        self.shiftds['corrs'].loc[dict(
+            animal=cur_anm, session=cur_ss)] = cur_cor
+
+        
+def generate_videos(minian, vpath, chk=None):
+    print("generating traces")
+    if not chk:
+        chk = dict(height='auto', width='auto', frame='auto')
+    A = minian['A'].chunk(dict(height=chk['height'], width=chk['width'], unit_id=-1))
+    C = minian['C'].chunk(dict(frame=chk['frame'], unit_id=-1))
+    Y = minian['Y'].chunk(dict(frame=chk['frame'], height=chk['height'], width=chk['width']))
+    org = minian['org'].chunk(dict(frame=chk['frame'], height=chk['height'], width=chk['width']))
+    AC = xr.apply_ufunc(
+        da.dot, A, C,
+        input_core_dims=[['height', 'width', 'unit_id'], ['unit_id', 'frame']],
+        output_core_dims=[['height', 'width', 'frame']],
+        dask='allowed',
+        output_dtypes=[Y.dtype])
+    res = org - AC
+    org_norm = scale_varr(org, (0, 255)).astype(np.uint8)
+    Y_norm = scale_varr(Y, (0, 255)).astype(np.uint8)
+    AC_norm = scale_varr(AC, (0, 255)).astype(np.uint8)
+    res_norm = scale_varr(res, (0, 255)).astype(np.uint8)
+#     with ProgressBar():
+#         Y_norm = Y_norm.compute()
+#         AC_norm = AC_norm.compute()
+#         res_norm = res_norm.compute()
+    vid = xr.concat([
+        xr.concat([org_norm, Y_norm], 'width'),
+        xr.concat([AC_norm, res_norm], 'width')],
+        dim='height')
+    print("writing videos")
+    with ProgressBar():
+        vwrite(vpath, vid.transpose('frame', 'height', 'width').values)
+#     vwrt = FFmpegWriter(vpath)
+#     for fid, fm in vid.rolling(frame=1):
+#         print("writing frame {}".format(fid.values), end='\r')
+#         vwrite(vpath, fm.values)
+#     vwrt.close()

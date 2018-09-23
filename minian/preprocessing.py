@@ -5,6 +5,8 @@ import functools as fct
 import cv2
 import skimage as ski
 import scipy.ndimage as ndi
+import scipy.stats as stat
+import numba as nb
 from dask import delayed, compute
 from dask.diagnostics import ProgressBar
 from collections import OrderedDict
@@ -197,7 +199,7 @@ def remove_background_perframe_old(fid, fm, varr, window):
     varr.loc[dict(frame=fid)] = f
 
 
-def remove_background(varr, method, wnd, compute=True):
+def remove_background(varr, method, wnd):
     selem = disk(wnd)
     res = xr.apply_ufunc(
         remove_background_perframe,
@@ -208,9 +210,6 @@ def remove_background(varr, method, wnd, compute=True):
         dask='parallelized',
         output_dtypes=[varr.dtype],
         kwargs=dict(method=method, wnd=wnd, selem=selem))
-    if compute:
-        with ProgressBar():
-            res = res.persist()
     return res.rename(varr.name + "_subtracted")
 
 
@@ -236,10 +235,13 @@ def gaussian_blur(varray, ksize=(3, 3), sigmaX=0):
         lambda fm: cv2.GaussianBlur(fm.values, ksize, sigmaX))
 
 
-def denoise(varr, method, compute=True, **kwargs):
-    kwargs['method'] = method
+def denoise(varr, method, **kwargs):
+    if method == 'gaussian':
+        func = cv2.GaussianBlur
+    elif method == 'anisotropic':
+        func = anisotropic_diffusion
     res = xr.apply_ufunc(
-        denoise_perframe,
+        func,
         varr,
         input_core_dims=[['height', 'width']],
         output_core_dims=[['height', 'width']],
@@ -247,9 +249,6 @@ def denoise(varr, method, compute=True, **kwargs):
         dask='parallelized',
         output_dtypes=[varr.dtype],
         kwargs=kwargs)
-    if compute:
-        with ProgressBar():
-            res = res.persist()
     return res.rename(varr.name + "_denoised")
 
 
@@ -293,7 +292,7 @@ def remove_brightspot(varr, thres=3):
 
 def remove_brightspot_perframe(fm, k_mean, thres):
     f_mean = ndi.convolve(fm, k_mean)
-    f_diff = zscore(fm - f_mean)
+    f_diff = stat.zscore(fm - f_mean)
     if thres == 'min':
         f_mask = f_diff > -np.min(f_diff)
     else:
