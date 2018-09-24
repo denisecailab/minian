@@ -224,10 +224,7 @@ def stripe_correction(varray, reduce_dim='height'):
     varr_sc = varray.astype(np.float32)
     mean1d = varray.mean(dim='frame').mean(dim=reduce_dim)
     varr_sc -= mean1d
-    return scale_varr(
-        varr_sc.rename(varray.name + "_Stripe_Corrected"), (0, 255),
-        inplace=True).astype(
-            np.uint8, copy=False)
+    return varr_sc.rename(varray.name + "_Stripe_Corrected")
 
 
 def gaussian_blur(varray, ksize=(3, 3), sigmaX=0):

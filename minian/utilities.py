@@ -338,6 +338,20 @@ def scale_varr(varr, scale=(0, 1), copy=False):
     return varr_norm
 
 
+def normalize(a, scale=(0, 1), copy=False):
+    if copy:
+        a_norm = a.copy()
+    else:
+        a_norm = a
+    a_max = np.nanmax(a_norm)
+    a_min = np.nanmin(a_norm)
+    a_norm -= a_min
+    a_norm *= 1 / (a_max - a_min)
+    a_norm *= (scale[1] - scale[0])
+    a_norm += scale[0]
+    return a_norm
+
+
 def varray_to_tif(filename, varr):
     imsave(filename, varr.transpose('frame', 'height', 'width'))
 
