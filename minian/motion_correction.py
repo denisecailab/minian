@@ -374,8 +374,6 @@ def estimate_shift_fft(varr, on='first', pad_f=1, pct_thres=None):
         dask='parallelized',
         kwargs=dict(s=pad_s),
         output_dtypes=[np.complex64])
-    with ProgressBar():
-        varr_fft = varr_fft
     if on == 'mean':
         meanfm = varr.mean('frame')
         src_fft = np.fft.fft2(meanfm, pad_s)
@@ -401,9 +399,7 @@ def estimate_shift_fft(varr, on='first', pad_f=1, pct_thres=None):
         output_dtypes=[float],
         output_sizes=dict(variable=3))
     res = res.assign_coords(variable=['height', 'width', 'corr'])
-    shifts = res.sel(variable = ['height', 'width'])
-    corr = res.sel(variable='corr')
-    return varr_fft, res
+    return res
     
 def mask_shifts(varr_fft, corr, shifts, z_thres, perframe=True, pad_f=1):
     dims = list(varr_fft.dims)
