@@ -45,18 +45,18 @@ def get_noise_fft(varr, noise_range=(0.25, 0.5), noise_method='logmexp'):
             output_dtypes=[np.complex_]).persist()
     print("computing power of noise")
     varr_fft = varr_fft.assign_coords(freq=freq_crd)
-    varr_band = varr_fft.sel(freq=slice(*noise_range))
-    varr_psd = 1 / _T * np.abs(varr_band)**2
+    varr_psd = 1 / _T * np.abs(varr_fft)**2
     with ProgressBar():
-        varr_psd = varr_psd.persist()
+        varr_psd = varr_psd.compute()
+    varr_band = varr_psd.sel(freq=slice(*noise_range))
     print("estimating noise using method {}".format(noise_method))
     if noise_method == 'mean':
-        sn = np.sqrt(varr_psd.mean('freq'))
+        sn = np.sqrt(varr_band.mean('freq'))
     elif noise_method == 'median':
-        sn = np.sqrt(varr_psd.median('freq'))
+        sn = np.sqrt(varr_band.median('freq'))
     elif noise_method == 'logmexp':
-        eps = np.finfo(varr_psd.dtype).eps
-        sn = np.sqrt(np.exp(np.log(varr_psd + eps).mean('freq')))
+        eps = np.finfo(varr_band.dtype).eps
+        sn = np.sqrt(np.exp(np.log(varr_band + eps).mean('freq')))
     with ProgressBar():
         sn = sn.persist()
     return sn, varr_psd
