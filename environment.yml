@@ -1,35 +1,52 @@
+name: minian
 channels:
+  - ostrokach-forge
+  - numba
+  - lukepfister
+  - cvxgrp
   - ioam
-  - bokeh
   - conda-forge
   - defaults
 dependencies:
-  - datashader=0.6.5
-  - ipywidgets=7.1.0
-  - tifffile=0.12.1
-  - widgetsnbextension=3.1.0
-  - bokeh=0.12.14
-  - dask=0.15.4
-  - ffmpeg=3.4
-  - ipython=6.1.0
-  - matplotlib=2.1.2
-  - mkl=2018.0.1
-  - natsort=5.2.0
-  - numpy=1.13.3
-  - pandas=0.22.0
-  - plotly=2.4.1
-  - scikit-image=0.13.1
-  - scipy=1.0.0
+  - bokeh=0.13.0
+  - bottleneck=1.2.1
+  - cairo=1.14.10
+  - dask=0.19.1
+  - datashader=0.6.6
+  - ffmpeg=4.0
+  - graphviz=2.38.0
+  - holoviews=1.10.7
+  - jupyter=1.0.0
+  - mkl_fft=1.0.6
+  - natsort=5.3.3
+  - netcdf4=1.4.1
+  - networkx=2.1
+  - param=1.6.1
+  - pycairo=1.13.3
+  - pyfftw=0.10.4
+  - python=3.6.5
+  - scikit-image=0.14.0
   - seaborn=0.8.1
-  - xarray=0.10.0
-  - holoviews=1.9.5
-  - param=1.5.1
+  - xarray=0.10.8
+  - cvxpy=1.0.6
+  - cudatoolkit=9.0
+  - mkl=2018.0.3
+  - numpy=1.14.5
+  - scipy=1.1.0
   - paramnb=2.0.2
+  - pycuda=master
+  - scikits.cuda=0.5.1
+  - numba=0.40.0dev0
+  - graph-tool=2.26
+  - widgetsnbextension=3.4.1
+  - ipywidgets=7.4.1
   - pip:
-    - dash==0.20.0
-    - dash-core-components==0.18.1
-    - dash-html-components==0.8.0
-    - dash-renderer==0.11.3
+    - medpy==0.3.0
+    - msgpack==0.5.6
     - opencv-contrib-python==3.3.0.10
+    - peakutils==1.1.0
+    - pydicom==1.1.0
+    - pyment==0.3.2
+    - scikit-cuda==0.5.2
     - sk-video==1.1.8
 
