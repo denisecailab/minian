@@ -93,6 +93,8 @@ def estimate_shifts(mn_list,
             "estimating shifts: {:2d}/{:2d}".format(itemp, len(temps)))
         if method == 'first':
             temp_src = temps[0]
+        elif method == 'last':
+            temp_src = temps[-1]
         # common = (temp_src.isnull() + temp_dst.isnull())
         # temp_src = temp_src.reindex_like(common)
         # temp_dst = temp_dst.reindex_like(common)
