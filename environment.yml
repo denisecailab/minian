@@ -42,11 +42,7 @@ dependencies:
   - ipywidgets=7.4.1
   - pip:
     - medpy==0.3.0
-    - msgpack==0.5.6
     - opencv-contrib-python==3.3.0.10
-    - peakutils==1.1.0
-    - pydicom==1.1.0
-    - pyment==0.3.2
     - scikit-cuda==0.5.2
     - sk-video==1.1.8
 
