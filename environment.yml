@@ -2,7 +2,6 @@ name: minian
 channels:
   - ostrokach-forge
   - numba
-  - lukepfister
   - cvxgrp
   - ioam
   - conda-forge
@@ -40,6 +39,8 @@ dependencies:
   - graph-tool=2.26
   - widgetsnbextension=3.4.1
   - ipywidgets=7.4.1
+  - tifffile=0.15.1
+  - scikit-learn=0.20.0
   - pip:
     - medpy==0.3.0
     - opencv-contrib-python==3.3.0.10
