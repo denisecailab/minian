@@ -221,7 +221,7 @@ def remove_background_perframe(fm, method, wnd, selem):
 
 
 def stripe_correction(varray, reduce_dim='height'):
-    varr_sc = varray.astype(np.float32)
+    varr_sc = varray.copy()
     mean1d = varray.mean(dim='frame').mean(dim=reduce_dim)
     varr_sc -= mean1d
     return varr_sc.rename(varray.name + "_Stripe_Corrected")
