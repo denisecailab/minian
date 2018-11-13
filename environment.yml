@@ -33,8 +33,6 @@ dependencies:
   - numpy=1.14.5
   - scipy=1.1.0
   - paramnb=2.0.2
-  - pycuda=master
-  - scikits.cuda=0.5.1
   - numba=0.40.0dev0
   - graph-tool=2.26
   - widgetsnbextension=3.4.1
@@ -44,6 +42,4 @@ dependencies:
   - pip:
     - medpy==0.3.0
     - opencv-contrib-python==3.3.0.10
-    - scikit-cuda==0.5.2
     - sk-video==1.1.8
-
