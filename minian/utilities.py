@@ -506,10 +506,11 @@ def save_variable(var, fpath, fname, meta_dict=None):
     return ds
 
 
-def update_meta(dpath, pattern=r'^minian.nc$', meta_dict=None):
+def update_meta(dpath, pattern=r'^minian\.nc$', meta_dict=None):
     for dirpath, dirnames, fnames in os.walk(dpath):
         fnames = filter(lambda fn: re.search(pattern, fn), fnames)
         for fname in fnames:
+            f_path = os.path.join(dirpath, fname)
             pathlist = os.path.normpath(dirpath).split(os.sep)
             new_ds = xr.Dataset()
             with xr.open_dataset(f_path) as old_ds:
