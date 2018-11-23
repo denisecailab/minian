@@ -65,10 +65,12 @@ def local_max(fm, wnd):
 
 def gmm_refine(varr, seeds, q=(0.1, 99.9)):
     print("reshaping data array")
-    varr_sub = varr.where(seeds > 0).stack(sample=('height',
-                                                   'width')).dropna('sample')
-    seeds_ref = seeds.where(seeds > 0).stack(sample=('height',
-                                                     'width')).dropna('sample')
+    varr_sub = (varr.where(seeds > 0)
+                .stack(sample=('height', 'width'))
+                .dropna('sample', how='all'))
+    seeds_ref = (seeds.where(seeds > 0)
+                 .stack(sample=('height', 'width'))
+                 .dropna('sample', how='all'))
     print("computing peak-valley values")
     varr_valley = xr.apply_ufunc(
         np.percentile,
@@ -99,10 +101,12 @@ def gmm_refine(varr, seeds, q=(0.1, 99.9)):
 
 def pnr_refine(varr, seeds, thres=1.5):
     print("reshaping data array")
-    varr_sub = varr.where(seeds > 0).stack(sample=('height',
-                                                   'width')).dropna('sample')
-    seeds_ref = seeds.where(seeds > 0).stack(sample=('height',
-                                                     'width')).dropna('sample')
+    varr_sub = (varr.where(seeds > 0)
+                .stack(sample=('height', 'width'))
+                .dropna('sample', how='all'))
+    seeds_ref = (seeds.where(seeds > 0)
+                 .stack(sample=('height', 'width'))
+                 .dropna('sample', how='all'))
     print("computing peak-noise ratio")
     varr_fft = xr.apply_ufunc(
         npfft.fft,
@@ -161,10 +165,12 @@ def intensity_refine(varr, seeds):
 
 
 def ks_refine(varr, seeds, sig=0.05):
-    varr_sub = varr.where(seeds > 0).stack(sample=('height',
-                                                   'width')).dropna('sample')
-    seeds_ref = seeds.where(seeds > 0).stack(sample=('height',
-                                                     'width')).dropna('sample')
+    varr_sub = (varr.where(seeds > 0)
+                .stack(sample=('height', 'width'))
+                .dropna('sample', how='all'))
+    seeds_ref = (seeds.where(seeds > 0)
+                 .stack(sample=('height', 'width'))
+                 .dropna('sample', how='all'))
     ks = xr.apply_ufunc(
         lambda x: kstest(zscore(x), 'norm')[1],
         varr_sub.chunk(dict(frame=-1, sample='auto')),
@@ -177,10 +183,12 @@ def ks_refine(varr, seeds, sig=0.05):
 
 
 def seeds_merge(varr, seeds, thres_dist=5, thres_corr=0.6):
-    varr_sub = varr.where(seeds > 0).stack(sample=('height',
-                                                   'width')).dropna('sample')
-    seeds_ref = seeds.where(seeds > 0).stack(sample=('height',
-                                                     'width')).dropna('sample')
+    varr_sub = (varr.where(seeds > 0)
+                .stack(sample=('height', 'width'))
+                .dropna('sample', how='all'))
+    seeds_ref = (seeds.where(seeds > 0)
+                 .stack(sample=('height', 'width'))
+                 .dropna('sample', how='all'))
     varr_max = varr.max('frame').where(seeds > 0).stack(
         sample=('height', 'width')).dropna('sample').compute()
     crds = seeds_ref.coords
@@ -231,8 +239,9 @@ def initialize(varr, seeds, thres_corr=0.8, wnd=10, schd='processes', chk=None):
     print("reshaping video array")
     old_err = np.seterr(divide='raise')
     varr_flt = varr.stack(sample=('height', 'width'))
-    seeds_ref = seeds.where(seeds > 0).stack(sample=('height',
-                                                     'width')).dropna('sample')
+    seeds_ref = (seeds.where(seeds > 0)
+                 .stack(sample=('height', 'width'))
+                 .dropna('sample', how='all'))
     res = []
     print("creating parallel schedule")
     for cur_crd, cur_sd in seeds_ref.groupby('sample'):
