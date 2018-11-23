@@ -4,12 +4,15 @@ import re
 import gc
 import matplotlib
 import pickle as pkl
-import skvideo.io as sio
+import skvideo.io as skv
+import skimage.io as ski
 import xarray as xr
 import numpy as np
 import functools as fct
 import holoviews as hv
 import dask as da
+import dask.array.image as daim
+import subprocess
 from copy import deepcopy
 from scipy import ndimage as ndi
 from scipy.io import loadmat
@@ -82,7 +85,7 @@ def load_videos(vpath,
                 dat_list.append(ncname)
             else:
                 print("processing {}".format(vname), end='\r')
-                cur_v = sio.vread(vname, as_grey=True).astype(dtype).squeeze()
+                cur_v = skv.vread(vname, as_grey=True).astype(dtype).squeeze()
                 crd_f = np.arange(cur_v.shape[0]) + f_start
                 f_start = f_start + cur_v.shape[0]
                 cur_varr = xr.DataArray(
@@ -109,7 +112,27 @@ def load_videos(vpath,
             return xr.concat(dat_list, 'frame').rename(ssname)
         else:
             return xr.open_mfdataset(dat_list, concat_dim='frame', autoclose=True)[ssname]
-            
+
+def video_to_tiffs(ipath, opath, iptn='msCam[0-9]+\.avi$', optn='msCam-%05d.tiff'):
+    flist = natsorted([os.path.join(ipath, v) for v in os.listdir(ipath) if re.search(iptn, v)])
+    istr = "|".join(flist)
+    ostr = os.path.join(opath, optn)
+    cmd = 'ffmpeg -i "concat:{}" -pix_fmt rgba -compression_algo raw {}'.format(istr, ostr)
+    try:
+        os.makedirs(opath)
+    except OSError:
+        if not os.path.isdir(path):
+            raise
+    print("output directory: {}".format(opath))
+    subprocess.check_call(cmd, shell=True)
+        
+def load_images(path):
+    imread = fct.partial(ski.imread, as_gray=True)
+    varr = daim.imread(path, imread)
+    varr = xr.DataArray(varr, dims=['frame', 'height', 'width'])
+    for dim, length in varr.sizes.items():
+        varr = varr.assign_coords(**{dim: np.arange(length)})
+    return varr
 
 def create_fig(varlist, nrows, ncols, **kwargs):
     if not isinstance(varlist, list):
@@ -224,7 +247,7 @@ def save_video(movpath, fname_mov_orig, fname_mov_rig, fname_AC, fname_ACbf,
     mov_rig = np.load(fname_mov_rig, mmap_mode='r')
     mov_ac = np.load(fname_AC, mmap_mode='r')
     mov_acbf = np.load(fname_ACbf, mmap_mode='r')
-    vw = sio.FFmpegWriter(
+    vw = skv.FFmpegWriter(
         movpath, inputdict={'-framerate': '30'}, outputdict={'-r': '30'})
     for fidx in range(0, mov_orig.shape[0], dsratio):
         print("writing frame: " + str(fidx))
@@ -324,17 +347,18 @@ def varr_to_float32(varr):
     return varr_norm
 
 
-def scale_varr(varr, scale=(0, 1), copy=False):
-    if copy:
-        varr_norm = varr.copy()
-    else:
+def scale_varr(varr, scale=(0, 1), inplace=False):
+    varr_max = varr.max()
+    varr_min = varr.min()
+    if inplace:
         varr_norm = varr
-    varr_max = varr_norm.max()
-    varr_min = varr_norm.min()
-    varr_norm -= varr_min
-    varr_norm *= 1 / (varr_max - varr_min)
-    varr_norm *= (scale[1] - scale[0])
-    varr_norm += scale[0]
+        varr_norm -= varr_min
+        varr_norm *= 1 / (varr_max - varr_min)
+        varr_norm *= (scale[1] - scale[0])
+        varr_norm += scale[0]
+    else:
+        varr_norm = ((varr - varr_min) * (scale[1] - scale[0])
+                     / (varr_max - varr_min)) + scale[0]
     return varr_norm
 
 
