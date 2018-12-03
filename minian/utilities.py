@@ -12,7 +12,9 @@ import functools as fct
 import holoviews as hv
 import dask as da
 import dask.array.image as daim
+import dask.array as darr
 import subprocess
+import cv2
 from copy import deepcopy
 from scipy import ndimage as ndi
 from scipy.io import loadmat
@@ -126,13 +128,20 @@ def video_to_tiffs(ipath, opath, iptn='msCam[0-9]+\.avi$', optn='msCam-%05d.tiff
     print("output directory: {}".format(opath))
     subprocess.check_call(cmd, shell=True)
         
-def load_images(path):
-    imread = fct.partial(ski.imread, as_gray=True)
+def load_images(path, dtype=np.float64):
+    # imread = fct.partial(ski.imread, as_gray=True)
+    imread = fct.partial(imread_cv, dtype=dtype)
     varr = daim.imread(path, imread)
     varr = xr.DataArray(varr, dims=['frame', 'height', 'width'])
     for dim, length in varr.sizes.items():
         varr = varr.assign_coords(**{dim: np.arange(length)})
     return varr
+
+
+def imread_cv(im, dtype=np.float64):
+    return (cv2.imread(im, flags=cv2.IMREAD_GRAYSCALE)
+            .astype(dtype))
+
 
 def create_fig(varlist, nrows, ncols, **kwargs):
     if not isinstance(varlist, list):
@@ -360,6 +369,11 @@ def scale_varr(varr, scale=(0, 1), inplace=False):
         varr_norm = ((varr - varr_min) * (scale[1] - scale[0])
                      / (varr_max - varr_min)) + scale[0]
     return varr_norm
+
+
+def scale_varr_da(varr, scale=(0, 1)):
+    return ((varr - darr.nanmin(varr)) * (scale[1] - scale[0])
+           / (darr.nanmax(varr) - darr.nanmin(varr))) + scale[0]
 
 
 def normalize(a, scale=(0, 1), copy=False):
