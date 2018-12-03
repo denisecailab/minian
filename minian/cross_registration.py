@@ -8,6 +8,7 @@ import dask as da
 from dask.diagnostics import ProgressBar
 from scipy.ndimage.measurements import center_of_mass
 from scipy.stats import pearsonr
+from .preprocessing import remove_background
 from .motion_correction import shift_fft
 from IPython.core.debugger import set_trace
 
@@ -62,6 +63,7 @@ def get_minian_list(path, pattern=r'^minian.nc$'):
 def estimate_shifts(mn_list,
                     temp_list,
                     z_thres=None,
+                    remove_background=False,
                     method='first',
                     concat_dim='session'):
     temps = []
@@ -73,31 +75,36 @@ def estimate_shifts(mn_list,
                 mn_path, chunks=dict(width='auto', height='auto'))['org'] as cur_va:
                 if temp_list[imn] == 'first':
                     cur_temp = cur_va.isel(frame=0).load().copy()
-                    temps.append(cur_temp)
                 elif temp_list[imn] == 'last':
                     cur_temp = cur_va.isel(frame=-1).load().copy()
-                    temps.append(cur_temp)
                 elif temp_list[imn] == 'mean':
-                    cur_temp = (cur_va.astype(np.float32).mean('frame'))
+                    cur_temp = (cur_va.mean('frame'))
                     with ProgressBar():
                         cur_temp = cur_temp.compute()
-                    temps.append(cur_temp)
                 else:
                     print("unrecognized template")
+                    continue
+                if remove_background:
+                    cur_temp = remove_background(cur_temp, 'uniform', wnd=51)
+                temps.append(cur_temp)
         except KeyError:
             print("no video found for path {}".format(mn_path))
+    if concat_dim:
+        temps = xr.concat(temps, dim=concat_dim).rename('temps')
+        window = ~temps.isnull().sum(concat_dim).astype(bool)
+        temps = temps.where(window, drop=True)
     shifts = []
     corrs = []
-    for itemp, temp_dst in enumerate(temps):
-        print(
-            "estimating shifts: {:2d}/{:2d}".format(itemp, len(temps)))
+    for itemp, temp_dst in temps.rolling(**{concat_dim: 1}):
+        print("processing: {}".format(itemp.values))
         if method == 'first':
-            temp_src = temps[0]
+            temp_src = temps.isel(**{concat_dim: 0})
         elif method == 'last':
-            temp_src = temps[-1]
+            temp_src = temps.isel(**{concat_dim: -1})
         # common = (temp_src.isnull() + temp_dst.isnull())
         # temp_src = temp_src.reindex_like(common)
         # temp_dst = temp_dst.reindex_like(common)
+        temp_src, temp_dst = temp_src.squeeze(), temp_dst.squeeze()
         src_fft = np.fft.fft2(temp_src)
         dst_fft = np.fft.fft2(temp_dst)
         cur_res = shift_fft(src_fft, dst_fft)
@@ -126,7 +133,7 @@ def estimate_shifts(mn_list,
 
 def apply_shifts(var, shifts, inplace=False, dim='session'):
     shifts = shifts.dropna(dim)
-    var_sh = var.astype('O', copy=not inplace)
+    var_sh = var.astype('O', copy=not inplace).load()
     for dim_n, sh in shifts.groupby(dim):
         sh_dict = sh.astype(int).to_series().to_dict()
         var_sh.loc[{dim: dim_n}] = var_sh.loc[{dim: dim_n}].shift(**sh_dict)

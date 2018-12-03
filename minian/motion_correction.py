@@ -431,6 +431,10 @@ def mask_shifts(varr_fft, corr, shifts, z_thres, perframe=True, pad_f=1):
 
 
 def shift_fft(fft_src, fft_dst, pad_s=None, pad_f=1, pct_thres=99.99):
+    if not np.iscomplexobj(fft_src):
+        fft_src = np.fft.fft2(fft_src)
+    if not np.iscomplexobj(fft_dst):
+        fft_dst = np.fft.fft2(fft_dst)
     if np.isnan(fft_src).any() or np.isnan(fft_dst).any():
         return np.array([0, 0, np.nan])
     dims = fft_dst.shape
