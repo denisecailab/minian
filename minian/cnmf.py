@@ -61,6 +61,63 @@ def get_noise_fft(varr, noise_range=(0.25, 0.5), noise_method='logmexp'):
         sn = sn.persist()
     return sn, varr_psd
 
+def psd_fft(varr): 
+    _T = len(varr.coords['frame'])
+    ns = _T // 2 + 1
+    if _T % 2 == 0:
+        freq_crd = np.linspace(0, 0.5, ns)
+    else:
+        freq_crd = np.linspace(0, 0.5 * (_T - 1) / _T, ns)
+    print("computing psd of input")
+    with ProgressBar():
+        varr_fft = xr.apply_ufunc(
+            dafft.rfft,
+            varr.chunk(dict(frame=-1)),
+            input_core_dims=[['frame']],
+            output_core_dims=[['freq']],
+            dask='allowed',
+            output_sizes=dict(freq=ns),
+            output_dtypes=[np.complex_]).persist()
+    varr_fft = varr_fft.assign_coords(freq=freq_crd)
+    varr_psd = 1 / _T * np.abs(varr_fft)**2
+    return varr_psd
+
+def psd_welch(varr):
+    _T = len(varr.coords['frame'])
+    ns = _T // 2 + 1
+    if _T % 2 == 0:
+        freq_crd = np.linspace(0, 0.5, ns)
+    else:
+        freq_crd = np.linspace(0, 0.5 * (_T - 1) / _T, ns)
+    varr_psd = xr.apply_ufunc(
+            _welch,
+            varr.chunk(dict(frame=-1, height='auto', width='auto')),
+            input_core_dims=[['frame']],
+            output_core_dims=[['freq']],
+            dask='parallelized',
+            vectorize=True,
+            kwargs=dict(nperseg=_T),
+            output_sizes=dict(freq=ns),
+            output_dtypes=[varr.dtype])
+    varr_psd = varr_psd.assign_coords(freq=freq_crd)
+    return varr_psd
+
+def _welch(x, **kwargs):
+    return welch(x, **kwargs)[1]
+
+def get_noise(psd, noise_range=(0.25, 0.5), noise_method='logmexp'): 
+    psd_band = psd.sel(freq=slice(*noise_range))
+    print("estimating noise using method {}".format(noise_method))
+    if noise_method == 'mean':
+        sn = np.sqrt(psd_band.mean('freq'))
+    elif noise_method == 'median':
+        sn = np.sqrt(psd_band.median('freq'))
+    elif noise_method == 'logmexp':
+        eps = np.finfo(psd_band.dtype).eps
+        sn = np.sqrt(np.exp(np.log(psd_band + eps).mean('freq')))
+    with ProgressBar():
+        sn = sn.persist()
+    return sn 
 
 def get_noise_welch(varr,
                     noise_range=(0.25, 0.5),
@@ -200,6 +257,7 @@ def update_temporal(Y,
                     jac_thres = 0.1,
                     use_spatial=False,
                     sparse_penal=1,
+                    zero_thres=1e-8,
                     max_iters=200,
                     use_smooth=True,
                     compute=True,
@@ -420,7 +478,13 @@ def update_temporal(Y,
     B_new = result.isel(trace=2).drop('unit_labels').dropna('unit_id')
     C0_new = result.isel(trace=3).drop('unit_labels').dropna('unit_id')
     sig = result.isel(trace=4).drop('unit_labels').dropna('unit_id')
-    return YrA, C_new, S_new, B_new, C0_new, sig, g
+    g = g.sel(unit_id=C_new.coords['unit_id'])
+    mask = S_new.where(S_new > zero_thres).fillna(0).sum('frame').astype(bool)
+    mask_coord = mask.where(~mask, drop=True).coords['unit_id'].values
+    print("{} units dropped due to poor fit:\n {}".format(len(mask_coord), str(mask_coord)))
+    return (YrA, C_new.where(mask, drop=True), S_new.where(mask, drop=True),
+            B_new, C0_new.where(mask, drop=True), sig.where(mask,drop=True),
+            g.where(mask, drop=True))
 
 
 def get_ar_coef(y, sn, p, add_lag, pad=None):
