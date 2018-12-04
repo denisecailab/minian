@@ -635,7 +635,7 @@ def generate_videos(minian, vpath, chk=None):
         output_core_dims=[['height', 'width', 'frame']],
         dask='allowed',
         output_dtypes=[Y.dtype])
-    res = org - AC
+    res = scale_varr(org) - scale_varr(AC)
     org_norm = scale_varr(org, (0, 255)).astype(np.uint8)
     Y_norm = scale_varr(Y, (0, 255)).astype(np.uint8)
     AC_norm = scale_varr(AC, (0, 255)).astype(np.uint8)
@@ -679,6 +679,10 @@ def construct_pulse_response(g):
     s[10] = 1
     c = convolve_G(s, g)
     return s, c
+
+
+def visualize_seeds(Y, seeds):
+    pass
 
 def visualize_temporal_update(YA, C, S, g, sig, norm=True):
     if norm:
