@@ -544,6 +544,17 @@ def save_variable(var, fpath, fname, meta_dict=None):
     return ds
 
 
+def delete_variable(fpath, varlist, del_org=False):
+    fpath_bak = fpath + ".backup"
+    os.rename(fpath, fpath_bak)
+    with xr.open_dataset(fpath_bak) as ds:
+        new_ds = ds.drop(varlist)
+        new_ds.to_netcdf(fpath)
+    if del_org:
+        os.remove(fpath_bak)
+    return "deleted {} in file {}".format(str(varlist), fpath)
+
+
 def update_meta(dpath, pattern=r'^minian\.nc$', meta_dict=None):
     for dirpath, dirnames, fnames in os.walk(dpath):
         fnames = filter(lambda fn: re.search(pattern, fn), fnames)
