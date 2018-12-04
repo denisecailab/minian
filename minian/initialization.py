@@ -16,7 +16,7 @@ from sklearn.mixture import GaussianMixture
 from IPython.core.debugger import set_trace
 
 
-def seeds_init(varr, wnd_size=500, method='rolling', stp_size=200, nchunk=100):
+def seeds_init(varr, wnd_size=500, method='rolling', stp_size=200, nchunk=100, max_wnd=10):
     print("constructing chunks")
     idx_fm = varr.coords['frame']
     nfm = len(idx_fm)
@@ -48,10 +48,13 @@ def seeds_init(varr, wnd_size=500, method='rolling', stp_size=200, nchunk=100):
         vectorize=True,
         dask='parallelized',
         output_dtypes=[np.uint8],
-        kwargs=dict(wnd=20)).sum('sample')
+        kwargs=dict(wnd=max_wnd)).sum('sample')
     with ProgressBar():
         loc_max = loc_max.compute()
-    return loc_max
+    loc_max_flt = loc_max.stack(spatial=['height', 'width'])
+    seeds = (loc_max_flt.where(loc_max_flt > 0, drop=True)
+             .rename('seeds').to_dataframe().reset_index())
+    return seeds[['height', 'width', 'seeds']].reset_index()
 
 
 def max_proj_frame(varr, idx):
@@ -64,13 +67,9 @@ def local_max(fm, wnd):
 
 
 def gmm_refine(varr, seeds, q=(0.1, 99.9)):
-    print("reshaping data array")
-    varr_sub = (varr.where(seeds > 0)
-                .stack(sample=('height', 'width'))
-                .dropna('sample', how='all'))
-    seeds_ref = (seeds.where(seeds > 0)
-                 .stack(sample=('height', 'width'))
-                 .dropna('sample', how='all'))
+    print("selecting seeds")
+    varr_sub = varr.sel(
+        spatial=[tuple(hw) for hw in seeds[['height', 'width']].values])
     print("computing peak-valley values")
     varr_valley = xr.apply_ufunc(
         np.percentile,
@@ -95,18 +94,14 @@ def gmm_refine(varr, seeds, q=(0.1, 99.9)):
     gmm.fit(dat)
     idg = gmm.means_.argmax()
     idx_valid = gmm.predict(dat) == idg
-    seeds_ref = seeds_ref.isel(sample=idx_valid)
-    return seeds_ref.unstack('sample').fillna(0)
+    seeds['mask_gmm'] = idx_valid
+    return seeds
 
 
 def pnr_refine(varr, seeds, thres=1.5):
-    print("reshaping data array")
-    varr_sub = (varr.where(seeds > 0)
-                .stack(sample=('height', 'width'))
-                .dropna('sample', how='all'))
-    seeds_ref = (seeds.where(seeds > 0)
-                 .stack(sample=('height', 'width'))
-                 .dropna('sample', how='all'))
+    print("selecting seeds") 
+    varr_sub = varr.sel(
+        spatial=[tuple(hw) for hw in seeds[['height', 'width']].values])
     print("computing peak-noise ratio")
     varr_fft = xr.apply_ufunc(
         npfft.fft,
@@ -146,12 +141,17 @@ def pnr_refine(varr, seeds, thres=1.5):
     mask = (varr_sub_ptp / varr_ifft_ptp) > thres
     with ProgressBar():
         mask = mask.compute()
-    seeds_ref = seeds_ref.where(mask).dropna('sample')
-    return seeds_ref.unstack('sample').fillna(0)
+    mask_df = mask.to_pandas().rename('mask_pnr').reset_index()
+    seeds = pd.merge(seeds, mask_df, on=['height', 'width'], how='left')
+    return seeds
 
 
 def intensity_refine(varr, seeds):
-    fm_max = varr.max('frame')
+    try:
+        fm_max = varr.max('frame')
+    except ValueError:
+        print("using input as max projection")
+        fm_max = varr
     bins = np.around(
         fm_max.sizes['height'] * fm_max.sizes['width'] / 10).astype(int)
     hist, edges = np.histogram(fm_max, bins=bins)
@@ -160,29 +160,32 @@ def intensity_refine(varr, seeds):
     except IndexError:
         print("threshold out of bound, returning input")
         return seeds
-    seeds_ref = seeds.where(fm_max > thres).fillna(0)
-    return seeds_ref
+    mask = (fm_max > thres).stack(spatial=['height', 'width'])
+    mask_df = mask.to_pandas().rename('mask_int').reset_index()
+    seeds = pd.merge(seeds, mask_df, on=['height', 'width'], how='left')
+    return seeds
 
 
 def ks_refine(varr, seeds, sig=0.05):
-    varr_sub = (varr.where(seeds > 0)
-                .stack(sample=('height', 'width'))
-                .dropna('sample', how='all'))
-    seeds_ref = (seeds.where(seeds > 0)
-                 .stack(sample=('height', 'width'))
-                 .dropna('sample', how='all'))
+    print("selecting seeds")
+    varr_sub = varr.sel(
+        spatial=[tuple(hw) for hw in seeds[['height', 'width']].values])
+    print("performing KS test")
     ks = xr.apply_ufunc(
         lambda x: kstest(zscore(x), 'norm')[1],
-        varr_sub.chunk(dict(frame=-1, sample='auto')),
+        varr_sub.chunk(dict(frame=-1, spatial='auto')),
         input_core_dims=[['frame']],
         vectorize=True,
         dask='parallelized',
         output_dtypes=[float])
-    seeds_ref = seeds_ref.where(ks < sig).dropna('sample')
-    return seeds_ref.unstack('sample').fillna(0)
+    mask = ks < sig
+    mask_df = mask.to_pandas().rename('mask_ks').reset_index()
+    seeds = pd.merge(seeds, mask_df, on=['height', 'width'], how='left')
+    return seeds
 
 
 def seeds_merge(varr, seeds, thres_dist=5, thres_corr=0.6):
+    seeds_ref = 
     varr_sub = (varr.where(seeds > 0)
                 .stack(sample=('height', 'width'))
                 .dropna('sample', how='all'))
