@@ -185,7 +185,6 @@ def ks_refine(varr, seeds, sig=0.05):
 
 
 def seeds_merge(varr, seeds, thres_dist=5, thres_corr=0.6):
-    seeds_ref = 
     varr_sub = (varr.where(seeds > 0)
                 .stack(sample=('height', 'width'))
                 .dropna('sample', how='all'))
