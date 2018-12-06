@@ -14,6 +14,7 @@ from scipy.stats import zscore, kstest
 from scipy.spatial.distance import pdist, squareform
 from sklearn.mixture import GaussianMixture
 from IPython.core.debugger import set_trace
+from scipy.signal import butter, lfilter
 
 
 def seeds_init(varr, wnd_size=500, method='rolling', stp_size=200, nchunk=100, max_wnd=10):
@@ -98,32 +99,20 @@ def gmm_refine(varr, seeds, q=(0.1, 99.9)):
     return seeds
 
 
-def pnr_refine(varr, seeds, thres=1.5):
+def pnr_refine(varr, seeds, noise_freq=0.25, thres=1.5):
     print("selecting seeds") 
     varr_sub = varr.sel(
         spatial=[tuple(hw) for hw in seeds[['height', 'width']].values])
     print("computing peak-noise ratio")
-    varr_fft = xr.apply_ufunc(
-        npfft.fft,
+    but_b, but_a = butter(2, noise_freq, btype='high', analog=False)
+    varr_noise = xr.apply_ufunc(
+        lambda x: lfilter(but_b, but_a, x),
         varr_sub.chunk(dict(frame=-1)),
         input_core_dims=[['frame']],
         output_core_dims=[['frame']],
         vectorize=True,
-        dask='allowed',
-        output_dtypes=[np.complex128]).compute()
-    fidx = varr_fft.coords['frame']
-    cut25, cut75 = np.around(fidx.quantile(0.25)), np.around(
-        fidx.quantile(0.75))
-    varr_fft.loc[dict(frame=slice(0, cut25))] = 0
-    varr_fft.loc[dict(frame=slice(cut75, len(fidx)))] = 0
-    varr_ifft = xr.apply_ufunc(
-        npfft.ifft,
-        varr_fft.chunk(dict(frame=-1)),
-        input_core_dims=[['frame']],
-        output_core_dims=[['frame']],
-        vectorize=True,
-        dask='allowed',
-        output_dtypes=[np.complex128]).compute()
+        dask='parallelized',
+        output_dtypes=[varr_sub.dtype])
     varr_sub_ptp = xr.apply_ufunc(
         np.ptp,
         varr_sub.chunk(dict(frame=-1)),
@@ -131,19 +120,20 @@ def pnr_refine(varr, seeds, thres=1.5):
         dask='parallelized',
         vectorize=True,
         output_dtypes=[varr_sub.dtype]).compute()
-    varr_ifft_ptp = xr.apply_ufunc(
+    varr_noise_ptp = xr.apply_ufunc(
         np.ptp,
-        varr_ifft.chunk(dict(frame=-1)).real,
+        varr_noise.chunk(dict(frame=-1)).real,
         input_core_dims=[['frame']],
         dask='parallelized',
         vectorize=True,
         output_dtypes=[varr_sub.dtype]).compute()
-    mask = (varr_sub_ptp / varr_ifft_ptp) > thres
+    pnr = varr_sub_ptp / varr_noise_ptp
+    mask = pnr > thres
     with ProgressBar():
         mask = mask.compute()
     mask_df = mask.to_pandas().rename('mask_pnr').reset_index()
     seeds = pd.merge(seeds, mask_df, on=['height', 'width'], how='left')
-    return seeds
+    return seeds, pnr
 
 
 def intensity_refine(varr, seeds):
@@ -249,8 +239,8 @@ def initialize(varr, seeds, thres_corr=0.8, wnd=10, schd='processes', chk=None):
     for cur_crd, cur_sd in seeds_ref.groupby('sample'):
         cur_sur = (slice(cur_crd[0] - wnd, cur_crd[0] + wnd),
                    slice(cur_crd[1] - wnd, cur_crd[1] + wnd))
-        sd = varr_flt.sel(sample=cur_crd).load()
-        sur = varr_flt.sel(sample=cur_sur).load()
+        sd = varr_flt.sel(sample=cur_crd)
+        sur = varr_flt.sel(sample=cur_sur)
         cur_res = delayed(initialize_perseed)(cur_crd, sd, sur, thres_corr)
         # cur_res = initialize_perseed(cur_crd, sd, sur, thres_corr)
         res.append(cur_res)
