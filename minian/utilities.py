@@ -2,6 +2,7 @@ import glob
 import os
 import re
 import gc
+import time
 import matplotlib
 import pickle as pkl
 import skvideo.io as skv
@@ -545,7 +546,7 @@ def save_variable(var, fpath, fname, meta_dict=None):
 
 
 def delete_variable(fpath, varlist, del_org=False):
-    fpath_bak = fpath + ".backup"
+    fpath_bak = fpath + ".{}.backup".format(int(time.time()))
     os.rename(fpath, fpath_bak)
     with xr.open_dataset(fpath_bak) as ds:
         new_ds = ds.drop(varlist)
