@@ -161,6 +161,7 @@ def update_spatial(Y,
                    dl_wnd=5,
                    sparse_penal=0.5,
                    update_background=False,
+                   zero_thres='eps',
                    compute=True):
     _T = len(Y.coords['frame'])
     # print(
@@ -219,6 +220,9 @@ def update_spatial(Y,
     if compute:
         with ProgressBar():
             A_new = A_new.compute()
+    if zero_thres == 'eps':
+        zero_thres = np.finfo(A_new.dtype).eps
+    A_new = A_new.where(A_new > zero_thres).fillna(0)
     if update_background:
         b_new = A_new.sel(unit_id=-1)
         A_new = A_new.drop(-1, 'unit_id')
@@ -625,7 +629,7 @@ def update_temporal_cvxpy(y, g, sn, A=None, **kwargs):
         set_trace()
 
 
-def unit_merge(A, C, thres_corr=0.9):
+def unit_merge(A, C, add_list=None, thres_corr=0.9):
     print("computing spatial overlap")
     A_ovlp = A.dot(A.rename(unit_id='unit_id_cp'), ['height', 'width'])
     uid_idx = C.coords['unit_id'].values
@@ -649,7 +653,14 @@ def unit_merge(A, C, thres_corr=0.9):
         'unit_labels').sum('unit_id').rename(unit_labels='unit_id')
     C_merge = C.assign_coords(unit_labels=unit_labels).groupby(
         'unit_labels').mean('unit_id').rename(unit_labels='unit_id')
-    return A_merge, C_merge
+    if add_list:
+        for ivar, var in enumerate(add_list):
+            add_list[ivar] = (var.assign_coords(unit_labels=unit_labels)
+                              .groupby('unit_labels').mean('unit_id')
+                              .rename(unit_labels='unit_id'))
+        return A_merge, C_merge, add_list
+    else:
+        return A_merge, C_merge
 
 
 def label_connected(adj, only_connected=False):
