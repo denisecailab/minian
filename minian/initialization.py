@@ -231,6 +231,8 @@ def initialize(varr, seeds, thres_corr=0.8, wnd=10, schd='processes', chk=None):
     print("reshaping video array")
     old_err = np.seterr(divide='raise')
     varr_flt = varr.stack(sample=('height', 'width'))
+    if schd == 'threads':
+        varr_flt = delayed(varr_flt)
     seeds_ref = (seeds.where(seeds > 0)
                  .stack(sample=('height', 'width'))
                  .dropna('sample', how='all'))
