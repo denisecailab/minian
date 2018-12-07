@@ -463,7 +463,19 @@ def apply_shifts(varr, shifts):
 
 
 def shift_perframe(fm, sh):
-    return np.roll(fm, sh, axis=np.arange(fm.ndim))
+    fm = np.roll(fm, sh, axis=np.arange(fm.ndim))
+    index = [slice(None) for _ in range(fm.ndim)]
+    for ish, s in enumerate(sh):
+        index = [slice(None) for _ in range(fm.ndim)]
+        if s > 0:
+            index[ish] = slice(None, s)
+            fm[tuple(index)] = np.nan
+        elif s == 0:
+            continue
+        elif s < 0:
+            index[ish] = slice(s, None)
+            fm[tuple(index)] = np.nan
+    return fm
 
 
 def interpolate_frame(varr, drop_idx):
