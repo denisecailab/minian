@@ -73,48 +73,50 @@ def load_videos(vpath,
         vpath + os.sep + v for v in os.listdir(vpath) if re.search(pattern, v)
     ])
     if not vlist:
-        print(
-            "No data with pattern {} found in the specified folder {}".format(
-                pattern, vpath))
+        print("No data with pattern {}"
+              " found in the specified folder {}".format(pattern, vpath))
         return
+    print("loading {} videos in folder {}".format(len(vlist), vpath))
+    varr_list = [load_avi_lazy(v) for v in vlist]
+    varr = darr.concatenate(varr_list, axis=0)
+    varr = xr.DataArray(
+        varr, dims=['frame', 'height', 'width'],
+        coords=dict(
+            frame=np.arange(varr.shape[0]),
+            height=np.arange(varr.shape[1]),
+            width=np.arange(varr.shape[2])))
+    if resample:
+        for dim, binw in resample.items():
+            binw = int(binw)
+            crd = varr.coords[dim]
+            bin_eg = np.arange(crd.values[0], crd.values[-1] + binw, binw)
+            varr = (varr
+                    .groupby_bins(dim, bin_eg, labels=bin_eg[:-1], include_lowest=True)
+                    .mean(dim).rename({dim + '_bins': dim}))
+    return varr.rename(ssname)
+
+
+def load_avi_lazy(fname):
+    cap = cv2.VideoCapture(fname)
+    f = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    fmread = da.delayed(load_avi_perframe)
+    flist = [fmread(fname, i) for i in range(f)]
+    sample = flist[0].compute()
+    arr = [da.array.from_delayed(
+        fm, dtype=sample.dtype, shape=sample.shape) for fm in flist]
+    return da.array.stack(arr, axis=0)
+
+
+def load_avi_perframe(fname, fid):
+    cap = cv2.VideoCapture(fname)
+    cap.set(cv2.CAP_PROP_POS_FRAMES, fid)
+    ret, fm = cap.read()
+    if ret:
+        return cv2.cvtColor(fm, cv2.COLOR_RGB2GRAY)
     else:
-        print("loading {} videos in folder {}".format(len(vlist), vpath))
-        f_start = 0
-        dat_list = []
-        for vname in vlist:
-            ncname = vname + '.nc'
-            if (not in_memory) and os.path.isfile(ncname) and (not overwrite):
-                print("file exsist, directly loading {}".format(ncname), end='\r')
-                dat_list.append(ncname)
-            else:
-                print("processing {}".format(vname), end='\r')
-                cur_v = skv.vread(vname, as_grey=True).astype(dtype).squeeze()
-                crd_f = np.arange(cur_v.shape[0]) + f_start
-                f_start = f_start + cur_v.shape[0]
-                cur_varr = xr.DataArray(
-                    cur_v, dims=['frame', 'height', 'width'],
-                    coords=dict(
-                        frame=crd_f,
-                        height=np.arange(cur_v.shape[1]),
-                        width=np.arange(cur_v.shape[2])),
-                    name=ssname)
-                if resample:
-                    for dim, binw in resample.items():
-                        binw = int(binw)
-                        crd = cur_varr.coords[dim]
-                        bin_eg = np.arange(crd.values[0], crd.values[-1] + binw, binw)
-                        cur_varr = (cur_varr
-                                    .groupby_bins(dim, bin_eg, labels=bin_eg[:-1], include_lowest=True)
-                                    .mean(dim).rename({dim + '_bins': dim}))
-                if in_memory:
-                    dat_list.append(cur_varr)
-                else:
-                    cur_varr.to_dataset().to_netcdf(ncname)
-                    dat_list.append(ncname)
-        if in_memory:
-            return xr.concat(dat_list, 'frame').rename(ssname)
-        else:
-            return xr.open_mfdataset(dat_list, concat_dim='frame', autoclose=True)[ssname]
+        print("frame read failed for frame {}".format(fid))
+        return fm
+
 
 def video_to_tiffs(ipath, opath, iptn='msCam[0-9]+\.avi$', optn='msCam-%05d.tiff'):
     flist = natsorted([os.path.join(ipath, v) for v in os.listdir(ipath) if re.search(iptn, v)])
@@ -128,7 +130,8 @@ def video_to_tiffs(ipath, opath, iptn='msCam[0-9]+\.avi$', optn='msCam-%05d.tiff
             raise
     print("output directory: {}".format(opath))
     subprocess.check_call(cmd, shell=True)
-        
+
+
 def load_images(path, dtype=np.float64):
     # imread = fct.partial(ski.imread, as_gray=True)
     imread = fct.partial(imread_cv, dtype=dtype)
