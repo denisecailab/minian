@@ -628,7 +628,13 @@ def generate_videos(minian, vpath, chk=None):
     A = minian['A'].chunk(dict(height=chk['height'], width=chk['width'], unit_id=-1))
     C = minian['C'].chunk(dict(frame=chk['frame'], unit_id=-1))
     Y = minian['Y'].chunk(dict(frame=chk['frame'], height=chk['height'], width=chk['width']))
+    try:
+        B = minian['B'].chunk(dict(unit_id=-1))
+    except KeyError:
+        print("cannot find background term")
+        B = 0
     org = minian['org'].chunk(dict(frame=chk['frame'], height=chk['height'], width=chk['width']))
+    C = C + B
     AC = xr.apply_ufunc(
         da.dot, A, C,
         input_core_dims=[['height', 'width', 'unit_id'], ['unit_id', 'frame']],
@@ -670,7 +676,7 @@ def convolve_G(s, g):
     G = construct_G(g, len(s))
     try:
         c = linalg.inv(G).dot(s)
-    except LinAlgError:
+    except np.linalg.LinAlgError:
         c = s.copy()
     return c
 
@@ -685,6 +691,7 @@ def visualize_seeds(Y, seeds):
     pass
 
 def visualize_temporal_update(YA, C, S, g, sig, norm=True):
+    YA = YA.sel(unit_id=C.coords['unit_id'])
     if norm:
         C_norm = xr.apply_ufunc(
             normalize, C, input_core_dims=[['frame']], output_core_dims=[['frame']],
