@@ -5,6 +5,7 @@ import dask as da
 import graph_tool.all as gt
 import numba as nb
 import dask.array.fft as dafft
+import dask.array.linalg as dalin
 # import dask_ml.joblib
 import graph_tool.all as gt
 from dask import delayed, compute
@@ -266,19 +267,37 @@ def update_temporal(Y,
                     use_smooth=True,
                     compute=True,
                     chk=None,
+                    post_scal=True,
                     cvx_sched='processes'):
     nunits = len(A.coords['unit_id'])
+    A = A.chunk(dict(height=-1, width=-1, unit_id=chk['unit_id']))
     if not chk:
         chk = dict(height='auto', width='auto', frame='auto', unit_id='auto')
     print("grouping overlaping units")
-    A_bl = (A > 0).compute()
-    A_bl_flt = A_bl.stack(spatial=('height', 'width'))
-    A_jac = xr.apply_ufunc(
-        lambda x: squareform(pdist(x, 'jaccard')),
-        A_bl_flt,
-        input_core_dims=[['unit_id', 'spatial']],
-        output_core_dims=[['unit_id', 'unit_id_cp']])
-    A_jac = 1 - A_jac
+    A_pos = (A > 0).astype(np.float32)
+    A_neg = (A == 0).astype(np.float32)
+    A_inter = xr.apply_ufunc(
+        da.array.tensordot,
+        A_pos,
+        A_pos.rename(unit_id='unit_id_cp'),
+        input_core_dims=[['unit_id', 'height', 'width'], ['height', 'width', 'unit_id_cp']],
+        output_core_dims=[['unit_id', 'unit_id_cp']],
+        dask='allowed',
+        kwargs=dict(axes=([1, 2], [0, 1])),
+        output_dtypes=[A_pos.dtype])
+    A_union = xr.apply_ufunc(
+        da.array.tensordot,
+        A_neg,
+        A_neg.rename(unit_id='unit_id_cp'),
+        input_core_dims=[['unit_id', 'height', 'width'], ['height', 'width', 'unit_id_cp']],
+        output_core_dims=[['unit_id', 'unit_id_cp']],
+        dask='allowed',
+        kwargs=dict(axes=([1, 2], [0, 1])),
+        output_dtypes=[A_neg.dtype])
+    A_jac = A_inter / (A.sizes['height'] * A.sizes['width'] - A_union)
+    if compute:
+        with ProgressBar():
+            A_jac = A_jac.compute()
     unit_labels = xr.apply_ufunc(
         label_connected,
         A_jac > jac_thres,
@@ -286,7 +305,6 @@ def update_temporal(Y,
         kwargs=dict(only_connected=True),
         output_core_dims=[['unit_id']])
     print("computing trace")
-    A = A.chunk(dict(height=-1, width=-1, unit_id=chk['unit_id']))
     AA = xr.apply_ufunc(
         da.array.tensordot, A, A.rename(dict(unit_id='unit_id_cp')),
         input_core_dims=[['unit_id', 'height', 'width'], ['height', 'width', 'unit_id_cp']],
@@ -479,16 +497,48 @@ def update_temporal(Y,
     result = xr.concat(result_ovlp + [result_iso], 'unit_id').sortby('unit_id')
     C_new = result.isel(trace=0).drop('unit_labels').dropna('unit_id')
     S_new = result.isel(trace=1).drop('unit_labels').dropna('unit_id')
-    B_new = result.isel(trace=2).drop('unit_labels').dropna('unit_id')
-    C0_new = result.isel(trace=3).drop('unit_labels').dropna('unit_id')
-    sig = result.isel(trace=4).drop('unit_labels').dropna('unit_id')
-    g = g.sel(unit_id=C_new.coords['unit_id'])
-    mask = S_new.where(S_new > zero_thres).fillna(0).sum('frame').astype(bool)
-    mask_coord = mask.where(~mask, drop=True).coords['unit_id'].values
-    print("{} units dropped due to poor fit:\n {}".format(len(mask_coord), str(mask_coord)))
-    return (YrA, C_new.where(mask, drop=True), S_new.where(mask, drop=True),
-            B_new, C0_new.where(mask, drop=True), sig.where(mask,drop=True),
-            g.where(mask, drop=True))
+    B_new = result.isel(trace=2, frame=0).drop('unit_labels').dropna('unit_id').squeeze()
+    C0_new = result.isel(trace=3, frame=0).drop('unit_labels').dropna('unit_id').squeeze()
+    dc_new = result.isel(trace=4).drop('unit_labels').dropna('unit_id')
+    g_new = g.sel(unit_id=C_new.coords['unit_id'])
+    if zero_thres:
+        mask = S_new.where(S_new > zero_thres).fillna(0).sum('frame').astype(bool)
+        mask_coord = mask.where(~mask, drop=True).coords['unit_id'].values
+        print("{} units dropped due to poor fit:\n {}".format(len(mask_coord), str(mask_coord)))
+    else:
+        mask_coord = S_new.coords['unit_id'].values
+        mask = xr.DataArray(np.ones(len(mask_coord)),
+                            dims=['unit_id'],
+                            coords=dict(unit_id=mask_coord))
+    C_new, S_new, C0_new, B_new, dc_new, g_new = (
+        C_new.where(mask, drop=True), S_new.where(mask, drop=True),
+        C0_new.where(mask, drop=True), B_new.where(mask, drop=True),
+        dc_new.where(mask, drop=True), g_new.where(mask, drop=True))
+    if post_scal:
+        print("post-hoc scaling")
+        YrA_new = YrA.sel(unit_id=C_new.coords['unit_id'])
+        b_lstsq = YrA_new - B_new - C0_new * dc_new
+        def lstsq(a, b):
+            a = np.atleast_2d(a).T
+            return np.linalg.lstsq(a, b, rcond=-1)[0]
+        scal = xr.apply_ufunc(
+            lstsq,
+            C_new.chunk(dict(frame=-1, unit_id='auto')),
+            b_lstsq.chunk(dict(frame=-1, unit_id='auto')),
+            input_core_dims=[['frame'], ['frame']],
+            output_core_dims=[[]],
+            vectorize=True,
+            dask='parallelized',
+            output_dtypes=[C_new.dtype])
+        if compute:
+            with ProgressBar(), da.config.set(scheduler='threads'):
+                scal = scal.compute()
+        C_new = C_new * scal
+        S_new = S_new * scal
+    else:
+        scal=None
+    sig_new = C0_new * dc_new + B_new + C_new
+    return (YrA, C_new, S_new, B_new, C0_new, sig_new, g_new, scal)
 
 
 def get_ar_coef(y, sn, p, add_lag, pad=None):
@@ -531,6 +581,7 @@ def update_temporal_cvxpy(y, g, sn, A=None, **kwargs):
     # get_parameters
     sparse_penal = kwargs.get('sparse_penal')
     max_iters = kwargs.get('max_iters')
+    use_cons = kwargs.get('use_cons', False)
     # conform variables to generalize multiple unit case
     if y.ndim < 2:
         y = y.reshape((1, -1))
@@ -586,54 +637,62 @@ def update_temporal_cvxpy(y, g, sn, A=None, **kwargs):
     cons.append(c0 >= 0)  # initial fluorescence larger than 0
     cons.append(s >= 0)  # spike train non-negativity
     # noise constraints
-    #cons_noise = [noise[i] <= thres_sn[i] for i in range(thres_sn.shape[0])]
-    # objective
-    # try:
-        # obj = cvx.Minimize(cvx.sum(cvx.norm(s, 1, axis=1)))
-        # obj = cvx.Minimize(cvx.norm(c, 1))
-        # prob = cvx.Problem(obj, cons)
-        # res = prob.solve(solver='ECOS', verbose=True)
-        # res = prob.solve(solver='SCS', verbose=True)
-        # if not (prob.status == 'optimal'
-        #         or prob.status == 'optimal_inaccurate'):
-        #     print("constrained version of problem infeasible")
-        #     raise ValueError
-    # except (ValueError, cvx.SolverError):
-        # pass
-    # Pr = np.zeros(_T)
-    # Pr[1:10] = 1
-    # P = toeplitz(Pr)
-    # sPs = cvx.vstack([s * P * s.T for u in range(s.shape[0])])
-    lam = sn * sparse_penal
-    obj = cvx.Minimize(cvx.sum(cvx.sum(noise, axis=1) + lam * cvx.norm(s, 1, axis=1)))
-    prob = cvx.Problem(obj, cons)
+    cons_noise = [noise[i] <= thres_sn[i] for i in range(thres_sn.shape[0])]
     try:
-        res = prob.solve(solver='ECOS', max_iters=max_iters)
-        if prob.status in ["infeasible", "unbounded", None]:
+        obj = cvx.Minimize(cvx.sum(cvx.norm(s, 1, axis=1)))
+        prob = cvx.Problem(obj, cons + cons_noise)
+        if use_cons:
+            res = prob.solve(solver='ECOS')
+            # res = prob.solve(solver='SCS', verbose=True)
+        if not (prob.status == 'optimal'
+                or prob.status == 'optimal_inaccurate'):
+            if use_cons:
+                warnings.warn("constrained version of problem infeasible")
             raise ValueError
-    except (cvx.SolverError, ValueError):
+    except (ValueError, cvx.SolverError):
+        lam = sn * sparse_penal
+        obj = cvx.Minimize(cvx.sum(cvx.sum(noise, axis=1) + lam * cvx.norm(s, 1, axis=1)))
+        prob = cvx.Problem(obj, cons)
         try:
-            # res = prob.solve(solver='SCS')
+            res = prob.solve(solver='ECOS', max_iters=max_iters)
             if prob.status in ["infeasible", "unbounded", None]:
                 raise ValueError
         except (cvx.SolverError, ValueError):
-            warnings.warn("problem infeasible, returning null", RuntimeWarning)
-            return np.full((5, c.shape[0], c.shape[1]), np.nan).squeeze()
+            try:
+                # res = prob.solve(solver='SCS')
+                if prob.status in ["infeasible", "unbounded", None]:
+                    raise ValueError
+            except (cvx.SolverError, ValueError):
+                warnings.warn("problem infeasible, returning null", RuntimeWarning)
+                return np.full((5, c.shape[0], c.shape[1]), np.nan).squeeze()
     if not prob.status is 'optimal':
         warnings.warn("problem solved sub-optimally", RuntimeWarning)
     try:
         return np.stack(
         np.broadcast_arrays(c.value, s.value, b.value.reshape((-1, 1)),
-                            c0.value.reshape((-1, 1)), sig.value)).squeeze()
+                            c0.value.reshape((-1, 1)), dc_vec)).squeeze()
     except:
         set_trace()
 
 
 def unit_merge(A, C, add_list=None, thres_corr=0.9):
     print("computing spatial overlap")
-    A_ovlp = A.dot(A.rename(unit_id='unit_id_cp'), ['height', 'width'])
-    uid_idx = C.coords['unit_id'].values
+    A_bl = ((A > 0).astype(np.float32)
+            .chunk(dict(unit_id='auto', height=-1, width=-1)))
+    A_ovlp = xr.apply_ufunc(
+        da.array.tensordot,
+        A_bl,
+        A_bl.rename(unit_id='unit_id_cp'),
+        input_core_dims=[['unit_id', 'height', 'width'],
+                         ['height', 'width', 'unit_id_cp']],
+        output_core_dims=[['unit_id', 'unit_id_cp']],
+        dask='allowed',
+        kwargs=dict(axes=([1, 2], [0, 1])),
+        output_dtypes=[A_bl.dtype])
+    with ProgressBar():
+        A_ovlp = A_ovlp.persist()
     print("computing temporal correlation")
+    uid_idx = C.coords['unit_id'].values
     corr = xr.apply_ufunc(
         np.corrcoef,
         C.compute(),
