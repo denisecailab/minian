@@ -15,6 +15,7 @@ import dask as da
 import dask.array.image as daim
 import dask.array as darr
 import subprocess
+import warnings
 import cv2
 from copy import deepcopy
 from scipy import ndimage as ndi
@@ -41,7 +42,8 @@ def load_videos(vpath,
                 dtype=np.float64,
                 in_memory=False,
                 overwrite=False,
-                resample=None):
+                downsample=None,
+                downsample_strategy='subset'):
     """Load videos from a folder.
 
     Load videos from the folder specified in `vpath` and according to the regex
@@ -85,14 +87,23 @@ def load_videos(vpath,
             frame=np.arange(varr.shape[0]),
             height=np.arange(varr.shape[1]),
             width=np.arange(varr.shape[2])))
-    if resample:
-        for dim, binw in resample.items():
+    varr = varr.astype(dtype)
+    if downsample:
+        for dim, binw in downsample.items():
             binw = int(binw)
             crd = varr.coords[dim]
             bin_eg = np.arange(crd.values[0], crd.values[-1] + binw, binw)
-            varr = (varr
-                    .groupby_bins(dim, bin_eg, labels=bin_eg[:-1], include_lowest=True)
-                    .mean(dim).rename({dim + '_bins': dim}))
+            if downsample_strategy == 'mean':
+                grps = varr.groupby_bins(
+                    dim, bin_eg, labels=bin_eg[:-1], include_lowest=True)
+                varr = xr.concat([g[1].mean(dim) for g in grps])
+                varr = (varr.rename({dim + '_bin': dim})
+                        .assign_coords({dim: bin_eg[:-1]}))
+            elif downsample_strategy == 'subset':
+                varr = varr.sel(**{dim: bin_eg[:-1]})
+            else:
+                warnings.warn(
+                    "unrecognized downsampling strategy", RuntimeWarning)
     return varr.rename(ssname)
 
 
