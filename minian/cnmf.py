@@ -92,7 +92,7 @@ def psd_welch(varr):
         freq_crd = np.linspace(0, 0.5 * (_T - 1) / _T, ns)
     varr_psd = xr.apply_ufunc(
             _welch,
-            varr.chunk(dict(frame=-1, height='auto', width='auto')),
+            varr.chunk(dict(frame=-1)),
             input_core_dims=[['frame']],
             output_core_dims=[['freq']],
             dask='parallelized',
@@ -162,28 +162,16 @@ def update_spatial(Y,
                    dl_wnd=5,
                    sparse_penal=0.5,
                    update_background=False,
+                   post_scal=True,
                    zero_thres='eps',
-                   compute=True):
+                   compute=True,
+                   chk=50):
     _T = len(Y.coords['frame'])
-    # print(
-    #     "gaussian filtering on spatial matrix with sigma: {}".format(gs_sigma))
-    # A_gs = xr.apply_ufunc(
-    #         gaussian_filter,
-    #         A,
-    #         input_core_dims=[['height', 'width']],
-    #         output_core_dims=[['height', 'width']],
-    #         vectorize=True,
-    #         kwargs=dict(sigma=gs_sigma),
-    #         dask='parallelized',
-    #         output_dtypes=[A.dtype])
-    # if compute:
-    #     with ProgressBar():
-    #         A_gs = A_gs.persist()
     print("estimating penalty parameter")
     cct = C.dot(C, 'frame')
     alpha = sparse_penal * sn * np.sqrt(np.max(np.diag(cct))) / _T
     with ProgressBar():
-        alpha = alpha.compute()
+        alpha = alpha.persist()
     print("computing subsetting matrix")
     if update_background:
         A = xr.concat([A, b.assign_coords(unit_id=-1)], 'unit_id')
@@ -199,19 +187,19 @@ def update_spatial(Y,
             kwargs=dict(selem=selem),
             dask='parallelized',
             output_dtypes=[A.dtype])
-        sub = sub > 0
+        sub = (sub > 0).astype(bool)
     else:
         sub = xr.apply_ufunc(np.ones_like, A.compute())
     if compute:
         with ProgressBar():
-            sub = sub.persist().astype(np.bool)
+            sub = sub.persist()
     print("fitting spatial matrix")
     A_new = xr.apply_ufunc(
         update_spatial_perpx,
-        Y.chunk(dict(frame=-1)),
-        C.chunk(dict(frame=-1, unit_id=-1)),
-        alpha,
-        sub.chunk(dict(unit_id=-1)),
+        Y.chunk(chk).chunk(dict(frame=-1)),
+        C.chunk(chk).chunk(dict(frame=-1, unit_id=-1)),
+        alpha.chunk(chk),
+        sub.chunk(chk).chunk(dict(unit_id=-1)),
         input_core_dims=[['frame'], ['frame', 'unit_id'], [], ['unit_id']],
         output_core_dims=[['unit_id']],
         vectorize=True,
@@ -220,10 +208,31 @@ def update_spatial(Y,
     )
     if compute:
         with ProgressBar():
-            A_new = A_new.compute()
+            A_new = A_new.persist()
     if zero_thres == 'eps':
         zero_thres = np.finfo(A_new.dtype).eps
     A_new = A_new.where(A_new > zero_thres).fillna(0)
+    if post_scal:
+        print("post-hoc scaling")
+        with ProgressBar():
+            A_new_flt = (A_new.stack(spatial=['height', 'width'])
+                         .compute())
+            Y_flt = (Y.mean('frame').stack(spatial=['height', 'width'])
+                     .compute())
+        def lstsq(a, b):
+            return np.linalg.lstsq(a, b)[0]
+        scale = xr.apply_ufunc(
+            lstsq,
+            A_new_flt,
+            Y_flt,
+            input_core_dims=[['spatial', 'unit_id'], ['spatial']],
+            output_core_dims=[['unit_id']])
+        A_new = A_new * scale
+        with ProgressBar():
+            try:
+                A_new = A_new.persist()
+            except np.linalg.LinAlgError:
+                warnings.warn("post-hoc scaling failed", RuntimeWarning)
     if update_background:
         b_new = A_new.sel(unit_id=-1)
         A_new = A_new.drop(-1, 'unit_id')
@@ -236,7 +245,7 @@ def update_spatial(Y,
     C_new = C.where(non_empty, drop=True)
     if compute:
         with ProgressBar():
-            A_new, C_new = A_new.compute(), C_new.compute()
+            A_new, C_new = A_new.persist(), C_new.persist()
     return A_new, b_new, C_new, f
 
 
@@ -266,20 +275,19 @@ def update_temporal(Y,
                     max_iters=200,
                     use_smooth=True,
                     compute=True,
-                    chk=None,
+                    chk={'height':50, 'width':50, 'frame':1000, 'unit_id':20},
                     post_scal=True,
+                    scs_fallback=False,
                     cvx_sched='processes'):
     nunits = len(A.coords['unit_id'])
-    A = A.chunk(dict(height=-1, width=-1, unit_id=chk['unit_id']))
-    if not chk:
-        chk = dict(height='auto', width='auto', frame='auto', unit_id='auto')
     print("grouping overlaping units")
     A_pos = (A > 0).astype(np.float32)
     A_neg = (A == 0).astype(np.float32)
     A_inter = xr.apply_ufunc(
         da.array.tensordot,
-        A_pos,
-        A_pos.rename(unit_id='unit_id_cp'),
+        A_pos.chunk(dict(height=-1, width=-1, unit_id=chk['unit_id'])),
+        (A_pos.chunk(dict(height=-1, width=-1, unit_id=chk['unit_id']))
+         .rename(unit_id='unit_id_cp')),
         input_core_dims=[['unit_id', 'height', 'width'], ['height', 'width', 'unit_id_cp']],
         output_core_dims=[['unit_id', 'unit_id_cp']],
         dask='allowed',
@@ -287,8 +295,9 @@ def update_temporal(Y,
         output_dtypes=[A_pos.dtype])
     A_union = xr.apply_ufunc(
         da.array.tensordot,
-        A_neg,
-        A_neg.rename(unit_id='unit_id_cp'),
+        A_neg.chunk(dict(height=-1, width=-1, unit_id=chk['unit_id'])),
+        (A_neg.chunk(dict(height=-1, width=-1, unit_id=chk['unit_id']))
+         .rename(unit_id='unit_id_cp')),
         input_core_dims=[['unit_id', 'height', 'width'], ['height', 'width', 'unit_id_cp']],
         output_core_dims=[['unit_id', 'unit_id_cp']],
         dask='allowed',
@@ -306,16 +315,19 @@ def update_temporal(Y,
         output_core_dims=[['unit_id']])
     print("computing trace")
     AA = xr.apply_ufunc(
-        da.array.tensordot, A, A.rename(dict(unit_id='unit_id_cp')),
+        da.array.tensordot,
+        A.chunk(dict(height=-1, width=-1, unit_id=chk['unit_id'])),
+        (A.chunk(dict(height=-1, width=-1, unit_id=chk['unit_id']))
+         .rename(dict(unit_id='unit_id_cp'))),
         input_core_dims=[['unit_id', 'height', 'width'], ['height', 'width', 'unit_id_cp']],
         output_core_dims=[['unit_id', 'unit_id_cp']],
         dask='allowed',
         kwargs=dict(axes=([1, 2], [0, 1])),
         output_dtypes=[A.dtype])
-    nA = (A**2).sum(['height', 'width']).chunk(dict(unit_id=-1))
+    nA = (A**2).sum(['height', 'width'])
     nA_inv = xr.apply_ufunc(
         lambda x: np.asarray(diags(x).todense()),
-        1 / nA,
+        (1 / nA).chunk(dict(unit_id=-1)),
         input_core_dims=[['unit_id']],
         output_core_dims=[['unit_id', 'unit_id_cp']],
         dask='parallelized',
@@ -324,34 +336,37 @@ def update_temporal(Y,
     nA_inv = nA_inv.assign_coords(unit_id_temp=AA.coords['unit_id_cp'])
     if compute:
         with ProgressBar():
-            nA_inv = (nA_inv.compute()
-                      .chunk(dict(unit_id=chk['unit_id'], unit_id_cp=-1)))
-    Y = Y.chunk(dict(height=-1, width=-1, frame=chk['frame']))
+            nA_inv = nA_inv.compute()
     YA = (xr.apply_ufunc(
-        da.array.tensordot, Y, A,
+        da.array.tensordot,
+        Y.chunk(dict(height=-1, width=-1, frame=chk['frame'])),
+        A.chunk(dict(height=-1, width=-1, unit_id=chk['unit_id'])),
         input_core_dims=[['frame', 'height', 'width'], ['height', 'width', 'unit_id']],
         output_core_dims=[['frame', 'unit_id']],
         dask='allowed',
         kwargs=dict(axes=([1, 2], [0, 1])),
         output_dtypes=[A.dtype])
           .rename(dict(unit_id='unit_id_cp')))
-    YA = YA.chunk(dict(frame=chk['frame'], unit_id_cp=-1))
     YA_norm = xr.apply_ufunc(
-        da.array.dot, YA, nA_inv,
+        da.array.dot,
+        YA.chunk(dict(unit_id_cp=-1, frame=chk['frame'])),
+        nA_inv.chunk(dict(unit_id_cp=-1, unit_id=chk['unit_id'])),
         input_core_dims=[['frame', 'unit_id_cp'], ['unit_id_cp', 'unit_id']],
         output_core_dims=[['frame', 'unit_id']],
         dask='allowed',
         output_dtypes=[YA.dtype])
-    C = C.chunk(dict(frame=chk['frame'], unit_id=-1))
-    AA = AA.chunk(dict(unit_id=-1, unit_id_cp=-1))
     CA = xr.apply_ufunc(
-        da.array.dot, C, AA,
+        da.array.dot,
+        C.chunk(dict(unit_id=-1, frame=chk['frame'])),
+        AA.chunk(dict(unit_id=-1, unit_id_cp=chk['unit_id'])),
         input_core_dims=[['frame', 'unit_id'], ['unit_id', 'unit_id_cp']],
         output_core_dims=[['frame', 'unit_id_cp']],
         dask='allowed',
         output_dtypes=[C.dtype])
     CA_norm = xr.apply_ufunc(
-        da.array.dot, CA, nA_inv,
+        da.array.dot,
+        CA.chunk(dict(unit_id_cp=-1, frame=chk['frame'])),
+        nA_inv.chunk(dict(unit_id_cp=-1, unit_id=chk['unit_id'])),
         input_core_dims=[['frame', 'unit_id_cp'], ['unit_id_cp', 'unit_id']],
         output_core_dims=[['frame', 'unit_id']],
         dask='allowed',
@@ -382,7 +397,7 @@ def update_temporal(Y,
             output_dtypes=[YrA.dtype])
         if compute:
             with ProgressBar():
-                YrA_smth = YrA_smth.compute()
+                YrA_smth = YrA_smth.persist()
                 sn_temp_smth = get_noise_welch(
                     YrA_smth, noise_range=(noise_freq, 1))
     else:
@@ -433,7 +448,10 @@ def update_temporal(Y,
             output_core_dims=[['trace', 'frame']],
             vectorize=True,
             dask='parallelized',
-            kwargs=dict(sparse_penal=sparse_penal, max_iters=max_iters),
+            kwargs=dict(
+                sparse_penal=sparse_penal,
+                max_iters=max_iters,
+                scs_fallback=scs_fallback),
             output_sizes=dict(trace=5),
             output_dtypes=[YrA.dtype])
     else:
@@ -446,7 +464,10 @@ def update_temporal(Y,
             output_core_dims=[['trace', 'frame']],
             vectorize=True,
             dask='parallelized',
-            kwargs=dict(sparse_penal=sparse_penal, max_iters=max_iters),
+            kwargs=dict(
+                sparse_penal=sparse_penal,
+                max_iters=max_iters,
+                scs_fallback=scs_fallback),
             output_sizes=dict(trace=5),
             output_dtypes=[YrA.dtype])
     if compute:
@@ -472,7 +493,10 @@ def update_temporal(Y,
                                  ['spatial'], ['unit_id', 'spatial']],
                 output_core_dims=[['trace', 'unit_id', 'frame']],
                 dask='parallelized',
-                kwargs=dict(sparse_penal=sparse_penal, max_iters=max_iters),
+                kwargs=dict(
+                    sparse_penal=sparse_penal,
+                    max_iters=max_iters,
+                    scs_fallback=scs_fallback),
                 output_sizes=dict(trace=5),
                 output_dtypes=[YrA.dtype])
         else:
@@ -487,7 +511,10 @@ def update_temporal(Y,
                                  ['unit_id']],
                 output_core_dims=[['trace', 'unit_id', 'frame']],
                 dask='forbidden',
-                kwargs=dict(sparse_penal=sparse_penal, max_iters=max_iters),
+                kwargs=dict(
+                    sparse_penal=sparse_penal,
+                    max_iters=max_iters,
+                    scs_fallback=scs_fallback),
                 output_sizes=dict(trace=5),
                 output_dtypes=[YrA.dtype])
         res_list.append(cur_res)
@@ -582,6 +609,7 @@ def update_temporal_cvxpy(y, g, sn, A=None, **kwargs):
     sparse_penal = kwargs.get('sparse_penal')
     max_iters = kwargs.get('max_iters')
     use_cons = kwargs.get('use_cons', False)
+    scs = kwargs.get('scs_fallback')
     # conform variables to generalize multiple unit case
     if y.ndim < 2:
         y = y.reshape((1, -1))
@@ -659,11 +687,14 @@ def update_temporal_cvxpy(y, g, sn, A=None, **kwargs):
                 raise ValueError
         except (cvx.SolverError, ValueError):
             try:
-                # res = prob.solve(solver='SCS')
+                if scs:
+                    res = prob.solve(solver='SCS', max_iters=200)
                 if prob.status in ["infeasible", "unbounded", None]:
                     raise ValueError
             except (cvx.SolverError, ValueError):
-                warnings.warn("problem infeasible, returning null", RuntimeWarning)
+                warnings.warn(
+                    "problem status is {}, returning null".format(prob.status),
+                    RuntimeWarning)
                 return np.full((5, c.shape[0], c.shape[1]), np.nan).squeeze()
     if not prob.status is 'optimal':
         warnings.warn("problem solved sub-optimally", RuntimeWarning)
