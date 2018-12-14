@@ -63,7 +63,7 @@ def get_minian_list(path, pattern=r'^minian.nc$'):
 def estimate_shifts(mn_list,
                     temp_list,
                     z_thres=None,
-                    remove_background=False,
+                    rm_background=False,
                     method='first',
                     concat_dim='session'):
     temps = []
@@ -84,7 +84,7 @@ def estimate_shifts(mn_list,
                 else:
                     print("unrecognized template")
                     continue
-                if remove_background:
+                if rm_background:
                     cur_temp = remove_background(cur_temp, 'uniform', wnd=51)
                 temps.append(cur_temp)
         except KeyError:
@@ -135,7 +135,8 @@ def apply_shifts(var, shifts, inplace=False, dim='session'):
     shifts = shifts.dropna(dim)
     var_sh = var.astype('O', copy=not inplace).load()
     for dim_n, sh in shifts.groupby(dim):
-        sh_dict = sh.astype(int).to_series().to_dict()
+        sh_dict = (sh.astype(int).to_series().reset_index()
+                   .set_index('shift_dim')['shifts'].to_dict())
         var_sh.loc[{dim: dim_n}] = var_sh.loc[{dim: dim_n}].shift(**sh_dict)
     return var_sh.rename(var.name + '_shifted')
 
