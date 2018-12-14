@@ -621,7 +621,7 @@ class AlignViewer():
             animal=cur_anm, session=cur_ss)] = cur_cor
 
         
-def generate_videos(minian, vpath, chk=None):
+def generate_videos(minian, vpath, chk=None, pre_compute=False):
     print("generating traces")
     if not chk:
         chk = dict(height='auto', width='auto', frame='auto')
@@ -641,11 +641,11 @@ def generate_videos(minian, vpath, chk=None):
         output_core_dims=[['height', 'width', 'frame']],
         dask='allowed',
         output_dtypes=[Y.dtype])
-    res = scale_varr(org) - scale_varr(AC)
-    org_norm = scale_varr(org, (0, 255)).astype(np.uint8)
-    Y_norm = scale_varr(Y, (0, 255)).astype(np.uint8)
-    AC_norm = scale_varr(AC, (0, 255)).astype(np.uint8)
-    res_norm = scale_varr(res, (0, 255)).astype(np.uint8)
+    res = scale_varr(org, pre_compute=pre_compute) - scale_varr(AC, pre_compute=pre_compute)
+    org_norm = scale_varr(org, (0, 255), pre_compute=pre_compute).astype(np.uint8)
+    Y_norm = scale_varr(Y, (0, 255), pre_compute=pre_compute).astype(np.uint8)
+    AC_norm = scale_varr(AC, (0, 255), pre_compute=pre_compute).astype(np.uint8)
+    res_norm = scale_varr(res, (0, 255), pre_compute=pre_compute).astype(np.uint8)
 #     with ProgressBar():
 #         Y_norm = Y_norm.compute()
 #         AC_norm = AC_norm.compute()
