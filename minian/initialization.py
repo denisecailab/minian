@@ -103,6 +103,7 @@ def pnr_refine(varr, seeds, noise_freq=0.25, thres=1.5):
     print("selecting seeds") 
     varr_sub = varr.sel(
         spatial=[tuple(hw) for hw in seeds[['height', 'width']].values])
+    varr_sub = varr_sub.chunk(dict(frame=-1, spatial='auto'))
     print("computing peak-noise ratio")
     but_b, but_a = butter(2, noise_freq, btype='high', analog=False)
     varr_noise = xr.apply_ufunc(
@@ -269,7 +270,7 @@ def initialize(varr, seeds, thres_corr=0.8, wnd=10, schd='processes', chk=None):
         output_dtypes=[A.dtype])
     Yr = varr - AC
     with ProgressBar():
-        Yr = Yr.compute()
+        # Yr = Yr.compute()
         b = (Yr.chunk(dict(frame=-1, height=chk['height'], width=chk['width']))
              .mean('frame').compute())
         f = (Yr.chunk(dict(frame=chk['frame'], height=-1, width=-1))
