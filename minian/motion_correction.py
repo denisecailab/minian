@@ -5,6 +5,7 @@ import sys
 import itertools as itt
 import pyfftw.interfaces.numpy_fft as npfft
 import numba as nb
+import dask.array as darr
 from scipy.stats import zscore
 from scipy.ndimage import center_of_mass
 from collections import OrderedDict
@@ -354,7 +355,7 @@ def apply_translation(img, shift):
 
 
 def estimate_shift_fft(varr, on='first', pad_f=1, pct_thres=None):
-    varr = varr.chunk(dict(height=-1, width=-1, frame='auto'))
+    varr = varr.chunk(dict(height=-1, width=-1))
     dims = list(varr.dims)
     dims.remove('frame')
     sizes = [varr.sizes[d] for d in dims]
@@ -366,17 +367,23 @@ def estimate_shift_fft(varr, on='first', pad_f=1, pct_thres=None):
     results = []
     print("computing fft on array")
     varr_fft = xr.apply_ufunc(
-        np.fft.fft2,
+        darr.fft.fft2,
         varr,
-        input_core_dims=[['height', 'width']],
-        output_core_dims=[['height', 'width']],
-        vectorize=True,
-        dask='parallelized',
+        input_core_dims=[['frame', 'height', 'width']],
+        output_core_dims=[['frame', 'height', 'width']],
+        dask='allowed',
         kwargs=dict(s=pad_s),
         output_dtypes=[np.complex64])
     if on == 'mean':
         meanfm = varr.mean('frame')
-        src_fft = np.fft.fft2(meanfm, pad_s)
+        src_fft = xr.apply_ufunc(
+            darr.fft.fft2,
+            meanfm,
+            input_core_dims=[['height', 'width']],
+            output_core_dims=[['height', 'width']],
+            dask='allowed',
+            kwargs=dict(s=pad_s),
+            output_dtypes=[np.complex64])
     elif on == 'first':
         src_fft = varr_fft.isel(frame=0)
     elif on == 'last':
