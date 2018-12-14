@@ -17,6 +17,7 @@ import dask.array as darr
 import subprocess
 import warnings
 import cv2
+from dask.diagnostics import ProgressBar
 from copy import deepcopy
 from scipy import ndimage as ndi
 from scipy.io import loadmat
@@ -27,6 +28,9 @@ from collections import Iterable
 from tifffile import imsave, imread
 from pandas import Timestamp
 from IPython.core.debugger import set_trace
+from os.path import isdir, abspath
+from os import listdir
+from os.path import join as pjoin
 
 try:
     import pycuda.autoinit
@@ -94,11 +98,9 @@ def load_videos(vpath,
             crd = varr.coords[dim]
             bin_eg = np.arange(crd.values[0], crd.values[-1] + binw, binw)
             if downsample_strategy == 'mean':
-                grps = varr.groupby_bins(
+                varr = (varr.groupby_bins(
                     dim, bin_eg, labels=bin_eg[:-1], include_lowest=True)
-                varr = xr.concat([g[1].mean(dim) for g in grps])
-                varr = (varr.rename({dim + '_bin': dim})
-                        .assign_coords({dim: bin_eg[:-1]}))
+                        .mean(dim).rename({dim + '_bins': dim}))
             elif downsample_strategy == 'subset':
                 varr = varr.sel(**{dim: bin_eg[:-1]})
             else:
@@ -371,9 +373,14 @@ def varr_to_float32(varr):
     return varr_norm
 
 
-def scale_varr(varr, scale=(0, 1), inplace=False):
+def scale_varr(varr, scale=(0, 1), inplace=False, pre_compute=False):
     varr_max = varr.max()
     varr_min = varr.min()
+    if pre_compute:
+        print("pre-computing min and max")
+        with ProgressBar():
+            varr_max = varr_max.compute()
+            varr_min = varr_min.compute()
     if inplace:
         varr_norm = varr
         varr_norm -= varr_min
@@ -558,6 +565,43 @@ def save_variable(var, fpath, fname, meta_dict=None):
         ds.to_netcdf(os.path.join(fpath, fname + '.nc'), mode='w')
     return ds
 
+
+def open_minian(dpath, fname='minian', backend='netcdf', chunks=None):
+    if backend is 'netcdf':
+        fname = fname + '.nc'
+        if chunks is 'auto':
+            with xr.open_dataset(os.path.join(dpath, fname)) as ds:
+                dims = ds.dims
+            chunks = dict([(d, 'auto') for d in dims])
+        return xr.open_dataset(os.path.join(dpath, fname), chunks=chunks)
+    elif backend is 'zarr':
+        mpath = pjoin(dpath, fname)
+        dslist = [xr.open_zarr(pjoin(mpath, d)) for d in listdir(mpath) if isdir(pjoin(mpath, d))]
+        ds = xr.merge(dslist)
+        if chunks is 'auto':
+            chunks = dict([(d, 'auto') for d in ds.dims])
+        return ds.chunk(chunks)
+    else:
+        raise NotImplementedError("backend {} not supported".format(backend))
+
+def save_minian(var, dpath, fname='minian', backend='netcdf', meta_dict=None):
+    dpath = os.path.normpath(dpath)
+    ds = var.to_dataset()
+    if meta_dict is not None:
+        pathlist = os.path.normpath(dpath).split(os.sep)
+        ds = ds.assign_coords(
+            **dict([(dn, pathlist[di]) for dn, di in meta_dict.items()]))
+    if backend is 'netcdf':
+        try:
+            ds.to_netcdf(os.path.join(dpath, fname + '.nc'), mode='a')
+        except FileNotFoundError:
+            ds.to_netcdf(os.path.join(dpath, fname + '.nc'), mode='w')
+        return ds
+    elif backend is 'zarr':
+        ds.to_zarr(os.path.join(dpath, fname, var.name + '.zarr'))
+        return ds
+    else:
+        raise NotImplementedError("backend {} not supported".format(backend))
 
 def delete_variable(fpath, varlist, del_org=False):
     fpath_bak = fpath + ".{}.backup".format(int(time.time()))
