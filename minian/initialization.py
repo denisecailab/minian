@@ -15,6 +15,7 @@ from scipy.spatial.distance import pdist, squareform
 from sklearn.mixture import GaussianMixture
 from IPython.core.debugger import set_trace
 from scipy.signal import butter, lfilter
+from .cnmf import smooth_sig
 
 
 def seeds_init(varr, wnd_size=500, method='rolling', stp_size=200, nchunk=100, max_wnd=10):
@@ -175,7 +176,7 @@ def ks_refine(varr, seeds, sig=0.05):
     return seeds
 
 
-def seeds_merge(varr, seeds, thres_dist=5, thres_corr=0.6):
+def seeds_merge(varr, seeds, thres_dist=5, thres_corr=0.6, noise_freq=0.25):
     varr_sub = (varr.where(seeds > 0)
                 .stack(sample=('height', 'width'))
                 .dropna('sample', how='all'))
@@ -197,6 +198,8 @@ def seeds_merge(varr, seeds, thres_dist=5, thres_corr=0.6):
         output_sizes=dict(sampleA=nsmp, sampleB=nsmp)).assign_coords(
             sampleA=np.arange(len(crds['sample'])),
             sampleB=np.arange(len(crds['sample'])))
+    if noise_freq:
+        varr_sub = smooth_sig(varr_sub, noise_freq)
     corr = xr.apply_ufunc(
         np.corrcoef,
         varr_sub.chunk(dict(sample=-1, frame=-1)),
