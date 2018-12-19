@@ -137,7 +137,8 @@ def apply_shifts(var, shifts, inplace=False, dim='session'):
     for dim_n, sh in shifts.groupby(dim):
         sh_dict = (sh.astype(int).to_series().reset_index()
                    .set_index('shift_dim')['shifts'].to_dict())
-        var_list.append(var.sel(**{dim: dim_n}).shift(**sh_dict))
+        var_list.append((var.sel(**{dim: dim_n})
+                         .shift(**sh_dict).rename(var.name + "_shifted")))
     return xr.concat(var_list, dim=dim)
 
 
