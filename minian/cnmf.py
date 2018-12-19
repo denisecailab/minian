@@ -768,3 +768,17 @@ def label_connected(adj, only_connected=False):
     if only_connected:
         labels[np.isin(labels, np.where(hist == 1)[0])] = -1
     return labels
+
+
+def smooth_sig(sig, freq):
+    print("smoothing signals")
+    but_b, but_a = butter(2, freq, btype='low', analog=False)
+    sig_smth = xr.apply_ufunc(
+            lambda x: lfilter(but_b, but_a, x),
+            sig.chunk(dict(frame=-1)),
+            input_core_dims=[['frame']],
+            output_core_dims=[['frame']],
+            vectorize=True,
+            dask='parallelized',
+            output_dtypes=[sig.dtype])
+    return sig_smth
