@@ -133,12 +133,12 @@ def estimate_shifts(mn_list,
 
 def apply_shifts(var, shifts, inplace=False, dim='session'):
     shifts = shifts.dropna(dim)
-    var_sh = var.astype('O', copy=not inplace).load()
+    var_list = []
     for dim_n, sh in shifts.groupby(dim):
         sh_dict = (sh.astype(int).to_series().reset_index()
                    .set_index('shift_dim')['shifts'].to_dict())
-        var_sh.loc[{dim: dim_n}] = var_sh.loc[{dim: dim_n}].shift(**sh_dict)
-    return var_sh.rename(var.name + '_shifted')
+        var_list.append(var.sel(**{dim: dim_n}).shift(**sh_dict))
+    return xr.concat(var_list, dim=dim)
 
 
 def calculate_centroids(cnmds, window, grp_dim=['animal', 'session']):
