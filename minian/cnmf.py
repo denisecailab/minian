@@ -220,7 +220,7 @@ def update_spatial(Y,
             Y_flt = (Y.mean('frame').stack(spatial=['height', 'width'])
                      .compute())
         def lstsq(a, b):
-            return np.linalg.lstsq(a, b)[0]
+            return np.linalg.lstsq(a, b, rcond=-1)[0]
         scale = xr.apply_ufunc(
             lstsq,
             A_new_flt,
@@ -521,13 +521,15 @@ def update_temporal(Y,
     if compute:
         with ProgressBar(), da.config.set(scheduler=cvx_sched):
             result_ovlp, = da.compute(res_list)
-    result = xr.concat(result_ovlp + [result_iso], 'unit_id').sortby('unit_id')
-    C_new = result.isel(trace=0).drop('unit_labels').dropna('unit_id')
-    S_new = result.isel(trace=1).drop('unit_labels').dropna('unit_id')
-    B_new = result.isel(trace=2, frame=0).drop('unit_labels').dropna('unit_id').squeeze()
-    C0_new = result.isel(trace=3, frame=0).drop('unit_labels').dropna('unit_id').squeeze()
-    dc_new = result.isel(trace=4).drop('unit_labels').dropna('unit_id')
-    g_new = g.sel(unit_id=C_new.coords['unit_id'])
+    result = (xr.concat(result_ovlp + [result_iso], 'unit_id')
+              .sortby('unit_id').drop('unit_labels'))
+    YrA = YrA.drop('unit_labels')
+    C_new = result.isel(trace=0).dropna('unit_id')
+    S_new = result.isel(trace=1).dropna('unit_id')
+    B_new = result.isel(trace=2, frame=0).dropna('unit_id').squeeze()
+    C0_new = result.isel(trace=3, frame=0).dropna('unit_id').squeeze()
+    dc_new = result.isel(trace=4).dropna('unit_id')
+    g_new = g.sel(unit_id=C_new.coords['unit_id']).drop('unit_labels')
     if zero_thres:
         mask = S_new.where(S_new > zero_thres).fillna(0).sum('frame').astype(bool)
         mask_coord = mask.where(~mask, drop=True).coords['unit_id'].values
