@@ -13,10 +13,12 @@ from .motion_correction import shift_fft
 from collections import OrderedDict
 from holoviews.streams import Stream, Pipe, RangeXY, DoubleTap, Tap, Selection1D, BoxEdit
 from holoviews.operation import contours, threshold
-from holoviews.operation.datashader import datashade, regrid
+from holoviews.operation.datashader import datashade, regrid, dynspread
 from holoviews.util import Dynamic
 from datashader.colors import Sets1to3
 from datashader import count_cat
+from datashader import mean as dsmean
+from datashader import count as dscount
 from IPython.core.display import display, clear_output
 from bokeh.io import push_notebook, show
 from bokeh.layouts import layout
@@ -24,6 +26,7 @@ from bokeh.plotting import figure
 from bokeh.models import Slider, Range1d, LinearAxis
 from bokeh.application import Application
 from bokeh.application.handlers import FunctionHandler
+from bokeh.palettes import Category10_10
 from matplotlib.colors import rgb_to_hsv
 from scipy.ndimage.measurements import center_of_mass
 from IPython.core.debugger import set_trace
@@ -42,79 +45,71 @@ from bokeh.io import export_svgs
 
 
 class VArrayViewer():
-    def __init__(self, varr, framerate=30, rerange=None):
+    def __init__(self, varr, framerate=30, rerange=None, compute=True, datashading=True):
         if isinstance(varr, list):
-            varr = xr.merge(varr)
-        self.ds = hv.Dataset(varr)
+            self.ds = xr.merge(varr)
+        else:
+            self.ds = varr.to_dataset()
+        # self.ds = hv.Dataset(varr)
+        self.mean = self.ds.mean(['height', 'width'])
+        self.max = self.ds.max(['height', 'width'])
+        self.min = self.ds.min(['height', 'width'])
         self.framerate = framerate
-        self._f = varr.coords['frame'].values.tolist()
-        self._h = varr.sizes['height']
-        self._w = varr.sizes['width']
+        self._f = self.ds.coords['frame'].values
+        self._h = self.ds.sizes['height']
+        self._w = self.ds.sizes['width']
         self.rerange = rerange
         CStream = Stream.define(
             'CStream',
-            f=param.Integer(default=0, bounds=self.ds.range('frame')))
+            f=param.Integer(default=0, bounds=(self._f.min(), self._f.max())))
         self.stream = CStream()
         self.widgets = self._widgets()
+        self._compute = compute
+        self._datashade = datashading
+        if compute:
+            print("computing summary")
+            with ProgressBar():
+                self.mean = self.mean.compute()
+                self.max = self.max.compute()
+                self.min = self.min.compute()
 
-    def show(self, use_datashade=False):
+    def show(self):
         imdict = OrderedDict()
         meandict = OrderedDict()
-        ds_mean = self.ds.aggregate(dimensions='frame', function=np.mean)
-        ds_max = self.ds.aggregate(dimensions='frame', function=np.max)
-        ds_min = self.ds.aggregate(dimensions='frame', function=np.min)
-        for dim in self.ds.vdims:
-            cur_d = self.ds.reindex(vdims=[dim.name])
-            fim = fct.partial(self._img, dat=cur_d)
+        for vname, varr in self.ds.items():
+            fim = fct.partial(self._img, dat=varr)
             im = hv.DynamicMap(fim, streams=[self.stream])
             im = regrid(im, height=self._h, width=self._w)
             im = im(plot={'width': self._w, 'height': self._h})
             if self.rerange:
-                im = im.redim.range(**{dim.name: self.rerange})
+                im = im.redim.range(**{vname: self.rerange})
             xyrange = RangeXY(source=im)
             xyrange = xyrange.rename(x_range='w', y_range='h')
-            fhist = fct.partial(self._hist, dat=cur_d)
+            fhist = fct.partial(self._hist, dat=varr)
             hist = hv.DynamicMap(fhist, streams=[self.stream, xyrange])
             hist = hist(plot={'width': int(np.around(self._w * 0.35)), 'height': self._h})
-            cur_mdict = OrderedDict()
-            dmean = hv.Curve(ds_mean, kdims='frame', vdims=dim.name)
-            cur_mdict['mean'] = dmean(plot={'tools': ['hover']})
-            dmax = hv.Curve(ds_max, kdims='frame', vdims=dim.name)
-            cur_mdict['max'] = dmax(plot={'tools': ['hover']})
-            dmin = hv.Curve(ds_min, kdims='frame', vdims=dim.name)
-            cur_mdict['min'] = dmin(plot={'tools': ['hover']})
-            mean = hv.NdOverlay(cur_mdict, kdims=['variable'])
-            if use_datashade:
-                c_keys = OrderedDict()
-                legends = OrderedDict()
-                c_keys['mean'] = Sets1to3[0]
-                legends['mean'] = hv.Points(
-                    [0, 0]).opts(style=dict(color=Sets1to3[0]))
-                c_keys['max'] = Sets1to3[1]
-                legends['max'] = hv.Points(
-                    [0, 0]).opts(style=dict(color=Sets1to3[1]))
-                c_keys['min'] = Sets1to3[2]
-                legends['min'] = hv.Points(
-                    [0, 0]).opts(style=dict(color=Sets1to3[2]))
-                mean = datashade(
-                    mean,
-                    aggregator=count_cat('variable'),
-                    height=300,
-                    width=752,
-                    color_key=c_keys)
-                leg = hv.NdOverlay(legends)
-                leg = leg(plot={'width': self._w, 'height': int(np.around(self._h * 0.6))})
-                mean = mean * leg
-            mean = mean(plot={'width': self._w, 'height': int(np.around(self._h * 0.6))})
-            vl = hv.DynamicMap(lambda f: hv.VLine(f), streams=[self.stream])
-            vl = vl(style={'color': 'red'})
-            image = im.relabel(group=dim.name, label='Image')
-            histtogram = hist.relabel(group=dim.name, label='Histogram')
-            mean = (mean * vl).relabel(group=dim.name, label='Mean')
-            imdict[dim.name] = image << histtogram
-            meandict[dim.name] = mean
+            if self._compute:
+                cur_mdict = OrderedDict()
+                dmean = hv.Curve(self.mean, kdims='frame', vdims=vname)
+                cur_mdict['mean'] = dmean(plot={'tools': ['hover']})
+                dmax = hv.Curve(self.max, kdims='frame', vdims=vname)
+                cur_mdict['max'] = dmax(plot={'tools': ['hover']})
+                dmin = hv.Curve(self.min, kdims='frame', vdims=vname)
+                cur_mdict['min'] = dmin(plot={'tools': ['hover']})
+                mean = hv.NdOverlay(cur_mdict, kdims=['variable'])
+                if self._datashade:
+                    mean = datashade_ndcurve(mean)
+                vl = hv.DynamicMap(lambda f: hv.VLine(f), streams=[self.stream])
+                vl = vl(style={'color': 'red'})
+                mean = (mean * vl).relabel(group=vname, label='Mean')
+                mean = mean.opts(
+                    plot={'width': self._w, 'height': int(np.around(self._h * 0.6))})
+                meandict[vname] = mean
+            image = im.relabel(group=vname, label='Image')
+            histtogram = hist.relabel(group=vname, label='Histogram')
+            imdict[vname] = image << histtogram
         return hv.Layout(list(imdict.values()) + list(meandict.values())).cols(
-            len(self.ds.vdims))
+            len(self.ds))
 
     def _widgets(self):
         w_paly = iwgt.Play(
@@ -124,7 +119,7 @@ class VArrayViewer():
             interval=1000 / self.framerate)
         w_frame = iwgt.SelectionSlider(
             value = self._f[0],
-            options = self._f,
+            options = self._f.tolist(),
             continuous_update=False,
             description="Frame:"
         )
@@ -133,7 +128,7 @@ class VArrayViewer():
         return iwgt.HBox([w_paly, w_frame])
 
     def _img(self, dat, f):
-        return hv.Image(dat.select(frame=f), kdims=['width', 'height'])
+        return hv.Image(dat.sel(frame=f).compute(), kdims=['width', 'height'])
 
     def _hist(self, dat, f, w, h):
         if w and h:
@@ -663,6 +658,21 @@ def generate_videos(minian, vpath, chk=None, pre_compute=False):
 #         vwrite(vpath, fm.values)
 #     vwrt.close()
 
+
+def datashade_ndcurve(ovly, kdim=None):
+    if not kdim:
+        kdim = ovly.kdims[0].name
+    var = np.unique(ovly.dimension_values(kdim)).tolist()
+    color_key = [(v, Category10_10[iv]) for iv, v in enumerate(var)]
+    color_pts = hv.NdOverlay(
+        {k: hv.Points([0, 0], label=str(k)).opts(style=dict(color=v)) for k, v in color_key})
+    ds_ovly = dynspread(datashade(
+        ovly,
+        aggregator=count_cat(kdim),
+        color_key=dict(color_key), min_alpha=128, normalization='eq_hist'))
+    return ds_ovly * color_pts
+
+
 def construct_G(g, T):
     cur_c, cur_r = np.zeros(T), np.zeros(T)
     cur_c[0] = 1
@@ -680,56 +690,147 @@ def convolve_G(s, g):
         c = s.copy()
     return c
 
-def construct_pulse_response(g):
-    s = np.zeros(500)
-    s[10] = 1
+def construct_pulse_response(g, length=500):
+    s = np.zeros(length)
+    s[np.arange(0, length, 500)] = 1
     c = convolve_G(s, g)
     return s, c
+
+
+def centroid(A):
+    def rel_cent(im):
+        cent = np.array(center_of_mass(im))
+        return cent / im.shape
+    cents = (xr.apply_ufunc(
+        rel_cent, A.chunk(dict(height=-1, width=-1)),
+        input_core_dims=[['height', 'width']],
+        output_core_dims=[['dim']],
+        vectorize=True,
+        dask='parallelized',
+        output_dtypes=[np.float],
+        output_sizes=dict(dim=2))
+             .assign_coords(dim=['height', 'width']))
+    cents_df = (cents.rename('cents').to_series().unstack()
+               .reset_index().rename_axis(None, axis='columns'))
+    cents_df['height'] *= A.coords['height'].max().values
+    cents_df['width'] *= A.coords['width'].max().values
+    meta_df = (cents.rename('cents').to_dataframe().reset_index()
+               .drop(['dim', 'cents'], axis='columns').drop_duplicates())
+    cents_df = cents_df.merge(meta_df, on='unit_id')
+    return cents_df
 
 
 def visualize_seeds(Y, seeds):
     pass
 
-def visualize_temporal_update(YA, C, S, g, sig, norm=True):
-    YA = YA.sel(unit_id=C.coords['unit_id'])
-    if norm:
-        C_norm = xr.apply_ufunc(
-            normalize, C, input_core_dims=[['frame']], output_core_dims=[['frame']],
-            vectorize=True, dask='parallelized', output_dtypes=[C.dtype])
-        S_norm = xr.apply_ufunc(
-            normalize, S, input_core_dims=[['frame']], output_core_dims=[['frame']],
-            vectorize=True, dask='parallelized', output_dtypes=[S.dtype])
-        YA_norm = xr.apply_ufunc(
-            normalize, YA.compute(), input_core_dims=[['frame']], output_core_dims=[['frame']],
-            vectorize=True, dask='parallelized', output_dtypes=[YA.dtype])
-        sig_norm = xr.apply_ufunc(
-            normalize, sig, input_core_dims=[['frame']], output_core_dims=[['frame']],
-            vectorize=True, dask='parallelized', output_dtypes=[sig.dtype])
+
+def visualize_spatial_update(A_dict, C_dict, kdims=None):
+    if not kdims:
+        A_dict = dict(dummy=A_dict)
+        C_dict = dict(dummy=C_dict)
+    hv_pts_dict, hv_A_dict, hv_Ab_dict, hv_C_dict = (
+        dict(), dict(), dict(), dict())
+    for key, A in A_dict.items():
+        A = A.compute()
+        C = C_dict[key].compute()
+        h, w = A.sizes['height'], A.sizes['width']
+        cents_df = centroid(A)
+        hv_pts_dict[key] = (hv.Points(cents_df,
+                                      kdims=['width', 'height'],
+                                      vdims=['unit_id'])
+                            .opts(plot=dict(tools=['hover']),
+                                  style=dict(fill_alpha=0.2,
+                                             line_alpha=0, size=8)))
+        hv_A_dict[key] = hv.Image(A.sum('unit_id').rename('A'),
+                                  kdims=['width', 'height'])
+        hv_Ab_dict[key] = hv.Image((A > 0).sum('unit_id').rename('A_bin'),
+                                   kdims=['width', 'height'])
+        hv_C_dict[key] = hv.Dataset(C.rename('C')).to(hv.Curve, kdims='frame')
+    cropts = {'plot': {
+        'height': int(np.around(0.13 * w)),
+        'width': int(np.around(1.8 * w))}}
+    hv_pts = hv.HoloMap(hv_pts_dict, kdims=kdims)
+    hv_A = (regrid(hv.HoloMap(hv_A_dict, kdims=kdims))
+            .opts(plot=dict(height=h, width=w, colorbar=True),
+                  style=dict(cmap='Viridis')))
+    hv_Ab = (regrid(hv.HoloMap(hv_Ab_dict, kdims=kdims))
+            .opts(plot=dict(height=h, width=w, colorbar=True),
+                  style=dict(cmap='Viridis')))
+    hv_C = (datashade(hv.HoloMap(hv_C_dict, kdims=kdims).collate()
+                      .grid('unit_id').add_dimension('time', 0, 0),
+                      min_alpha=128)
+            .map(lambda cr: cr.opts(**cropts), hv.RGB))
+    return ((hv_pts * hv_A).relabel('Spatial Matrix')
+            + (hv_pts * hv_Ab).relabel('Binary Spatial Matrix')
+            + hv_C.relabel('Temporal Components')
+            + hv.Div('')).cols(2)
+
+
+def visualize_temporal_update(YA_dict, C_dict, S_dict, g_dict, sig_dict, A_dict, kdims=None, norm=True, datashading=True):
+    inputs = [YA_dict, C_dict, S_dict, sig_dict, g_dict]
+    if not kdims:
+        inputs = [dict(dummy=i) for i in inputs]
+        A_dict = dict(dummy=A_dict)
+    input_dict = {k: [i[k] for i in inputs] for k in inputs[0].keys()}
+    hv_YA, hv_C, hv_S, hv_sig, hv_C_pul, hv_S_pul, hv_A = [dict() for _ in range(7)]
+    for k, ins in input_dict.items():
+        ins[0] = ins[0].sel(unit_id=ins[1].coords['unit_id'])
+        if norm:
+            ins[:-1] = [xr.apply_ufunc(
+                normalize, i.chunk(dict(frame=-1, unit_id='auto')),
+                input_core_dims=[['frame']],
+                output_core_dims=[['frame']],
+                vectorize=True,
+                dask='parallelized',
+                output_dtypes=[i.dtype]
+            ) for i in ins[:-1]]
+        ins[:] = [i.compute() for i in ins]
+        ya, c, s, sig, g = ins
+        f_crd = ya.coords['frame']
+        s_pul, c_pul = xr.apply_ufunc(
+            construct_pulse_response, g,
+            input_core_dims=[['lag']],
+            output_core_dims=[['t'], ['t']],
+            vectorize=True,
+            # kwargs=dict(length=len(f_crd)),
+            output_sizes=dict(t=500))
+        s_pul, c_pul = (s_pul.assign_coords(t=f_crd.values[:500]),
+                        c_pul.assign_coords(t=f_crd.values[:500]))
+        pul_range = (
+            f_crd.min(),
+            int(np.around(f_crd.min() + (f_crd.max() - f_crd.min()) / 2)))
+        hv_S_pul[k], hv_C_pul[k] = [
+            (hv.Dataset(tr.rename('Response (A.U.)'))
+             .to(hv.Curve, kdims=['t'])) for tr in [s_pul, c_pul]]
+        hv_YA[k], hv_C[k], hv_S[k], hv_sig[k] = [
+            (hv.Dataset(tr.rename('Intensity (A.U.)'))
+             .to(hv.Curve, kdims=['frame'])) for tr in [ya, c, s, sig]]
+        hv_A[k] = (hv.Dataset(A_dict[k].rename('A'))
+                   .to(hv.Image, kdims=['width', 'height']))
+        h, w = A_dict[k].sizes['height'], A_dict[k].sizes['width']
+    hvobjs = [hv_YA, hv_C, hv_S, hv_sig, hv_C_pul, hv_S_pul, hv_A]
+    hvobjs[:] = [hv.HoloMap(hvobj, kdims=kdims).collate() for hvobj in hvobjs]
+    hv_unit = {'Raw Signal': hvobjs[0], 'Fitted Calcium Trace': hvobjs[1],
+               'Fitted Spikes': hvobjs[2], 'Fitted Signal': hvobjs[3]}
+    hv_pul = {'Simulated Calcium': hvobjs[4], 'Simulated Spike': hvobjs[5]}
+    hv_unit = hv.HoloMap(hv_unit, kdims='traces').collate().overlay('traces')
+    hv_pul = hv.HoloMap(hv_pul, kdims='traces').collate().overlay('traces')
+    if datashading:
+        hv_unit = datashade_ndcurve(hv_unit, 'traces')
+        hv_pul = datashade_ndcurve(hv_pul, 'traces')
+        hv_A = regrid(hvobjs[6])
     else:
-        C_norm = C
-        S_norm = S
-        YA_norm = YA
-        sig_norm = sig
-    s_pul, c_pul = xr.apply_ufunc(
-        construct_pulse_response, g.compute(),
-        input_core_dims=[['lag']], output_core_dims=[['frame'], ['frame']],
-        vectorize=True, output_sizes=dict(t=500))
-    s_pul = s_pul.assign_coords(frame=np.arange(500))
-    c_pul = c_pul.assign_coords(frame=np.arange(500))
-    hv_s_pul = hv.Dataset(s_pul.rename('s_pul'), kdims=['unit_id', 'frame'])
-    hv_c_pul = hv.Dataset(c_pul.rename('c_pul'), kdims=['unit_id', 'frame'])
-    with ProgressBar():
-        hv_C = hv.Dataset(C_norm.compute().rename('Calcium trace'), kdims=['unit_id', 'frame'])
-        hv_S = hv.Dataset(S_norm.compute().rename('Spike'), kdims=['unit_id', 'frame'])
-        hv_YA = hv.Dataset(YA_norm.compute().rename('Raw'), kdims=['unit_id', 'frame'])
-        hv_sig = hv.Dataset(sig_norm.compute().rename('Fitted'), kdims=['unit_id', 'frame'])
-    hv_obj = hv_YA.to(hv.Curve, kdims=['frame'], label='Raw Signal').opts(style=dict(alpha=0.7))\
-    * hv_C.to(hv.Curve, kdims=['frame'], label='Fitted Calcium Trace')\
-    * hv_S.to(hv.Curve, kdims=['frame'], label='Fitted Spikes')\
-    * hv_sig.to(hv.Curve, kdims=['frame'], label='Fitted Signal')\
-    + hv_c_pul.to(hv.Curve, kdims=['frame'], label='Simulated Calcium')\
-    * hv_s_pul.to(hv.Curve, kdims=['frame'], label='Simultaed Spike')
-    return hv_obj.cols(1)
+        hv_unit = hv.DynamicMap(hv_unit)
+        hv_pul = hv.DynamicMap(hv_pul)
+        hv_A = hv.DynamicMap(hvobjs[6])
+    hv_unit = hv_unit.opts(plot=dict(height=h, width=2*w))
+    hv_pul = (hv_pul.opts(plot=dict(height=h, width=w))
+              .redim(t=hv.Dimension('t', soft_range=pul_range)))
+    hv_A = hv_A.opts(plot=dict(height=h, width=w), style=dict(cmap='Viridis'))
+    return (hv_unit.relabel("Temporal Traces")
+            + hv.Div('')
+            + hv_pul.relabel("Simulated Pulse Response")
+            + hv_A.relabel("Spatial Footprint")).cols(2)
 
 
 def flatten(l):
