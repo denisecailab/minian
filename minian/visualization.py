@@ -488,6 +488,8 @@ class AlignViewer():
     def __init__(self, shiftds, sampling=2):
         self.shiftds = shiftds
         self.temps = shiftds['temps']
+        self.hh = self.temps.sizes['height']
+        self.ww = self.temps.sizes['width']
         self.mask = xr.zeros_like(self.temps, dtype=bool)
         self.ls_anm = np.unique(shiftds.coords['animal'].values)
         self.ls_ss = np.unique(shiftds.coords['session'].values)
@@ -496,7 +498,7 @@ class AlignViewer():
             anm=param.Selector(self.ls_anm),
             ss=param.Selector(self.ls_ss))
         self.str_sel = Selection(anm=self.ls_anm[0], ss=self.ls_ss[0])
-        self.sampling = sampling
+        # self.sampling = sampling
         self.str_box = BoxEdit()
         self.box = hv.DynamicMap(self._box, streams=[self.str_box])
         self.box = self.box.opts(
@@ -548,10 +550,18 @@ class AlignViewer():
         return iwgt.HBox([sel_anm, sel_ss, bt_mask0, bt_mask])
 
     def _get_objs(self):
-        im0 = regrid(hv.DynamicMap(self._temp0, streams=[self.str_sel]))
-        ims = regrid(hv.DynamicMap(self._temps, streams=[self.str_sel]))
-        re = regrid(hv.DynamicMap(self._re, streams=[self.str_sel]))
-        return ims * self.box.clone(link_inputs=False) + im0 * self.box + re
+        opts = {
+            'plot': {'height': self.hh, 'width': self.ww, 'colorbar': True},
+            'style': {'cmap': 'Viridis'}}
+        im0 = (regrid(hv.DynamicMap(self._temp0, streams=[self.str_sel]))
+               .opts(**opts))
+        ims = (regrid(hv.DynamicMap(self._temps, streams=[self.str_sel]))
+               .opts(**opts))
+        re = (regrid(hv.DynamicMap(self._re, streams=[self.str_sel]))
+              .opts(**opts))
+        return ((im0 * self.box).relabel("Template")
+                + (ims * self.box.clone(link_inputs=False)).relabel("Target")
+                + re.relabel("Shifted Target"))
 
     def _save_mask0(self, _):
         print("save mask 0")
@@ -697,7 +707,7 @@ def construct_pulse_response(g, length=500):
     return s, c
 
 
-def centroid(A):
+def centroid(A, verbose=False):
     def rel_cent(im):
         cent = np.array(center_of_mass(im))
         return cent / im.shape
@@ -710,15 +720,16 @@ def centroid(A):
         output_dtypes=[np.float],
         output_sizes=dict(dim=2))
              .assign_coords(dim=['height', 'width']))
-    cents_df = (cents.rename('cents').to_series().unstack()
-               .reset_index().rename_axis(None, axis='columns'))
+    if verbose:
+        print("computing centroids")
+        with ProgressBar():
+            cents=cents.compute()
+    cents_df = (cents.rename('cents').to_series().dropna()
+                .unstack('dim').rename_axis(None, axis='columns')
+                .reset_index())
     cents_df['height'] *= A.coords['height'].max().values
     cents_df['width'] *= A.coords['width'].max().values
-    meta_df = (cents.rename('cents').to_dataframe().reset_index()
-               .drop(['dim', 'cents'], axis='columns').drop_duplicates())
-    cents_df = cents_df.merge(meta_df, on='unit_id')
     return cents_df
-
 
 def visualize_seeds(Y, seeds):
     pass
