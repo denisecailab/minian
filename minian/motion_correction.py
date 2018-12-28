@@ -354,10 +354,10 @@ def apply_translation(img, shift):
     return np.roll(img, shift, axis=(1, 0))
 
 
-def estimate_shift_fft(varr, on='first', pad_f=1, pct_thres=None):
+def estimate_shift_fft(varr, dim='frame', on='first', pad_f=1, pct_thres=None):
     varr = varr.chunk(dict(height=-1, width=-1))
     dims = list(varr.dims)
-    dims.remove('frame')
+    dims.remove(dim)
     sizes = [varr.sizes[d] for d in dims]
     if not pct_thres:
         pct_thres = (1 - 10 / (sizes[0] * sizes[1])) * 100
@@ -369,13 +369,13 @@ def estimate_shift_fft(varr, on='first', pad_f=1, pct_thres=None):
     varr_fft = xr.apply_ufunc(
         darr.fft.fft2,
         varr,
-        input_core_dims=[['frame', 'height', 'width']],
-        output_core_dims=[['frame', 'height', 'width']],
+        input_core_dims=[[dim, 'height', 'width']],
+        output_core_dims=[[dim, 'height', 'width']],
         dask='allowed',
         kwargs=dict(s=pad_s),
         output_dtypes=[np.complex64])
     if on == 'mean':
-        meanfm = varr.mean('frame')
+        meanfm = varr.mean(dim)
         src_fft = xr.apply_ufunc(
             darr.fft.fft2,
             meanfm,
@@ -385,11 +385,11 @@ def estimate_shift_fft(varr, on='first', pad_f=1, pct_thres=None):
             kwargs=dict(s=pad_s),
             output_dtypes=[np.complex64])
     elif on == 'first':
-        src_fft = varr_fft.isel(frame=0)
+        src_fft = varr_fft.isel(**{dim: 0})
     elif on == 'last':
-        src_fft = varr_fft.isel(frame=-1)
+        src_fft = varr_fft.isel(**{dim: -1})
     elif on == 'perframe':
-        src_fft = varr_fft.shift(frame=1)
+        src_fft = varr_fft.shift(**{dim: 1})
     else:
         print("template not understood. returning")
         return
@@ -407,7 +407,8 @@ def estimate_shift_fft(varr, on='first', pad_f=1, pct_thres=None):
         output_sizes=dict(variable=3))
     res = res.assign_coords(variable=['height', 'width', 'corr'])
     return res
-    
+
+
 def mask_shifts(varr_fft, corr, shifts, z_thres, perframe=True, pad_f=1):
     dims = list(varr_fft.dims)
     dims.remove('frame')
@@ -470,6 +471,7 @@ def apply_shifts(varr, shifts):
 
 
 def shift_perframe(fm, sh):
+    sh = np.around(sh).astype(int)
     fm = np.roll(fm, sh, axis=np.arange(fm.ndim))
     index = [slice(None) for _ in range(fm.ndim)]
     for ish, s in enumerate(sh):
