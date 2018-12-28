@@ -14,6 +14,7 @@ import holoviews as hv
 import dask as da
 import dask.array.image as daim
 import dask.array as darr
+import pandas as pd
 import subprocess
 import warnings
 import cv2
@@ -584,6 +585,29 @@ def open_minian(dpath, fname='minian', backend='netcdf', chunks=None):
     else:
         raise NotImplementedError("backend {} not supported".format(backend))
 
+
+def open_minian_mf(dpath, index_dims, result_format='xarray', **kwargs):
+    minian_dict = dict()
+    for nextdir, dirlist, filelist in os.walk(dpath, topdown=False):
+        try:
+            minian = open_minian(nextdir, **kwargs)
+            key = tuple([np.array_str(minian[d].values) for d in index_dims])
+            minian_dict[key] = minian
+            print("opening dataset under {}".format(nextdir))
+            print(["{}: {}".format(d, v) for d, v in zip(index_dims, key)])
+        except FileNotFoundError:
+            pass
+    if result_format is 'xarray':
+        return xrconcat_recursive(minian_dict, index_dims)
+    elif result_format is 'pandas':
+        minian_df = pd.Series(minian_dict).rename('minian')
+        minian_df.index.set_names(index_dims, inplace=True)
+        return minian_df.to_frame()
+    else:
+        raise NotImplementedError(
+            "format {} not understood".format(result_format))
+
+
 def save_minian(var, dpath, fname='minian', backend='netcdf', meta_dict=None):
     dpath = os.path.normpath(dpath)
     ds = var.to_dataset()
@@ -612,6 +636,24 @@ def delete_variable(fpath, varlist, del_org=False):
     if del_org:
         os.remove(fpath_bak)
     return "deleted {} in file {}".format(str(varlist), fpath)
+
+
+def xrconcat_recursive(var_dict, dims):
+    if len(dims) > 1:
+        try:
+            var_dict = {k: v.to_dataset() for k, v in var_dict.items()}
+        except AttributeError:
+            pass
+        var_ps = pd.Series(var_dict)
+        var_ps.index.set_names(dims, inplace=True)
+        xr_ls = []
+        for idx, var in var_ps.groupby(level=dims[0]):
+            var.index = var.index.droplevel(dims[0])
+            xarr = xrconcat_recursive(var.to_dict(), dims[1:])
+            xr_ls.append(xarr)
+        return xr.concat(xr_ls, dim=dims[0])
+    else:
+        return xr.concat(var_dict.values(), dim=dims[0])
 
 
 def update_meta(dpath, pattern=r'^minian\.nc$', meta_dict=None):
