@@ -8,8 +8,11 @@ import dask as da
 from dask.diagnostics import ProgressBar
 from scipy.ndimage.measurements import center_of_mass
 from scipy.stats import pearsonr
+from scipy.spatial.distance import cdist
 from .preprocessing import remove_background
-from .motion_correction import shift_fft
+from .motion_correction import estimate_shift_fft, apply_shifts
+from .utilities import xrconcat_recursive
+from .visualization import centroid
 from IPython.core.debugger import set_trace
 
 
@@ -59,8 +62,56 @@ def get_minian_list(path, pattern=r'^minian.nc$'):
         mnlist += mn_paths
     return mnlist
 
+def estimate_shifts(minian_df, by='session', to='first', temp_var='org', template=None, rm_background=False):
+    if template is not None:
+        minian_df['template'] = template
+        
+    def get_temp(row):
+        ds, temp = row['minian'], row['template']
+        try:
+            return ds.isel(frame=temp).drop('frame')
+        except TypeError:
+            func_dict = {
+                'mean': lambda v: v.mean('frame'),
+                'max': lambda v: v.max('frame')}
+            try:
+                return func_dict[temp](ds)
+            except KeyError:
+                raise NotImplementedError(
+                    "template {} not understood".format(temp))
+    
+    minian_df['template'] = minian_df.apply(get_temp, axis='columns')
+    grp_dims = list(minian_df.index.names)
+    grp_dims.remove(by)
+    temp_dict, shift_dict, corr_dict, tempsh_dict = [dict() for _ in range(4)]
+    for idxs, df in minian_df.groupby(level=grp_dims):
+        try:
+            temp_ls = [t[temp_var] for t in df['template']]
+        except KeyError:
+            raise KeyError(
+                "variable {} not found in dataset".format(temp_var))
+        temps = xr.concat(temp_ls, dim=by)
+        res = estimate_shift_fft(temps, dim=by)
+        shifts = res.sel(variable=['height', 'width'])
+        corrs = res.sel(variable='corr')
+        temps_sh = apply_shifts(temps, shifts)
+        temp_dict[idxs] = temps
+        shift_dict[idxs] = shifts
+        corr_dict[idxs] = corrs
+        tempsh_dict[idxs] = temps_sh
+    temps = xrconcat_recursive(temp_dict, grp_dims).rename('temps')
+    shifts = xrconcat_recursive(shift_dict, grp_dims).rename('shifts')
+    corrs = xrconcat_recursive(corr_dict, grp_dims).rename('corrs')
+    temps_sh = xrconcat_recursive(tempsh_dict, grp_dims).rename('temps_shifted')
+    with ProgressBar():
+        temps = temps.compute()
+        shifts = shifts.compute()
+        corrs = corrs.compute()
+        temps_sh = temps_sh.compute()
+    return xr.merge([temps, shifts, corrs, temps_sh])
 
-def estimate_shifts(mn_list,
+
+def estimate_shifts_old(mn_list,
                     temp_list,
                     z_thres=None,
                     rm_background=False,
@@ -131,7 +182,7 @@ def estimate_shifts(mn_list,
     return shifts, corrs, temps
 
 
-def apply_shifts(var, shifts, inplace=False, dim='session'):
+def apply_shifts_old(var, shifts, inplace=False, dim='session'):
     shifts = shifts.dropna(dim)
     var_list = []
     for dim_n, sh in shifts.groupby(dim):
@@ -141,8 +192,12 @@ def apply_shifts(var, shifts, inplace=False, dim='session'):
                          .shift(**sh_dict).rename(var.name + "_shifted")))
     return xr.concat(var_list, dim=dim)
 
+def calculate_centroids(A, window):
+    A = A.where(window, 0)
+    return centroid(A, verbose=True)
 
-def calculate_centroids(cnmds, window, grp_dim=['animal', 'session']):
+
+def calculate_centroids_old(cnmds, window, grp_dim=['animal', 'session']):
     print("computing centroids")
     cnt_list = []
     for anm, cur_anm in cnmds.groupby('animal'):
@@ -195,8 +250,75 @@ def centroids(A, window=None):
     return cts_df
 
 
-def calculate_centroid_distance(cents,
-                                cnmds,
+def calculate_centroid_distance(cents, by='session', index_dim=['animal'], tile=(50, 50)):
+    res_list = []
+    print("creating parallel schedule")
+    for idxs, grp in cents.groupby(index_dim):
+        if type(idxs) is not tuple:
+            idxs = (idxs,)
+        for (byA, grpA), (byB, grpB) in itt.combinations(list(grp.groupby(by)), 2):
+            cur_pairs = subset_pairs(grpA, grpB, tile)
+            pairs_ls = list(cur_pairs)
+            subA = (grpA.set_index('unit_id')
+                    .loc[[p[0] for p in pairs_ls]]
+                    .reset_index())
+            subB = (grpB.set_index('unit_id')
+                    .loc[[p[1] for p in pairs_ls]]
+                    .reset_index())
+            dist = da.delayed(pd_dist)(subA, subB).rename('distance')
+            meta_df = pd.concat(
+                [pd.Series([idx] * len(pairs_ls), name=('meta', dim))
+                 for idx, dim in zip(idxs, index_dim)],
+                axis='columns')
+            dist_df = da.delayed(pd.concat)(
+                [subA['unit_id'].rename(byA), subB['unit_id'].rename(byB), dist], axis='columns')
+            dist_df = dist_df.rename(columns={
+                'distance': ('variable', 'distance'),
+                byA: (by, byA),
+                byB: (by, byB)})
+            res_df = da.delayed(pd.concat)([meta_df, dist_df], axis='columns')
+            res_list.append(res_df)
+    print("computing distances")
+    with ProgressBar():
+        res_list = da.compute(res_list)[0]
+    return pd.concat(res_list, ignore_index=True)
+            
+
+            
+def subset_pairs(A, B, tile):
+    Ah, Aw, Bh, Bw = A['height'], A['width'], B['height'], B['width']
+    hh = (min(Ah.min(), Bh.min()), max(Ah.max(), Bh.max()))
+    ww = (min(Aw.min(), Bw.min()), max(Aw.max(), Bw.max()))
+    dh, dw = np.ceil(tile[0] / 2), np.ceil(tile[1] / 2)
+    tile_h = np.linspace(hh[0], hh[1], np.ceil((hh[1] - hh[0]) * 2 / tile[0]))
+    tile_w = np.linspace(ww[0], ww[1], np.ceil((ww[1] - ww[0]) * 2 / tile[1]))
+    pairs = set()
+    for h, w in itt.product(tile_h, tile_w):
+        curA = A[
+            Ah.between(h - dh, h + dh)
+            & Aw.between(w - dw, w + dw)]
+        curB = B[
+            Bh.between(h - dh, h + dh)
+            & Bw.between(w - dw, w + dw)]
+        Au, Bu = curA['unit_id'].values, curB['unit_id'].values
+        pairs.update(
+            set(map(tuple, cartesian(Au, Bu).tolist())))
+    return pairs
+
+
+def pd_dist(A, B):
+    return np.sqrt(
+        ((A[['height', 'width']] - B[['height', 'width']])**2)
+        .sum('columns'))
+    
+    
+def cartesian(*args):
+    n = len(args)
+    return np.array(np.meshgrid(*args)).T.reshape((-1, n))
+
+
+def calculate_centroid_distance_old(cents,
+                                A,
                                 window,
                                 grp_dim=['animal'],
                                 tile=(50, 50),
@@ -204,11 +326,12 @@ def calculate_centroid_distance(cents,
                                 hamming=True,
                                 corr=False):
     dist_list = []
+    A = da.delayed(A)
     for cur_anm, cur_grp in cents.groupby('animal'):
         print("processing animal: {}".format(cur_anm))
-        cur_cnm = cnmds.sel(animal=cur_anm)
+        cur_A = A.sel(animal=cur_anm)
         cur_wnd = window.sel(animal=cur_anm)
-        dist = centroids_distance(cur_grp, cur_cnm, cur_wnd, shift, hamming,
+        dist = centroids_distance(cur_grp, cur_A, cur_wnd, shift, hamming,
                                   corr, tile)
         dist['meta', 'animal'] = cur_anm
         dist_list.append(dist)
@@ -216,8 +339,8 @@ def calculate_centroid_distance(cents,
     return dist
 
 
-def centroids_distance(cents,
-                       cnmds,
+def centroids_distance_old(cents,
+                       A,
                        window,
                        shift,
                        hamming,
@@ -229,7 +352,7 @@ def centroids_distance(cents,
     dist_list = []
     for ssA, ssB in itt.combinations(sessions, 2):
         # dist = _calc_cent_dist(ssA, ssB, cents, cnmds, window, tile, dim_h, dim_w)
-        dist = da.delayed(_calc_cent_dist)(ssA, ssB, cents, cnmds, window,
+        dist = da.delayed(_calc_cent_dist)(ssA, ssB, cents, A, window,
                                            tile, dim_h, dim_w, shift, hamming,
                                            corr)
         dist_list.append(dist)
@@ -239,7 +362,7 @@ def centroids_distance(cents,
     return dists
 
 
-def _calc_cent_dist(ssA, ssB, cents, cnmds, window, tile, dim_h, dim_w, shift,
+def _calc_cent_dist_old(ssA, ssB, cents, A, window, tile, dim_h, dim_w, shift,
                     hamming, corr):
     ssA_df = cents[cents['session'] == ssA]
     ssB_df = cents[cents['session'] == ssB]
@@ -279,11 +402,11 @@ def _calc_cent_dist(ssA, ssB, cents, cnmds, window, tile, dim_h, dim_w, shift,
         diff = diff.T.squeeze()
         cur_dist = np.sqrt((diff**2).sum())
         if corr or hamming:
-            cur_A_A = cnmds.sel(
-                session=ssA, unit_id=uidA)['A_shifted'].where(
+            cur_A_A = A.sel(
+                session=ssA, unit_id=uidA).where(
                     window, drop=True)
-            cur_A_B = cnmds.sel(
-                session=ssB, unit_id=uidB)['A_shifted'].where(
+            cur_A_B = A.sel(
+                session=ssB, unit_id=uidB).where(
                     window, drop=True)
         if shift:
             cur_A_B = cur_A_B.shift(**diff.round().astype(int).to_dict())
