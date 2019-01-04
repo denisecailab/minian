@@ -8,6 +8,7 @@ import pandas as pd
 import colorsys
 import param
 import dask.array as da
+import panel as pn
 from .utilities import scale_varr
 from .motion_correction import shift_fft
 from collections import OrderedDict
@@ -26,7 +27,7 @@ from bokeh.plotting import figure
 from bokeh.models import Slider, Range1d, LinearAxis
 from bokeh.application import Application
 from bokeh.application.handlers import FunctionHandler
-from bokeh.palettes import Category10_10
+from bokeh.palettes import Category10_10, Viridis256
 from matplotlib.colors import rgb_to_hsv
 from scipy.ndimage.measurements import center_of_mass
 from IPython.core.debugger import set_trace
@@ -35,6 +36,10 @@ from skvideo.io import FFmpegWriter, vwrite
 from scipy import linalg
 from bokeh import models
 from bokeh.io import export_svgs
+from panel.interact import interact as pninteract
+from panel.layout import Row, Column
+from panel import widgets as pnwgt
+from scipy.spatial import cKDTree
 
 # def update_override(self, **kwargs):
 #     self._set_stream_parameters(**kwargs)
@@ -207,7 +212,7 @@ class MCViewer():
         return hv.RGB(dat.select(frame=f), kdims=['width', 'height'])
 
 
-class CNMFViewer():
+class CNMFViewer_old():
     def __init__(self, cnmf, Y, framerate=30):
         self.cnmf = cnmf
         # self.cnmf_vld = cnmf.sel(unit_id=cnmf.attrs['unit_mask'])
@@ -482,6 +487,382 @@ class CNMFViewer():
             iwgt.HBox([w_frame, w_play, w_update_mov]),
             iwgt.HBox([w_select, w_update, w_overlay])
         ])
+    
+    
+class CNMFViewer():
+    def __init__(self, minian=None, A=None, C=None, S=None, org=None, sortNN=True):
+        self._A = A if A else minian['A']
+        self._C = C if C else minian['C']
+        self._S = S if S else minian['S']
+        self._org = org if org else minian['org']
+        self._C_norm = xr.apply_ufunc(
+                normalize, self._C.chunk(dict(frame=-1, unit_id='auto')),
+                input_core_dims=[['frame']],
+                output_core_dims=[['frame']],
+                vectorize=True,
+                dask='parallelized',
+                output_dtypes=[self._C.dtype])
+        self._S_norm = xr.apply_ufunc(
+                normalize, self._S.chunk(dict(frame=-1, unit_id='auto')),
+                input_core_dims=[['frame']],
+                output_core_dims=[['frame']],
+                vectorize=True,
+                dask='parallelized',
+                output_dtypes=[self._C.dtype])
+        self.cents = centroid(self._A, verbose=True)
+        print("computing sum projection")
+        with ProgressBar():
+            self.Asum = self._A.sum('unit_id').compute()
+        self._NNsort = sortNN
+        self._normalize = False
+        self._useAC = True
+        self._showC = True
+        self._showS = True
+        meta_dims = list(set(self._org.dims) - {'frame', 'height', 'width'})
+        self.meta_dicts = {d: list(self._org.coords[d].values) for d in meta_dims}
+        self.metas = {d: v[0] for d, v in self.meta_dicts.items()}
+        if self._NNsort:
+            self.cents['NNord'] = (self.cents.groupby(meta_dims, group_keys=False)
+                                   .apply(NNsort))
+            NNcoords = (self.cents.set_index(meta_dims + ['unit_id'])['NNord']
+                        .to_xarray())
+            self._A = self._A.assign_coords(NNord=NNcoords)
+            self._C = self._C.assign_coords(NNord=NNcoords)
+            self._S = self._S.assign_coords(NNord=NNcoords)
+            self._C_norm = self._C_norm.assign_coords(NNord=NNcoords)
+            self._S_norm = self._S_norm.assign_coords(NNord=NNcoords)
+        self.update_subs()
+        self.strm_f = DoubleTap(rename=dict(x='f'))
+        self.strm_f.add_subscriber(self.callback_f)
+        self.strm_uid = Selection1D()
+        self.strm_uid.add_subscriber(self.callback_uid)
+        Stream_usub = Stream.define(
+            'Stream_usub',
+            usub=param.List())
+        self.strm_usub = Stream_usub()
+        self.strm_usub.add_subscriber(self.callback_usub)
+        self._AC = self._org.sel(**self.metas)
+        self._mov = self._org.sel(**self.metas)
+        self.pipAC = Pipe([])
+        self.pipmov = Pipe([])
+        self.pipusub = Pipe([])
+        self.wgt_meta = self._meta_wgt()
+        self.wgt_spatial_all = self._spatial_all_wgt()
+        self.spatial_all = self._spatial_all()
+        self.temp_comp_sub = self._temp_comp_sub(self._u[:5])
+        self.wgt_temp_comp = self._temp_comp_wgt()
+
+
+    def update_subs(self):
+        self.A_sub = self._A.sel(**self.metas)
+        self.C_sub = self._C.sel(**self.metas)
+        self.S_sub = self._S.sel(**self.metas)
+        self.org_sub = self._org.sel(**self.metas)
+        self.C_norm_sub = self._C_norm.sel(**self.metas)
+        self.S_norm_sub = self._S_norm.sel(**self.metas)
+        if self._NNsort:
+            self.A_sub = self.A_sub.sortby('NNord')
+            self.C_sub = self.C_sub.sortby('NNord')
+            self.S_sub = self.S_sub.sortby('NNord')
+            self.C_norm_sub = self.C_norm_sub.sortby('NNord')
+            self.S_norm_sub = self.S_norm_sub.sortby('NNord')
+        self._h = (self.A_sub.isel(unit_id=0).dropna('height')
+                   .coords['height'].values)
+        self._w = (self.A_sub.isel(unit_id=0).dropna('width')
+                   .coords['width'].values)
+        self._f = (self.C_sub.isel(unit_id=0).dropna('frame')
+                   .coords['frame'].values)
+        self._u = (self.C_sub.isel(frame=0).dropna('unit_id')
+                   .coords['unit_id'].values)
+        sub = (pd.concat(
+            [self.cents[d] == v for d, v in self.metas.items()],
+            axis='columns').all(axis='columns'))
+        self.cents_sub = self.cents[sub]
+        
+        
+    def compute_subs(self, clicks=None):
+        self.A_sub = self.A_sub.compute()
+        self.C_sub = self.C_sub.compute()
+        self.S_sub = self.S_sub.compute()
+        self.org_sub = self.org_sub.compute()
+        self.C_norm_sub = self.C_norm_sub.compute()
+        self.S_norm_sub = self.S_norm_sub.compute()
+        
+    def update_all(self, clicks=None):
+        self.update_subs()
+        self.strm_uid.event(index=[])
+        self.strm_f.event(x=0)
+        self.update_spatial_all()
+        
+    def callback_uid(self, index=None):
+        self.update_temp()
+        self.update_AC()
+        self.update_usub_lab()
+        
+    def callback_f(self, f, y):
+        if len(self._AC) > 0 and len(self._mov) > 0:
+            fidx = (np.abs(self._f - f).argmin())
+            f = self._f[fidx]
+            if self._useAC:
+                AC = self._AC.sel(frame=f)
+            else:
+                AC = self._AC
+            mov = self._mov.sel(frame=f)
+            self.pipAC.send(AC)
+            self.pipmov.send(mov)
+            try:
+                self.wgt_temp_comp[1].value = int(fidx)
+            except AttributeError:
+                pass
+        else:
+            self.pipAC.send([])
+            self.pipmov.send([])
+            
+    def callback_usub(self, usub=None):
+        self.update_temp_comp_sub(usub)
+        self.update_AC(usub)
+        self.update_usub_lab(usub)
+    
+    def _meta_wgt(self):
+        wgt_meta = {d: pnwgt.Select(
+            name=d, options=v, height=45, width=120)
+                    for d, v in self.meta_dicts.items()}
+        def make_update_func(meta_name):
+            def _update(x):
+                self.metas[meta_name] = x.new
+                self.update_subs()
+            return _update
+        for d, wgt in wgt_meta.items():
+            cur_update = make_update_func(d)
+            wgt.param.watch(cur_update, 'value')
+        wgt_update = pnwgt.Button(
+            name='Refresh', button_type='primary', height=30, width=120)
+        wgt_update.param.watch(self.update_all, 'clicks')
+        wgt_load = pnwgt.Button(
+            name='Load Data', button_type='danger', height=30, width=120)
+        wgt_load.param.watch(self.compute_subs, 'clicks')
+        return pn.layout.WidgetBox(
+            *(list(wgt_meta.values()) + [wgt_update, wgt_load]),
+            width=150)
+    
+    def show(self):
+        return pn.layout.Column(
+            self.spatial_all,
+            pn.layout.Row(
+                pn.layout.Column(
+                    pn.layout.Row(
+                        self.wgt_meta,
+                        self.wgt_spatial_all
+                    ),
+                    self.wgt_temp_comp),
+                self.temp_comp_sub))
+    
+    def _temp_comp_sub(self, usub=None):
+        if usub is None:
+            usub = self.strm_usub.usub
+        if self._normalize:
+            C, S = self.C_norm_sub, self.S_norm_sub
+        else:
+            C, S = self.C_sub, self.S_sub
+        cur_temp = dict()
+        if self._showC:
+            cur_temp['C'] = (
+                hv.Dataset(C.sel(unit_id=usub)
+                           .compute().rename("Intensity (A. U.)")
+                           .dropna('frame', how='all')).to(hv.Curve, 'frame'))
+        if self._showS:
+            cur_temp['S'] = (
+                hv.Dataset(S.sel(unit_id=usub)
+                           .compute().rename("Intensity (A. U.)")
+                           .dropna('frame', how='all')).to(hv.Curve, 'frame'))
+        cur_vl = (hv.DynamicMap(
+            lambda f, y: hv.VLine(f) if f else hv.VLine(0),
+            streams=[self.strm_f])
+                  .opts(style=dict(color='red')))
+        cur_cv = hv.Curve([], kdims=['frame'], vdims=['Internsity (A.U.)'])
+        self.strm_f.source = cur_cv
+        h_cv = len(self._w) // 8
+        w_cv = len(self._w) * 2
+        temp_comp = (cur_cv
+                     * datashade_ndcurve(hv.HoloMap(cur_temp, 'trace')
+                                         .collate().overlay('trace')
+                                         .grid('unit_id')
+                                         .add_dimension('time', 0, 0),
+                                         'trace')                     
+                     .opts(plot=dict(shared_xaxis=True))
+                     .map(lambda p: p.opts(
+                         plot=dict(height=h_cv,
+                                   width=w_cv)),
+                          hv.RGB)
+                     * cur_vl)
+        temp_comp[temp_comp.keys()[0]] = (temp_comp[temp_comp.keys()[0]]
+                                           .opts(plot=dict(height=h_cv + 75)))
+        return pn.panel(temp_comp)
+    
+    def update_temp_comp_sub(self, usub=None):
+        self.temp_comp_sub.objects = self._temp_comp_sub(usub).objects
+        
+    def update_norm(self, norm):
+        self._normalize = norm.new
+        self.update_temp_comp_sub()        
+    
+    def _temp_comp_wgt(self):
+        if self.strm_uid.index:
+            cur_idxs = self.strm_uid.index
+        else:
+            cur_idxs = (self._u)
+        ntabs = np.ceil(len(cur_idxs) / 5)
+        sub_idxs = np.array_split(cur_idxs, ntabs)
+        idxs_dict = OrderedDict([("group{}".format(i), g.tolist())
+                                 for i, g in enumerate(sub_idxs)])
+        def_idxs = list(idxs_dict.values())[0]
+        wgt_grp = pnwgt.Select(
+            name='', options=idxs_dict, width=120, height=30, value=def_idxs)
+        def update_usub(usub):
+            self.strm_usub.event(usub=usub.new)
+        wgt_grp.param.watch(update_usub, 'value')
+        wgt_grp.value = def_idxs
+        self.strm_usub.event(usub=def_idxs)
+        wgt_grp_prv = pnwgt.Button(
+            name='Previous Group', width=120, height=30, button_type='primary')
+        def prv(clicks):
+            cur_val = wgt_grp.value
+            ig = list(idxs_dict.values()).index(cur_val)
+            try:
+                prv_val = idxs_dict[list(idxs_dict.keys())[ig-1]]
+                wgt_grp.value = prv_val
+            except:
+                pass
+        wgt_grp_prv.param.watch(prv, 'clicks')
+        wgt_grp_nxt = pnwgt.Button(
+            name='Next Group', width=120, height=30, button_type='primary')
+        def nxt(clicks):
+            cur_val = wgt_grp.value
+            ig = list(idxs_dict.values()).index(cur_val)
+            try:
+                nxt_val = idxs_dict[list(idxs_dict.keys())[ig+1]]
+                wgt_grp.value = nxt_val
+            except:
+                pass
+        wgt_grp_nxt.param.watch(nxt, 'clicks')
+        wgt_norm = pnwgt.Checkbox(
+            name='Normalize', value=self._normalize, width=120, height=10)
+        wgt_norm.param.watch(self.update_norm, 'value')
+        wgt_showC = pnwgt.Checkbox(
+            name='ShowC', value=self._showC, width=120, height=10)
+        def callback_showC(val):
+            self._showC = val.new
+            self.update_temp_comp_sub()
+        wgt_showC.param.watch(callback_showC, 'value')
+        wgt_showS = pnwgt.Checkbox(
+            name='ShowS', value=self._showS, width=120, height=10)
+        def callback_showS(val):
+            self._showS = val.new
+            self.update_temp_comp_sub()
+        wgt_showS.param.watch(callback_showS, 'value')
+        wgt_play = pnwgt.Player(
+            length=len(self._f), interval=10,
+            value=0, width=280)
+        def play(f):
+            if not f.old == f.new:
+                self.strm_f.event(x=self._f[f.new])
+        wgt_play.param.watch(play, 'value')
+        wgt_groups = pn.layout.Row(
+            pn.layout.WidgetBox(wgt_norm, wgt_showC, wgt_showS, wgt_grp, width=150),
+            pn.layout.WidgetBox(wgt_grp_prv, wgt_grp_nxt, width=150))
+        return pn.layout.Column(wgt_groups, wgt_play)
+    
+    def update_temp_comp_wgt(self):
+        self.wgt_temp_comp.objects = self._temp_comp_wgt().objects
+        
+    def update_temp(self):
+        self.update_temp_comp_wgt()      
+        
+    def update_AC(self, usub=None):
+        if usub is None:
+            usub = self.strm_usub.usub
+        if usub:
+            if self._useAC:
+                umask = ((self.A_sub.sel(unit_id=usub) > 0)
+                         .any('unit_id'))
+                A_sub = (self.A_sub.sel(unit_id=usub)
+                         .where(umask, drop=True).fillna(0))
+                C_sub = self.C_sub.sel(unit_id=usub)
+                AC = xr.apply_ufunc(
+                    da.dot,
+                    A_sub, C_sub,
+                    input_core_dims=[['height', 'width', 'unit_id'], ['unit_id', 'frame']],
+                    output_core_dims=[['height', 'width', 'frame']],
+                    dask='allowed')
+                self._AC = AC.compute()
+                wndh, wndw = AC.coords['height'].values, AC.coords['width'].values
+                window = self.A_sub.sel(
+                    height=slice(wndh.min(), wndh.max()),
+                    width=slice(wndw.min(), wndw.max()))
+                self._AC = self._AC.reindex_like(window).fillna(0)
+                self._mov = (self.org_sub.reindex_like(window)).compute()
+            else:
+                self._AC = self.A_sub.sel(unit_id=usub).sum('unit_id')
+                self._mov = self.org_sub
+            self.strm_f.event(x=0)
+        else:
+            self._AC = xr.DataArray([])
+            self._mov = xr.DataArray([])
+            self.strm_f.event(x=0)
+            
+    def update_usub_lab(self, usub=None):
+        if usub is None:
+            usub = self.strm_usub.usub
+        if usub:
+            self.pipusub.send(
+                self.cents_sub[self.cents_sub['unit_id'].isin(usub)])
+        else:
+            self.pipusub.send([])
+            
+    def _spatial_all_wgt(self):
+        wgt_useAC = pnwgt.Checkbox(
+            name='UseAC', value=self._useAC, width=120, height=15)
+        def callback_useAC(val):
+            self._useAC = val.new
+            self.update_AC()
+        wgt_useAC.param.watch(callback_useAC, 'value')
+        return pn.layout.WidgetBox(wgt_useAC, width=150)
+    
+    def _spatial_all(self):
+        metas = self.metas
+        Asum = (regrid(hv.Image(
+            self.Asum.sel(**metas), ['width', 'height']), precompute=True)
+                .opts(plot=dict(height=len(self._h), width=len(self._w)),
+                      style=dict(cmap='Viridis')))
+        cents = (hv.Dataset(
+            self.cents_sub.drop(['animal', 'session'], axis='columns'),
+            kdims=['width', 'height', 'unit_id'])
+                .to(hv.Points, ['width', 'height'])
+                .opts(style=dict(alpha=0.1,
+                                 line_alpha=0,
+                                 size=5,
+                                 nonselection_alpha=0.1,
+                                 selection_alpha=0.9))
+                .collate()
+                .overlay('unit_id')
+                .opts(plot=dict(tools=['hover', 'box_select'])))
+        self.strm_uid.source = cents
+        fim = fct.partial(hv.Image, kdims=['width', 'height'])
+        AC = (regrid(hv.DynamicMap(fim, streams=[self.pipAC]),
+                     precompute=True)
+              .opts(plot=dict(height=len(self._h), width=len(self._w)),
+                    style=dict(cmap='Viridis')))
+        mov = (regrid(hv.DynamicMap(fim, streams=[self.pipmov]),
+                      precompute=True)
+               .opts(plot=dict(height=len(self._h), width=len(self._w)),
+                     style=dict(cmap='Viridis')))
+        lab = fct.partial(hv.Labels, kdims=['width', 'height'], vdims=['unit_id'])
+        ulab = (hv.DynamicMap(lab, streams=[self.pipusub])
+                .opts(style=dict(text_color='red')))
+        return pn.panel(Asum * cents + AC * ulab + mov)
+    
+    def update_spatial_all(self):
+        self.spatial_all.objects = self._spatial_all().objects
 
 
 class AlignViewer():
@@ -676,10 +1057,13 @@ def datashade_ndcurve(ovly, kdim=None):
     color_key = [(v, Category10_10[iv]) for iv, v in enumerate(var)]
     color_pts = hv.NdOverlay(
         {k: hv.Points([0, 0], label=str(k)).opts(style=dict(color=v)) for k, v in color_key})
-    ds_ovly = dynspread(datashade(
+    ds_ovly = datashade(
         ovly,
         aggregator=count_cat(kdim),
-        color_key=dict(color_key), min_alpha=128, normalization='eq_hist'))
+        color_key=dict(color_key),
+        min_alpha=128,
+        normalization='eq_hist',
+        precompute=True)
     return ds_ovly * color_pts
 
 
@@ -886,3 +1270,28 @@ def _save_to_svg(hv_obj, save):
             save_fp = '{0}.{1}'.format(save_fp, 'svg')
 
         export_svgs(figure, save_fp)
+
+
+def NNsort(cents):
+    cents_hw = cents[['height', 'width']]
+    kdtree = cKDTree(cents_hw)
+    idu_start = cents_hw.sum(axis='columns').idxmin()
+    result = pd.Series(0, index=cents.index)
+    remain_list = cents.index.tolist()
+    idu_next = idu_start
+    NNord = 0
+    while(remain_list):
+        result.loc[idu_next] = NNord
+        remain_list.remove(idu_next)
+        for k in range(1, int(np.ceil(np.log2(len(result)))) + 1):
+            qry = kdtree.query(cents_hw.loc[idu_next], 2**k)
+            NNs = qry[1][np.isfinite(qry[0])].squeeze()
+            NNs = NNs[np.sort(np.unique(NNs, return_index=True)[1])]
+            NNs = np.array(result.iloc[NNs].index)
+            NN_idxs = np.argwhere(np.isin(NNs, remain_list, assume_unique=True))
+            if len(NN_idxs) > 0:
+                NN = NNs[NN_idxs[0]][0]
+                idu_next = NN
+                NNord = NNord + 1
+                break
+    return result
