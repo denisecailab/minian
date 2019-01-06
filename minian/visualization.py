@@ -84,35 +84,37 @@ class VArrayViewer():
         for vname, varr in self.ds.items():
             fim = fct.partial(self._img, dat=varr)
             im = hv.DynamicMap(fim, streams=[self.stream])
-            im = regrid(im, height=self._h, width=self._w)
-            im = im(plot={'width': self._w, 'height': self._h})
+            im = regrid(im)
+            im = im.opts(plot={'width': self._w, 'height': self._h},
+                         style={'camp': 'Viridis'})
             if self.rerange:
                 im = im.redim.range(**{vname: self.rerange})
             xyrange = RangeXY(source=im)
             xyrange = xyrange.rename(x_range='w', y_range='h')
             fhist = fct.partial(self._hist, dat=varr)
             hist = hv.DynamicMap(fhist, streams=[self.stream, xyrange])
-            hist = hist(plot={'width': int(np.around(self._w * 0.35)), 'height': self._h})
+            hist = hist.opts(plot={'width': int(np.around(self._w * 0.35)), 'height': self._h},
+                             style={'cmap': 'Viridis'})
             if self._compute:
                 cur_mdict = OrderedDict()
                 dmean = hv.Curve(self.mean, kdims='frame', vdims=vname)
-                cur_mdict['mean'] = dmean(plot={'tools': ['hover']})
+                cur_mdict['mean'] = dmean.opts(plot={'tools': ['hover']})
                 dmax = hv.Curve(self.max, kdims='frame', vdims=vname)
-                cur_mdict['max'] = dmax(plot={'tools': ['hover']})
+                cur_mdict['max'] = dmax.opts(plot={'tools': ['hover']})
                 dmin = hv.Curve(self.min, kdims='frame', vdims=vname)
-                cur_mdict['min'] = dmin(plot={'tools': ['hover']})
+                cur_mdict['min'] = dmin.opts(plot={'tools': ['hover']})
                 mean = hv.NdOverlay(cur_mdict, kdims=['variable'])
                 if self._datashade:
                     mean = datashade_ndcurve(mean)
                 vl = hv.DynamicMap(lambda f: hv.VLine(f), streams=[self.stream])
-                vl = vl(style={'color': 'red'})
+                vl = vl.opts(style={'color': 'red'})
                 mean = (mean * vl).relabel(group=vname, label='Mean')
                 mean = mean.opts(
                     plot={'width': self._w, 'height': int(np.around(self._h * 0.6))})
                 meandict[vname] = mean
             image = im.relabel(group=vname, label='Image')
             histtogram = hist.relabel(group=vname, label='Histogram')
-            imdict[vname] = image << histtogram
+            imdict[vname] = (image << histtogram).map(lambda p: p.opts(style=dict(cmap='Viridis')))
         return hv.Layout(list(imdict.values()) + list(meandict.values())).cols(
             len(self.ds))
 
