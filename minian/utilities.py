@@ -92,7 +92,8 @@ def load_videos(vpath,
             frame=np.arange(varr.shape[0]),
             height=np.arange(varr.shape[1]),
             width=np.arange(varr.shape[2])))
-    varr = varr.astype(dtype)
+    if dtype:
+        varr = varr.astype(dtype)
     if downsample:
         for dim, binw in downsample.items():
             binw = int(binw)
