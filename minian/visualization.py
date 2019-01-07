@@ -524,8 +524,11 @@ class CNMFViewer():
         self.meta_dicts = {d: list(self._org.coords[d].values) for d in meta_dims}
         self.metas = {d: v[0] for d, v in self.meta_dicts.items()}
         if self._NNsort:
-            self.cents['NNord'] = (self.cents.groupby(meta_dims, group_keys=False)
-                                   .apply(NNsort))
+            try:
+                self.cents['NNord'] = (self.cents.groupby(meta_dims, group_keys=False)
+                                       .apply(NNsort))
+            except ValueError:
+                self.cents['NNord'] = NNsort(self.cents)
             NNcoords = (self.cents.set_index(meta_dims + ['unit_id'])['NNord']
                         .to_xarray())
             self._A = self._A.assign_coords(NNord=NNcoords)
@@ -576,10 +579,13 @@ class CNMFViewer():
                    .coords['frame'].values)
         self._u = (self.C_sub.isel(frame=0).dropna('unit_id')
                    .coords['unit_id'].values)
-        sub = (pd.concat(
-            [self.cents[d] == v for d, v in self.metas.items()],
-            axis='columns').all(axis='columns'))
-        self.cents_sub = self.cents[sub]
+        if self.meta_dicts:
+            sub = (pd.concat(
+                [self.cents[d] == v for d, v in self.metas.items()],
+                axis='columns').all(axis='columns'))
+            self.cents_sub = self.cents[sub]
+        else:
+            self.cents_sub = self.cents
         
         
     def compute_subs(self, clicks=None):
@@ -837,7 +843,7 @@ class CNMFViewer():
                 .opts(plot=dict(height=len(self._h), width=len(self._w)),
                       style=dict(cmap='Viridis')))
         cents = (hv.Dataset(
-            self.cents_sub.drop(['animal', 'session'], axis='columns'),
+            self.cents_sub.drop(list(self.meta_dicts.keys()), axis='columns'),
             kdims=['width', 'height', 'unit_id'])
                 .to(hv.Points, ['width', 'height'])
                 .opts(style=dict(alpha=0.1,
