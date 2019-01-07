@@ -90,8 +90,7 @@ def gmm_refine(varr, seeds, q=(0.1, 99.9)):
         dask='parallelized',
         output_dtypes=[varr_sub.dtype])
     varr_pv = varr_peak - varr_valley
-    with ProgressBar():
-        varr_pv = varr_pv.compute()
+    varr_pv = varr_pv.compute()
     print("fitting GMM models")
     dat = varr_pv.values.reshape(-1, 1)
     gmm = GaussianMixture(n_components=2)
@@ -102,7 +101,7 @@ def gmm_refine(varr, seeds, q=(0.1, 99.9)):
     return seeds
 
 
-def pnr_refine(varr, seeds, noise_freq=0.25, thres=1.5):
+def pnr_refine(varr, seeds, noise_freq=0.25, thres=1.5, q=(0.1, 99.9)):
     print("selecting seeds") 
     varr_sub = varr.sel(
         spatial=[tuple(hw) for hw in seeds[['height', 'width']].values])
@@ -117,15 +116,17 @@ def pnr_refine(varr, seeds, noise_freq=0.25, thres=1.5):
         vectorize=True,
         dask='parallelized',
         output_dtypes=[varr_sub.dtype])
+    def ptp_q(x):
+        return np.percentile(x, q[1]) - np.percentile(x, q[0])
     varr_sub_ptp = xr.apply_ufunc(
-        np.ptp,
+        ptp_q,
         varr_sub.chunk(dict(frame=-1)),
         input_core_dims=[['frame']],
         dask='parallelized',
         vectorize=True,
         output_dtypes=[varr_sub.dtype]).compute()
     varr_noise_ptp = xr.apply_ufunc(
-        np.ptp,
+        ptp_q,
         varr_noise.chunk(dict(frame=-1)).real,
         input_core_dims=[['frame']],
         dask='parallelized',
