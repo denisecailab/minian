@@ -70,15 +70,14 @@ def psd_fft(varr):
     else:
         freq_crd = np.linspace(0, 0.5 * (_T - 1) / _T, ns)
     print("computing psd of input")
-    with ProgressBar():
-        varr_fft = xr.apply_ufunc(
-            dafft.rfft,
-            varr.chunk(dict(frame=-1)),
-            input_core_dims=[['frame']],
-            output_core_dims=[['freq']],
-            dask='allowed',
-            output_sizes=dict(freq=ns),
-            output_dtypes=[np.complex_]).persist()
+    varr_fft = xr.apply_ufunc(
+        dafft.rfft,
+        varr.chunk(dict(frame=-1)),
+        input_core_dims=[['frame']],
+        output_core_dims=[['freq']],
+        dask='allowed',
+        output_sizes=dict(freq=ns),
+        output_dtypes=[np.complex_])
     varr_fft = varr_fft.assign_coords(freq=freq_crd)
     varr_psd = 1 / _T * np.abs(varr_fft)**2
     return varr_psd
@@ -772,9 +771,9 @@ def label_connected(adj, only_connected=False):
     return labels
 
 
-def smooth_sig(sig, freq):
+def smooth_sig(sig, freq, btype='low'):
     print("smoothing signals")
-    but_b, but_a = butter(2, freq, btype='low', analog=False)
+    but_b, but_a = butter(2, freq, btype=btype, analog=False)
     sig_smth = xr.apply_ufunc(
             lambda x: lfilter(but_b, but_a, x),
             sig.chunk(dict(frame=-1)),
