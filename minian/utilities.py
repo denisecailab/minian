@@ -18,6 +18,8 @@ import pandas as pd
 import subprocess
 import warnings
 import cv2
+import papermill as pm
+import ast
 from dask.diagnostics import ProgressBar
 from copy import deepcopy
 from scipy import ndimage as ndi
@@ -42,11 +44,19 @@ except:
     print("cannot use cuda accelerate")
 
 
+def norm_params(param):
+    try:
+        param = ast.literal_eval(param)
+    except (ValueError, SyntaxError):
+        pass
+    if type(param) is dict:
+        param = {k: norm_params(v) for k, v in param.items()}
+    return param
+
 def load_videos(vpath,
                 pattern='msCam[0-9]+\.avi$',
                 dtype=np.float64,
                 in_memory=False,
-                overwrite=False,
                 downsample=None,
                 downsample_strategy='subset'):
     """Load videos from a folder.
