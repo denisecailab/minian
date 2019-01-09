@@ -1058,7 +1058,7 @@ def generate_videos(minian, vpath, chk=None, pre_compute=False):
 #     vwrt.close()
 
 
-def datashade_ndcurve(ovly, kdim=None):
+def datashade_ndcurve(ovly, kdim=None, spread=False):
     if not kdim:
         kdim = ovly.kdims[0].name
     var = np.unique(ovly.dimension_values(kdim)).tolist()
@@ -1072,6 +1072,8 @@ def datashade_ndcurve(ovly, kdim=None):
         min_alpha=128,
         normalization='eq_hist',
         precompute=True)
+    if spread:
+        ds_ovly = dynspread(ds_ovly)
     return ds_ovly * color_pts
 
 
@@ -1220,15 +1222,17 @@ def visualize_temporal_update(YA_dict, C_dict, S_dict, g_dict, sig_dict, A_dict,
     hv_pul = hv.HoloMap(hv_pul, kdims='traces').collate().overlay('traces')
     if datashading:
         hv_unit = datashade_ndcurve(hv_unit, 'traces')
-        hv_pul = datashade_ndcurve(hv_pul, 'traces')
+        hv_pul = datashade_ndcurve(hv_pul, 'traces', spread=True)
         hv_A = regrid(hvobjs[6])
     else:
         hv_unit = hv.DynamicMap(hv_unit)
         hv_pul = hv.DynamicMap(hv_pul)
         hv_A = hv.DynamicMap(hvobjs[6])
-    hv_unit = hv_unit.opts(plot=dict(height=h, width=2*w))
+    # hv_unit = hv_unit.opts(plot=dict(height=h, width=2*w))
+    hv_unit = hv_unit.map(lambda p: p.opts(plot=dict(height=h, width=2*w)))
     hv_pul = (hv_pul.opts(plot=dict(height=h, width=w))
               .redim(t=hv.Dimension('t', soft_range=pul_range)))
+    hv_pul = hv_pul.map(lambda p: p.opts(plot=dict(height=h, width=w)))
     hv_A = hv_A.opts(plot=dict(height=h, width=w), style=dict(cmap='Viridis'))
     return (hv_unit.relabel("Temporal Traces")
             + hv.Div('')
