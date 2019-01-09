@@ -8,7 +8,6 @@ import dask.array.fft as dafft
 import dask.array as da
 import warnings
 from dask import delayed, compute
-from dask.diagnostics import ProgressBar
 from scipy.ndimage.filters import maximum_filter
 from scipy.ndimage.measurements import label
 from scipy.stats import zscore, kstest
@@ -41,8 +40,7 @@ def seeds_init(varr, wnd_size=500, method='rolling', stp_size=200, nchunk=100, m
     res = [max_proj_frame(varr, cur_idx) for cur_idx in max_idx]
     max_res = xr.concat(res, 'sample').chunk(dict(sample=10))
     print("computing max projection")
-    with ProgressBar():
-        max_res = max_res.persist()
+    max_res = max_res.persist()
     print("calculating local maximum")
     loc_max = xr.apply_ufunc(
         local_max,
@@ -53,8 +51,7 @@ def seeds_init(varr, wnd_size=500, method='rolling', stp_size=200, nchunk=100, m
         dask='parallelized',
         output_dtypes=[np.uint8],
         kwargs=dict(wnd=max_wnd)).sum('sample')
-    with ProgressBar():
-        loc_max = loc_max.compute()
+    loc_max = loc_max.compute()
     loc_max_flt = loc_max.stack(spatial=['height', 'width'])
     seeds = (loc_max_flt.where(loc_max_flt > 0, drop=True)
              .rename('seeds').to_dataframe().reset_index())
@@ -134,8 +131,7 @@ def pnr_refine(varr, seeds, noise_freq=0.25, thres=1.5, q=(0.1, 99.9)):
         output_dtypes=[varr_sub.dtype]).compute()
     pnr = varr_sub_ptp / varr_noise_ptp
     mask = pnr > thres
-    with ProgressBar():
-        mask = mask.compute()
+    mask = mask.compute()
     mask_df = mask.to_pandas().rename('mask_pnr').reset_index()
     seeds = pd.merge(seeds, mask_df, on=['height', 'width'], how='left')
     return seeds, pnr
@@ -216,8 +212,7 @@ def seeds_merge(varr, seeds, thres_dist=5, thres_corr=0.6, noise_freq='envelope'
                 sampleA=np.arange(nsmp),
                 sampleB=np.arange(nsmp)))
     print("computing correlations")
-    with ProgressBar():
-        corr = corr.compute()
+    corr = corr.compute()
     adj = np.logical_and(dist < thres_dist, corr > thres_corr)
     adj = adj.compute()
     np.fill_diagonal(adj.values, 0)
@@ -245,8 +240,7 @@ def initialize(varr, seeds, thres_corr=0.8, wnd=10, chk=None):
     harr, warr = seeds['height'].values, seeds['width'].values
     res_ls = [init_perseed(varr, h, w, wnd, thres_corr) for h, w in zip(harr, warr)]
     print("computing rois")
-    with ProgressBar():
-        res_ls = dask.compute(res_ls)[0]
+    res_ls = dask.compute(res_ls)[0]
     print("concatenating results")
     A = (xr.concat([r[0] for r in res_ls], 'unit_id')
          .assign_coords(unit_id = np.arange(len(res_ls))))
@@ -265,11 +259,10 @@ def initialize(varr, seeds, thres_corr=0.8, wnd=10, chk=None):
         dask='allowed',
         output_dtypes=[A.dtype])
     Yr = varr - AC
-    with ProgressBar():
-        b = (Yr.chunk(dict(frame=-1, height=chk['height'], width=chk['width']))
-             .mean('frame').compute())
-        f = (Yr.chunk(dict(frame=chk['frame'], height=-1, width=-1))
-             .mean('height').mean('width').compute())
+    b = (Yr.chunk(dict(frame=-1, height=chk['height'], width=chk['width']))
+         .mean('frame').compute())
+    f = (Yr.chunk(dict(frame=chk['frame'], height=-1, width=-1))
+         .mean('height').mean('width').compute())
     return A, C, b, f
 
 
