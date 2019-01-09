@@ -619,7 +619,7 @@ def open_minian_mf(dpath, index_dims, result_format='xarray', **kwargs):
             "format {} not understood".format(result_format))
 
 
-def save_minian(var, dpath, fname='minian', backend='netcdf', meta_dict=None):
+def save_minian(var, dpath, fname='minian', backend='netcdf', meta_dict=None, overwrite=False):
     dpath = os.path.normpath(dpath)
     ds = var.to_dataset()
     if meta_dict is not None:
@@ -628,12 +628,14 @@ def save_minian(var, dpath, fname='minian', backend='netcdf', meta_dict=None):
             **dict([(dn, pathlist[di]) for dn, di in meta_dict.items()]))
     if backend is 'netcdf':
         try:
-            ds.to_netcdf(os.path.join(dpath, fname + '.nc'), mode='a')
+            md = {True: 'w', False: 'a'}[overwrite]
+            ds.to_netcdf(os.path.join(dpath, fname + '.nc'), mode=md)
         except FileNotFoundError:
-            ds.to_netcdf(os.path.join(dpath, fname + '.nc'), mode='w')
+            ds.to_netcdf(os.path.join(dpath, fname + '.nc'), mode=md)
         return ds
     elif backend is 'zarr':
-        ds.to_zarr(os.path.join(dpath, fname, var.name + '.zarr'))
+        md = {True: 'w', False: 'w-'}[overwrite]
+        ds.to_zarr(os.path.join(dpath, fname, var.name + '.zarr'), mode=md)
         return ds
     else:
         raise NotImplementedError("backend {} not supported".format(backend))
