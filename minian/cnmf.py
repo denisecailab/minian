@@ -9,7 +9,7 @@ import dask.array.linalg as dalin
 # import dask_ml.joblib
 import graph_tool.all as gt
 from dask import delayed, compute
-from dask.diagnostics import ProgressBar, Profiler
+from dask.diagnostics import Profiler
 from dask.distributed import progress
 from IPython.core.debugger import set_trace
 from scipy.ndimage import gaussian_filter, label
@@ -27,7 +27,7 @@ from timeit import timeit
 import warnings
 
 
-def get_noise_fft(varr, noise_range=(0.25, 0.5), noise_method='logmexp'):
+def get_noise_fft(varr, noise_range=(0.25, 0.5), noise_method='logmexp', compute=True):
     _T = len(varr.coords['frame'])
     ns = _T // 2 + 1
     if _T % 2 == 0:
@@ -35,20 +35,18 @@ def get_noise_fft(varr, noise_range=(0.25, 0.5), noise_method='logmexp'):
     else:
         freq_crd = np.linspace(0, 0.5 * (_T - 1) / _T, ns)
     print("computing fft of input")
-    with ProgressBar():
-        varr_fft = xr.apply_ufunc(
-            dafft.rfft,
-            varr.chunk(dict(frame=-1)),
-            input_core_dims=[['frame']],
-            output_core_dims=[['freq']],
-            dask='allowed',
-            output_sizes=dict(freq=ns),
-            output_dtypes=[np.complex_]).persist()
+    varr_fft = xr.apply_ufunc(
+        dafft.rfft,
+        varr.chunk(dict(frame=-1)),
+        input_core_dims=[['frame']],
+        output_core_dims=[['freq']],
+        dask='allowed',
+        output_sizes=dict(freq=ns),
+        output_dtypes=[np.complex_]).persist()
     print("computing power of noise")
     varr_fft = varr_fft.assign_coords(freq=freq_crd)
     varr_psd = 1 / _T * np.abs(varr_fft)**2
-    with ProgressBar():
-        varr_psd = varr_psd.compute()
+    varr_psd = varr_psd.compute()
     varr_band = varr_psd.sel(freq=slice(*noise_range))
     print("estimating noise using method {}".format(noise_method))
     if noise_method == 'mean':
@@ -58,9 +56,9 @@ def get_noise_fft(varr, noise_range=(0.25, 0.5), noise_method='logmexp'):
     elif noise_method == 'logmexp':
         eps = np.finfo(varr_band.dtype).eps
         sn = np.sqrt(np.exp(np.log(varr_band + eps).mean('freq')))
-    with ProgressBar():
-        sn = sn.persist()
-    return sn, varr_psd
+    if compute:
+        sn = sn.compute()
+    return sn
 
 def psd_fft(varr): 
     _T = len(varr.coords['frame'])
@@ -115,8 +113,7 @@ def get_noise(psd, noise_range=(0.25, 0.5), noise_method='logmexp'):
     elif noise_method == 'logmexp':
         eps = np.finfo(psd_band.dtype).eps
         sn = np.sqrt(np.exp(np.log(psd_band + eps).mean('freq')))
-    with ProgressBar():
-        sn = sn.persist()
+    sn = sn.persist()
     return sn 
 
 def get_noise_welch(varr,
@@ -133,8 +130,7 @@ def get_noise_welch(varr,
         kwargs=dict(noise_range=noise_range, noise_method=noise_method),
         output_dtypes=[varr.dtype])
     if compute:
-        with ProgressBar():
-            sn = sn.compute()
+        sn = sn.compute()
     return sn
 
 
@@ -169,8 +165,7 @@ def update_spatial(Y,
     print("estimating penalty parameter")
     cct = C.dot(C, 'frame')
     alpha = sparse_penal * sn * np.sqrt(np.max(np.diag(cct))) / _T
-    with ProgressBar():
-        alpha = alpha.persist()
+    alpha = alpha.persist()
     print("computing subsetting matrix")
     if update_background:
         A = xr.concat([A, b.assign_coords(unit_id=-1)], 'unit_id')
@@ -190,8 +185,7 @@ def update_spatial(Y,
     else:
         sub = xr.apply_ufunc(np.ones_like, A.compute())
     if compute:
-        with ProgressBar():
-            sub = sub.persist()
+        sub = sub.persist()
     print("fitting spatial matrix")
     A_new = xr.apply_ufunc(
         update_spatial_perpx,
@@ -206,18 +200,16 @@ def update_spatial(Y,
         output_dtypes=[Y.dtype],
     )
     if compute:
-        with ProgressBar():
-            A_new = A_new.persist()
+        A_new = A_new.persist()
     if zero_thres == 'eps':
         zero_thres = np.finfo(A_new.dtype).eps
     A_new = A_new.where(A_new > zero_thres).fillna(0)
     if post_scal:
         print("post-hoc scaling")
-        with ProgressBar():
-            A_new_flt = (A_new.stack(spatial=['height', 'width'])
-                         .compute())
-            Y_flt = (Y.mean('frame').stack(spatial=['height', 'width'])
+        A_new_flt = (A_new.stack(spatial=['height', 'width'])
                      .compute())
+        Y_flt = (Y.mean('frame').stack(spatial=['height', 'width'])
+                 .compute())
         def lstsq(a, b):
             return np.linalg.lstsq(a, b, rcond=-1)[0]
         scale = xr.apply_ufunc(
@@ -227,11 +219,10 @@ def update_spatial(Y,
             input_core_dims=[['spatial', 'unit_id'], ['spatial']],
             output_core_dims=[['unit_id']])
         A_new = A_new * scale
-        with ProgressBar():
-            try:
-                A_new = A_new.persist()
-            except np.linalg.LinAlgError:
-                warnings.warn("post-hoc scaling failed", RuntimeWarning)
+        try:
+            A_new = A_new.persist()
+        except np.linalg.LinAlgError:
+            warnings.warn("post-hoc scaling failed", RuntimeWarning)
     if update_background:
         b_new = A_new.sel(unit_id=-1)
         A_new = A_new.drop(-1, 'unit_id')
@@ -243,8 +234,7 @@ def update_spatial(Y,
     A_new = A_new.where(non_empty, drop=True)
     C_new = C.where(non_empty, drop=True)
     if compute:
-        with ProgressBar():
-            A_new, C_new = A_new.persist(), C_new.persist()
+        A_new, C_new = A_new.persist(), C_new.persist()
     return A_new, b_new, C_new, f
 
 
@@ -304,8 +294,7 @@ def update_temporal(Y,
         output_dtypes=[A_neg.dtype])
     A_jac = A_inter / (A.sizes['height'] * A.sizes['width'] - A_union)
     if compute:
-        with ProgressBar():
-            A_jac = A_jac.compute()
+        A_jac = A_jac.compute()
     unit_labels = xr.apply_ufunc(
         label_connected,
         A_jac > jac_thres,
@@ -334,8 +323,7 @@ def update_temporal(Y,
         output_sizes=dict(unit_id_cp = nunits))
     nA_inv = nA_inv.assign_coords(unit_id_temp=AA.coords['unit_id_cp'])
     if compute:
-        with ProgressBar():
-            nA_inv = nA_inv.compute()
+        nA_inv = nA_inv.compute()
     YA = (xr.apply_ufunc(
         da.array.tensordot,
         Y.chunk(dict(height=-1, width=-1, frame=chk['frame'])),
@@ -372,9 +360,8 @@ def update_temporal(Y,
         output_dtypes=[CA.dtype])
     YrA = YA_norm - CA_norm + C
     if compute:
-        with ProgressBar():
-            YrA = YrA.compute()
-            YrA = YrA.assign_coords(unit_labels=unit_labels)
+        YrA = YrA.compute()
+        YrA = YrA.assign_coords(unit_labels=unit_labels)
     sn_temp = get_noise_welch(YrA, noise_range=(noise_freq, 1))
     sn_temp = sn_temp.assign_coords(unit_labels=unit_labels)
     if use_spatial:
@@ -395,10 +382,9 @@ def update_temporal(Y,
             dask='parallelized',
             output_dtypes=[YrA.dtype])
         if compute:
-            with ProgressBar():
-                YrA_smth = YrA_smth.persist()
-                sn_temp_smth = get_noise_welch(
-                    YrA_smth, noise_range=(noise_freq, 1))
+            YrA_smth = YrA_smth.persist()
+            sn_temp_smth = get_noise_welch(
+                YrA_smth, noise_range=(noise_freq, 1))
     else:
         YrA_smth = YrA
         sn_temp_smth = sn_temp
@@ -412,8 +398,7 @@ def update_temporal(Y,
             dask='parallelized',
             output_dtypes=[np.int]).clip(1)
         if compute:
-            with ProgressBar():
-                p = p.compute()
+            p = p.compute()
         p_max = p.max().values
     else:
         p_max = p
@@ -432,8 +417,7 @@ def update_temporal(Y,
         output_sizes=dict(lag=p_max))
     g = g.assign_coords(lag=np.arange(1, p_max + 1), unit_labels=unit_labels)
     if compute:
-        with ProgressBar():
-            g = g.compute()
+        g = g.compute()
     print("updating isolated temporal components")
     if use_spatial is 'full':
         result_iso = xr.apply_ufunc(
@@ -470,7 +454,7 @@ def update_temporal(Y,
             output_sizes=dict(trace=5),
             output_dtypes=[YrA.dtype])
     if compute:
-        with ProgressBar(), da.config.set(scheduler=cvx_sched):
+        with da.config.set(scheduler=cvx_sched):
             result_iso = result_iso.compute()
     print("updating overlapping temporal components")
     res_list = []
@@ -518,7 +502,7 @@ def update_temporal(Y,
                 output_dtypes=[YrA.dtype])
         res_list.append(cur_res)
     if compute:
-        with ProgressBar(), da.config.set(scheduler=cvx_sched):
+        with da.config.set(scheduler=cvx_sched):
             result_ovlp, = da.compute(res_list)
     result = (xr.concat(result_ovlp + [result_iso], 'unit_id')
               .sortby('unit_id').drop('unit_labels'))
@@ -559,7 +543,7 @@ def update_temporal(Y,
             dask='parallelized',
             output_dtypes=[C_new.dtype])
         if compute:
-            with ProgressBar(), da.config.set(scheduler='threads'):
+            with da.config.set(scheduler='threads'):
                 scal = scal.compute()
         C_new = C_new * scal
         S_new = S_new * scal
@@ -721,8 +705,7 @@ def unit_merge(A, C, add_list=None, thres_corr=0.9):
         dask='allowed',
         kwargs=dict(axes=([1, 2], [0, 1])),
         output_dtypes=[A_bl.dtype])
-    with ProgressBar():
-        A_ovlp = A_ovlp.persist()
+    A_ovlp = A_ovlp.persist()
     print("computing temporal correlation")
     uid_idx = C.coords['unit_id'].values
     corr = xr.apply_ufunc(
