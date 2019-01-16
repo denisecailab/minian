@@ -62,7 +62,7 @@ def get_minian_list(path, pattern=r'^minian.nc$'):
         mnlist += mn_paths
     return mnlist
 
-def estimate_shifts(minian_df, by='session', to='first', temp_var='org', template=None, rm_background=False):
+def estimate_shifts(minian_df, by='session', to='first', temp_var='org', template=None, rm_background=False, pct_thres=99.9):
     if template is not None:
         minian_df['template'] = template
         
@@ -91,7 +91,7 @@ def estimate_shifts(minian_df, by='session', to='first', temp_var='org', templat
             raise KeyError(
                 "variable {} not found in dataset".format(temp_var))
         temps = xr.concat(temp_ls, dim=by)
-        res = estimate_shift_fft(temps, dim=by)
+        res = estimate_shift_fft(temps, dim=by, pct_thres=pct_thres)
         shifts = res.sel(variable=['height', 'width'])
         corrs = res.sel(variable='corr')
         temps_sh = apply_shifts(temps, shifts)
