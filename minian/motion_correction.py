@@ -391,8 +391,11 @@ def estimate_shift_fft(varr, dim='frame', on='first', pad_f=1, pct_thres=None):
     elif on == 'perframe':
         src_fft = varr_fft.shift(**{dim: 1})
     else:
-        print("template not understood. returning")
-        return
+        try:
+            src_fft = varr_fft.isel(**{dim: on})
+        except TypeError:
+            print("template not understood. returning")
+            return
     print("estimating shifts")
     res = xr.apply_ufunc(
         shift_fft,
