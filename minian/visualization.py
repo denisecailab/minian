@@ -874,9 +874,11 @@ class CNMFViewer():
 
 
 class AlignViewer():
-    def __init__(self, shiftds, sampling=2):
+    def __init__(self, shiftds, sampling=2, pct_thres=99.9, on=0):
         self.shiftds = shiftds
         self.temps = shiftds['temps']
+        self.on = on
+        self.pct_thres = pct_thres
         self.hh = self.temps.sizes['height']
         self.ww = self.temps.sizes['width']
         self.mask = xr.zeros_like(self.temps, dtype=bool)
@@ -920,7 +922,7 @@ class AlignViewer():
 
     def _temp0(self, anm, ss):
         im0 = hv.Image(
-            self.temps.sel(animal=anm).isel(session=0), ['width', 'height'])
+            self.temps.sel(animal=anm).isel(session=self.on), ['width', 'height'])
         return im0
 
     def _re(self, anm, ss):
@@ -996,7 +998,7 @@ class AlignViewer():
         print("done selection")
         temp_src_fft = np.fft.fft2(temp_src)
         temp_dst_fft = np.fft.fft2(temp_dst)
-        cur_res = shift_fft(temp_src_fft, temp_dst_fft)
+        cur_res = shift_fft(temp_src_fft, temp_dst_fft, pct_thres=self.pct_thres)
         cur_sh = cur_res[0:2]
         cur_cor = cur_res[2]
         cur_sh = xr.DataArray(
@@ -1046,7 +1048,7 @@ def generate_videos(minian, vpath, chk=None, pre_compute=False):
 #         res_norm = res_norm.compute()
     vid = xr.concat([
         xr.concat([org_norm, Y_norm], 'width'),
-        xr.concat([AC_norm, res_norm], 'width')],
+        xr.concat([res_norm, AC_norm], 'width')],
         dim='height')
     print("writing videos")
     with ProgressBar():
@@ -1103,6 +1105,11 @@ def construct_pulse_response(g, length=500):
 
 def centroid(A, verbose=False):
     def rel_cent(im):
+        im_nan = np.isnan(im)
+        if im_nan.all():
+            return np.array([np.nan, np.nan])
+        if im_nan.any():
+            im = np.nan_to_num(im)
         cent = np.array(center_of_mass(im))
         return cent / im.shape
     cents = (xr.apply_ufunc(
