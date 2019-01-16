@@ -461,7 +461,9 @@ def shift_fft(fft_src, fft_dst, pad_s=None, pad_f=1, pct_thres=99.99):
 def apply_shifts(varr, shifts):
     sh_dim = shifts.coords['variable'].values.tolist()
     varr_sh = xr.apply_ufunc(
-        shift_perframe, varr, shifts,
+        shift_perframe,
+        varr.chunk({d: -1 for d in sh_dim}),
+        shifts,
         input_core_dims=[sh_dim, ['variable']],
         output_core_dims=[sh_dim],
         vectorize=True,
