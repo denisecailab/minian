@@ -20,6 +20,7 @@ import warnings
 import cv2
 import papermill as pm
 import ast
+from pathlib import Path
 from dask.diagnostics import ProgressBar
 from copy import deepcopy
 from scipy import ndimage as ndi
@@ -597,17 +598,19 @@ def open_minian(dpath, fname='minian', backend='netcdf', chunks=None):
         raise NotImplementedError("backend {} not supported".format(backend))
 
 
-def open_minian_mf(dpath, index_dims, result_format='xarray', **kwargs):
+def open_minian_mf(dpath, index_dims, result_format='xarray', pattern=r'minian\.[0-9]+$', exclude_dirs=[], **kwargs):
     minian_dict = dict()
     for nextdir, dirlist, filelist in os.walk(dpath, topdown=False):
-        try:
-            minian = open_minian(nextdir, **kwargs)
+        cur_path = Path(nextdir)
+        if any([Path(epath) in cur_path.parents for epath in exclude_dirs]):
+            continue
+        flist = list(filter(lambda f: re.search(pattern, f), filelist + dirlist))
+        if flist:
+            minian = open_minian(nextdir, fname=flist[-1], **kwargs)
             key = tuple([np.array_str(minian[d].values) for d in index_dims])
             minian_dict[key] = minian
             print("opening dataset under {}".format(nextdir))
             print(["{}: {}".format(d, v) for d, v in zip(index_dims, key)])
-        except FileNotFoundError:
-            pass
     if result_format is 'xarray':
         return xrconcat_recursive(minian_dict, index_dims)
     elif result_format is 'pandas':
