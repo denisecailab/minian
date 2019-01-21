@@ -237,6 +237,13 @@ def denoise(varr, method, **kwargs):
         func = cv2.GaussianBlur
     elif method == 'anisotropic':
         func = anisotropic_diffusion
+    elif method == 'median':
+        func = cv2.medianBlur
+    elif method == 'bilateral':
+        func = cv2.bilateralFilter
+    else:
+        raise NotImplementedError(
+            "denoise method {} not understood".format(method))
     res = xr.apply_ufunc(
         func,
         varr,
