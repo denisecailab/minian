@@ -362,7 +362,7 @@ def update_temporal(Y,
     if compute:
         YrA = YrA.compute()
         YrA = YrA.assign_coords(unit_labels=unit_labels)
-    sn_temp = get_noise_welch(YrA, noise_range=(noise_freq, 1))
+    sn_temp = get_noise_fft(YrA, noise_range=(noise_freq, 1))
     sn_temp = sn_temp.assign_coords(unit_labels=unit_labels)
     if use_spatial:
         print("flattening spatial dimensions")
