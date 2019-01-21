@@ -67,7 +67,7 @@ def local_max(fm, wnd):
     return (fm == fm_max).astype(np.uint8)
 
 
-def gmm_refine(varr, seeds, q=(0.1, 99.9)):
+def gmm_refine(varr, seeds, q=(0.1, 99.9), n_components=2, valid_components=1):
     print("selecting seeds")
     varr_sub = varr.sel(
         spatial=[tuple(hw) for hw in seeds[['height', 'width']].values])
@@ -90,12 +90,12 @@ def gmm_refine(varr, seeds, q=(0.1, 99.9)):
     varr_pv = varr_pv.compute()
     print("fitting GMM models")
     dat = varr_pv.values.reshape(-1, 1)
-    gmm = GaussianMixture(n_components=2)
+    gmm = GaussianMixture(n_components=n_components)
     gmm.fit(dat)
-    idg = gmm.means_.argmax()
-    idx_valid = gmm.predict(dat) == idg
+    idg = np.argsort(gmm.means_.reshape(-1))[-valid_components:]
+    idx_valid = np.isin(gmm.predict(dat), idg)
     seeds['mask_gmm'] = idx_valid
-    return seeds
+    return seeds, varr_pv, gmm
 
 
 def pnr_refine(varr, seeds, noise_freq=0.25, thres=1.5, q=(0.1, 99.9)):
@@ -130,14 +130,21 @@ def pnr_refine(varr, seeds, noise_freq=0.25, thres=1.5, q=(0.1, 99.9)):
         vectorize=True,
         output_dtypes=[varr_sub.dtype]).compute()
     pnr = varr_sub_ptp / varr_noise_ptp
-    mask = pnr > thres
-    mask = mask.compute()
-    mask_df = mask.to_pandas().rename('mask_pnr').reset_index()
-    seeds = pd.merge(seeds, mask_df, on=['height', 'width'], how='left')
+    if thres == 'auto':
+        gmm = GaussianMixture(n_components=2)
+        gmm.fit(np.nan_to_num(pnr.values.reshape(-1, 1)))
+        idg = np.argsort(gmm.means_.reshape(-1))[-1]
+        idx_valid = np.isin(gmm.predict(pnr.values.reshape(-1, 1)), idg)
+        seeds['mask_pnr'] = idx_valid
+    else:
+        mask = pnr > thres
+        mask = mask.compute()
+        mask_df = mask.to_pandas().rename('mask_pnr').reset_index()
+        seeds = pd.merge(seeds, mask_df, on=['height', 'width'], how='left')
     return seeds, pnr
 
 
-def intensity_refine(varr, seeds):
+def intensity_refine(varr, seeds, thres_mul=2):
     try:
         fm_max = varr.max('frame')
     except ValueError:
@@ -147,7 +154,7 @@ def intensity_refine(varr, seeds):
         fm_max.sizes['height'] * fm_max.sizes['width'] / 10).astype(int)
     hist, edges = np.histogram(fm_max, bins=bins)
     try:
-        thres = edges[np.argmax(hist) * 2]
+        thres = edges[int(np.around(np.argmax(hist) * thres_mul))]
     except IndexError:
         print("threshold out of bound, returning input")
         return seeds
