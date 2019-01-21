@@ -35,6 +35,7 @@ from IPython.core.debugger import set_trace
 from os.path import isdir, abspath
 from os import listdir
 from os.path import join as pjoin
+from itertools import compress
 
 try:
     import pycuda.autoinit
@@ -59,7 +60,8 @@ def load_videos(vpath,
                 dtype=np.float64,
                 in_memory=False,
                 downsample=None,
-                downsample_strategy='subset'):
+                downsample_strategy='subset',
+                post_process=None):
     """Load videos from a folder.
 
     Load videos from the folder specified in `vpath` and according to the regex
@@ -119,7 +121,10 @@ def load_videos(vpath,
             else:
                 warnings.warn(
                     "unrecognized downsampling strategy", RuntimeWarning)
-    return varr.rename(ssname)
+    varr = varr.rename(ssname)
+    if post_process:
+        varr = post_process(varr, vpath, ssname, vlist, varr_list)
+    return varr
 
 
 def load_avi_lazy(fname):
@@ -142,6 +147,28 @@ def load_avi_perframe(fname, fid):
     else:
         print("frame read failed for frame {}".format(fid))
         return fm
+
+    
+def handle_crash(varr, vpath, ssname, vlist, varr_list, frame_dict):
+    seg1_list = list(filter(lambda v: re.search('seg1', v), vlist))
+    seg2_list = list(filter(lambda v: re.search('seg2', v), vlist))
+    if seg1_list and seg2_list:
+        tframe = frame_dict[ssname]
+        varr1 = darr.concatenate(
+            list(compress(varr_list, seg1_list)),
+            axis=0)
+        varr2 = darr.concatenate(
+            list(compress(varr_list, seg2_list)),
+            axis=0)
+        fm1, fm2 = varr1.shape[0], varr2.shape[0]
+        fm_crds = varr.coords['frame']
+        fm_crds1 = fm_crds.sel(frame=slice(None, fm1 - 1)).values
+        fm_crds2 = fm_crds.sel(frame=slice(fm1, None)).values
+        fm_crds2 = fm_crds2 + (tframe - fm_crds2.max())
+        fm_crds_new = np.concatenate([fm_crds1, fm_crds2], axis=0)
+        return varr.assign_coords(frame=fm_crds_new)
+    else:
+        return varr
 
 
 def video_to_tiffs(ipath, opath, iptn='msCam[0-9]+\.avi$', optn='msCam-%05d.tiff'):
