@@ -23,6 +23,7 @@ from numba import jit, guvectorize
 from skimage import morphology as moph
 from statsmodels.tsa.stattools import acovf
 import cvxpy as cvx
+import pyfftw.interfaces.dask_fft as fftw
 from timeit import timeit
 import warnings
 
@@ -36,7 +37,7 @@ def get_noise_fft(varr, noise_range=(0.25, 0.5), noise_method='logmexp', compute
         freq_crd = np.linspace(0, 0.5 * (_T - 1) / _T, ns)
     print("computing fft of input")
     varr_fft = xr.apply_ufunc(
-        dafft.rfft,
+        fftw.rfft,
         varr.chunk(dict(frame=-1)),
         input_core_dims=[['frame']],
         output_core_dims=[['freq']],
@@ -69,7 +70,7 @@ def psd_fft(varr):
         freq_crd = np.linspace(0, 0.5 * (_T - 1) / _T, ns)
     print("computing psd of input")
     varr_fft = xr.apply_ufunc(
-        dafft.rfft,
+        fftw.rfft,
         varr.chunk(dict(frame=-1)),
         input_core_dims=[['frame']],
         output_core_dims=[['freq']],
@@ -224,11 +225,20 @@ def update_spatial(Y,
         except np.linalg.LinAlgError:
             warnings.warn("post-hoc scaling failed", RuntimeWarning)
     if update_background:
+        print("updateing background")
         b_new = A_new.sel(unit_id=-1)
+#         b_new = b_new / da.array.linalg.norm(b_new.data)
+#         f_new = xr.apply_ufunc(
+#             da.array.tensordot, Y, b_new,
+#             input_core_dims=[['frame', 'height', 'width'], ['height', 'width']],
+#             output_core_dims=[['frame']],
+#             kwargs=dict(axes=[(1, 2), (0, 1)]),
+#             dask='allowed').persist()
         A_new = A_new.drop(-1, 'unit_id')
         C_new = C.drop(-1, 'unit_id')
     else:
         b_new = b
+        f_new = f
     print("removing empty units")
     non_empty = A_new.sum(['width', 'height']) > 0
     A_new = A_new.where(non_empty, drop=True)
@@ -324,6 +334,18 @@ def update_temporal(Y,
     nA_inv = nA_inv.assign_coords(unit_id_temp=AA.coords['unit_id_cp'])
     if compute:
         nA_inv = nA_inv.compute()
+    b = b.expand_dims('dot')
+    f = f.expand_dims('dot')
+    B = xr.apply_ufunc(
+        da.array.dot,
+        b.chunk(dict(height=-1, width=-1)),
+        f.chunk(dict(frame=-1)),
+        input_core_dims=[['height', 'width', 'dot'], ['dot', 'frame']],
+        output_core_dims=[['height', 'width', 'frame']],
+        dask='allowed',
+        output_dtypes=[b.dtype]
+    )
+    Y = Y - B
     YA = (xr.apply_ufunc(
         da.array.tensordot,
         Y.chunk(dict(height=-1, width=-1, frame=chk['frame'])),
