@@ -1132,8 +1132,36 @@ def centroid(A, verbose=False):
     cents_df['width'] *= A.coords['width'].max().values
     return cents_df
 
-def visualize_seeds(Y, seeds):
-    pass
+
+def visualize_seeds(max_proj, seeds, mask=None):
+    h, w = max_proj.sizes['height'], max_proj.sizes['width']
+    pt_cmap = {True: 'white', False: 'red'}
+    opts_im = dict(plot=dict(height=h, width=w), style=dict(cmap='Viridis'))
+    opts_pts = dict(
+        plot=dict(height=h, width=w, size_index='seeds', color_index=mask, tools=['hover']),
+        style=dict(fill_alpha=0.8, line_alpha=0, cmap=pt_cmap))
+    if mask:
+        vdims = ['index', 'seeds', mask]
+    else:
+        vdims = ['index', 'seeds']
+        opts_pts['style']['color'] = 'white'
+    return (regrid(hv.Image(max_proj, kdims=['width', 'height'])).opts(**opts_im)
+            * hv.Points(seeds,
+                        kdims=['width', 'height'],
+                        vdims=vdims).opts(**opts_pts))
+
+
+def visualize_gmm_fit(values, gmm, bins):
+    def gaussian(x, mu, sig):
+        return np.exp(-np.power(x - mu, 2.) / (2 * np.power(sig, 2.)))
+    hist = np.histogram(values, bins=bins, density=True)
+    gss_dict = dict()
+    for igss, (mu, sig) in enumerate(zip(gmm.means_, gmm.covariances_)):
+        gss = gaussian(hist[1], np.asscalar(mu), np.asscalar(np.sqrt(sig)))
+        gss_dict[igss] = hv.Curve((hist[1], gss))
+    return (hv.Histogram(((hist[0] - hist[0].min()) / np.ptp(hist[0]), hist[1]))
+            .opts(style=dict(alpha=0.6, fill_color='gray'))
+            * hv.NdOverlay(gss_dict)).opts(plot=dict(height=400, width=500))
 
 
 def visualize_spatial_update(A_dict, C_dict, kdims=None):
