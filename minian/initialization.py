@@ -67,7 +67,7 @@ def local_max(fm, wnd):
     return (fm == fm_max).astype(np.uint8)
 
 
-def gmm_refine(varr, seeds, q=(0.1, 99.9), n_components=2, valid_components=1):
+def gmm_refine(varr, seeds, q=(0.1, 99.9), n_components=2, valid_components=1, mean_mask=True):
     print("selecting seeds")
     varr_sub = varr.sel(
         spatial=[tuple(hw) for hw in seeds[['height', 'width']].values])
@@ -94,6 +94,9 @@ def gmm_refine(varr, seeds, q=(0.1, 99.9), n_components=2, valid_components=1):
     gmm.fit(dat)
     idg = np.argsort(gmm.means_.reshape(-1))[-valid_components:]
     idx_valid = np.isin(gmm.predict(dat), idg)
+    if mean_mask:
+        idx_mean = dat > np.sort(gmm.means_)[0]
+        idx_valid = np.logical_and(idx_mean.squeeze(), idx_valid)
     seeds['mask_gmm'] = idx_valid
     return seeds, varr_pv, gmm
 
@@ -141,7 +144,8 @@ def pnr_refine(varr, seeds, noise_freq=0.25, thres=1.5, q=(0.1, 99.9)):
         mask = mask.compute()
         mask_df = mask.to_pandas().rename('mask_pnr').reset_index()
         seeds = pd.merge(seeds, mask_df, on=['height', 'width'], how='left')
-    return seeds, pnr
+        gmm = None
+    return seeds, pnr, gmm
 
 
 def intensity_refine(varr, seeds, thres_mul=2):
@@ -250,7 +254,8 @@ def initialize(varr, seeds, thres_corr=0.8, wnd=10, chk=None):
     res_ls = dask.compute(res_ls)[0]
     print("concatenating results")
     A = (xr.concat([r[0] for r in res_ls], 'unit_id')
-         .assign_coords(unit_id = np.arange(len(res_ls))))
+         .assign_coords(unit_id = np.arange(len(res_ls)))
+         .fillna(0))
     C = (xr.concat([r[1] for r in res_ls], 'unit_id')
          .assign_coords(unit_id = np.arange(len(res_ls))))
     print("initializing backgrounds")
