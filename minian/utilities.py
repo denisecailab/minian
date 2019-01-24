@@ -653,7 +653,7 @@ def save_minian(var, dpath, fname='minian', backend='netcdf', meta_dict=None, ov
     dpath = os.path.normpath(dpath)
     ds = var.to_dataset()
     if meta_dict is not None:
-        pathlist = os.path.normpath(dpath).split(os.sep)
+        pathlist = os.path.abspath(dpath).split(os.sep)
         ds = ds.assign_coords(
             **dict([(dn, pathlist[di]) for dn, di in meta_dict.items()]))
     if backend is 'netcdf':
