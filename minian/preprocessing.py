@@ -220,10 +220,17 @@ def remove_background_perframe(fm, method, wnd, selem):
         return white_tophat(fm, selem)
 
 
-def stripe_correction(varray, reduce_dim='height'):
-    varr_sc = varray.copy()
-    mean1d = varray.mean(dim='frame').mean(dim=reduce_dim)
-    varr_sc -= mean1d
+def stripe_correction(varr, reduce_dim='height', on='mean'):
+    if on == 'mean':
+        temp = varr.mean(dim='frame')
+    elif on == 'max':
+        temp = varr.max(dim='frame')
+    elif on == 'perframe':
+        temp = varr
+    else:
+        raise NotImplementedError("on {} not understood".format(on))
+    mean1d = temp.mean(dim=reduce_dim)
+    varr_sc = varr - mean1d
     return varr_sc.rename(varray.name + "_Stripe_Corrected")
 
 
@@ -296,7 +303,7 @@ def remove_brightspot(varr, thres=3):
 
 def remove_brightspot_perframe(fm, k_mean, thres):
     f_mean = ndi.convolve(fm, k_mean)
-    f_diff = stat.zscore(fm - f_mean)
+    f_diff = np.nan_to_num(stat.zscore(fm - f_mean))
     if thres == 'min':
         f_mask = f_diff > -np.min(f_diff)
     else:
