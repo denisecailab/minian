@@ -1164,7 +1164,7 @@ def visualize_gmm_fit(values, gmm, bins):
             * hv.NdOverlay(gss_dict)).opts(plot=dict(height=400, width=500))
 
 
-def visualize_spatial_update(A_dict, C_dict, kdims=None):
+def visualize_spatial_update(A_dict, C_dict, kdims=None, norm=True):
     if not kdims:
         A_dict = dict(dummy=A_dict)
         C_dict = dict(dummy=C_dict)
@@ -1172,7 +1172,17 @@ def visualize_spatial_update(A_dict, C_dict, kdims=None):
         dict(), dict(), dict(), dict())
     for key, A in A_dict.items():
         A = A.compute()
-        C = C_dict[key].compute()
+        C = C_dict[key]
+        if norm:
+            C = xr.apply_ufunc(
+                normalize,
+                C.chunk(dict(frame=-1)),
+                input_core_dims=[['frame']],
+                output_core_dims=[['frame']],
+                vectorize=True,
+                dask='parallelized',
+                output_dtypes=[C.dtype])
+        C = C.compute()
         h, w = A.sizes['height'], A.sizes['width']
         cents_df = centroid(A)
         hv_pts_dict[key] = (hv.Points(cents_df,
