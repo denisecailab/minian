@@ -3,7 +3,6 @@ import numpy as np
 import holoviews as hv
 import xarray as xr
 import ipywidgets as iwgt
-import seaborn as sns
 import pandas as pd
 import colorsys
 import param

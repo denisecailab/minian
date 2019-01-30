@@ -2,12 +2,10 @@ import numpy as np
 import xarray as xr
 import pandas as pd
 import dask as da
-import graph_tool.all as gt
 import numba as nb
 import dask.array.fft as dafft
 import dask.array.linalg as dalin
 # import dask_ml.joblib
-import graph_tool.all as gt
 from dask import delayed, compute
 from dask.diagnostics import Profiler
 from dask.distributed import progress
@@ -22,6 +20,7 @@ from sklearn.externals.joblib import parallel_backend
 from numba import jit, guvectorize
 from skimage import morphology as moph
 from statsmodels.tsa.stattools import acovf
+import networkx as nx
 import cvxpy as cvx
 import pyfftw.interfaces.dask_fft as fftw
 from timeit import timeit
@@ -758,21 +757,17 @@ def unit_merge(A, C, add_list=None, thres_corr=0.9):
     else:
         return A_merge, C_merge
 
-
 def label_connected(adj, only_connected=False):
     np.fill_diagonal(adj, 0)
     adj = np.triu(adj)
-    eg_list = []
-    for idx, wt in np.ndenumerate(adj):
-        if wt > 0:
-            eg_list.append(list(idx))
-    g = gt.Graph(directed=False)
-    vmap = g.add_vertex(adj.shape[0])
-    gmap = g.add_edge_list(eg_list)
-    comp, hist = gt.label_components(g)
-    labels = np.array(comp.a)
-    if only_connected:
-        labels[np.isin(labels, np.where(hist == 1)[0])] = -1
+    g = nx.convert_matrix.from_numpy_matrix(adj)
+    labels = np.zeros(adj.shape[0], dtype=np.int)
+    for icomp, comp in enumerate(nx.connected_components(g)):
+        comp = list(comp)
+        if only_connected and len(comp) == 1:
+            labels[comp] = -1
+        else:
+            labels[comp] = icomp
     return labels
 
 
