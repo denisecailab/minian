@@ -3,7 +3,6 @@ import xarray as xr
 import pandas as pd
 import dask
 import pyfftw.interfaces.numpy_fft as npfft
-import graph_tool.all as gt
 import dask.array.fft as dafft
 import dask.array as da
 import warnings
@@ -17,7 +16,7 @@ from sklearn.mixture import GaussianMixture
 from IPython.core.debugger import set_trace
 from scipy.signal import butter, lfilter
 from tqdm import tqdm_notebook
-from .cnmf import smooth_sig
+from .cnmf import smooth_sig, label_connected
 
 
 def seeds_init(varr, wnd_size=500, method='rolling', stp_size=200, nchunk=100, max_wnd=10):
@@ -229,15 +228,11 @@ def seeds_merge(varr, seeds, thres_dist=5, thres_corr=0.6, noise_freq='envelope'
     np.fill_diagonal(adj.values, 0)
     iso = adj.sum('sampleB')
     iso = iso.where(iso == 0).dropna('sampleA')
-    adj = xr.apply_ufunc(np.triu, adj)
-    eg_list = adj.to_dataframe(name='adj')
-    eg_list = eg_list[eg_list['adj']].reset_index()[['sampleA', 'sampleB']]
-    g = gt.Graph(directed=False)
-    gmap = g.add_edge_list(eg_list.values, hashed=True)
-    comp, hist = gt.label_components(g)
+    labels = label_connected(adj.values)
+    uids = adj.coords['sampleA'].values
     seeds_final = set(iso.coords['sampleA'].data.tolist())
-    for cur_cmp in np.unique(comp.a):
-        cur_smp = [gmap[v] for v in np.where(comp.a == cur_cmp)[0]]
+    for cur_cmp in np.unique(labels):
+        cur_smp = uids[np.where(labels == cur_cmp)[0]]
         cur_max = varr_max.isel(spatial=cur_smp)
         max_seed = cur_smp[np.argmax(cur_max.data)]
         seeds_final.add(max_seed)
