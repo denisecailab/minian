@@ -17,6 +17,7 @@ from IPython.core.debugger import set_trace
 from scipy.signal import butter, lfilter
 from tqdm import tqdm_notebook
 from .cnmf import smooth_sig, label_connected
+from scipy.ndimage.filters import median_filter
 
 
 def seeds_init(varr, wnd_size=500, method='rolling', stp_size=200, nchunk=100, max_wnd=10):
@@ -105,6 +106,16 @@ def pnr_refine(varr, seeds, noise_freq=0.25, thres=1.5, q=(0.1, 99.9)):
     varr_sub = varr.sel(
         spatial=[tuple(hw) for hw in seeds[['height', 'width']].values])
     varr_sub = varr_sub.chunk(dict(frame=-1, spatial='auto'))
+    varr_base = xr.apply_ufunc(
+        median_filter,
+        varr_sub,
+        input_core_dims=[['frame']],
+        output_core_dims=[['frame']],
+        dask='parallelized',
+        kwargs=dict(size=501),
+        vectorize=True,
+        output_dtypes=[varr_sub.dtype])
+    varr_sub = (varr_sub - varr_base).persist()
     print("computing peak-noise ratio")
     but_b, but_a = butter(2, noise_freq, btype='high', analog=False)
     varr_noise = xr.apply_ufunc(
