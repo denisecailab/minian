@@ -699,7 +699,7 @@ def xrconcat_recursive(var_dict, dims):
         return xr.concat(var_dict.values(), dim=dims[0])
 
 
-def update_meta(dpath, pattern=r'^minian\.nc$', meta_dict=None):
+def update_meta(dpath, pattern=r'^minian\.nc$', meta_dict=None, backend='netcdf'):
     for dirpath, dirnames, fnames in os.walk(dpath):
         fnames = filter(lambda fn: re.search(pattern, fn), fnames)
         for fname in fnames:
@@ -711,7 +711,10 @@ def update_meta(dpath, pattern=r'^minian\.nc$', meta_dict=None):
             new_ds = new_ds.assign_coords(**dict([(
                 cdname,
                 pathlist[cdval]) for cdname, cdval in meta_dict.items()]))
-            new_ds.to_netcdf(f_path, mode='a')
+            if backend='netcdf':
+                new_ds.to_netcdf(f_path, mode='a')
+            elif backend='zarr':
+                new_ds.to_zarr(f_path, mode='w')
             print("updated: {}".format(f_path))
 
 
