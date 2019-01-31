@@ -570,9 +570,9 @@ class CNMFViewer():
             self.S_sub = self.S_sub.sortby('NNord')
             self.C_norm_sub = self.C_norm_sub.sortby('NNord')
             self.S_norm_sub = self.S_norm_sub.sortby('NNord')
-        self._h = (self.A_sub.isel(unit_id=0).dropna('height')
+        self._h = (self.A_sub.isel(unit_id=0).dropna('height', how='all')
                    .coords['height'].values)
-        self._w = (self.A_sub.isel(unit_id=0).dropna('width')
+        self._w = (self.A_sub.isel(unit_id=0).dropna('width', how='all')
                    .coords['width'].values)
         self._f = (self.C_sub.isel(unit_id=0).dropna('frame')
                    .coords['frame'].values)
@@ -1132,7 +1132,7 @@ def centroid(A, verbose=False):
     return cents_df
 
 
-def visualize_seeds(max_proj, seeds, mask=None):
+def visualize_seeds(max_proj, seeds, mask=None, datashade=True):
     h, w = max_proj.sizes['height'], max_proj.sizes['width']
     pt_cmap = {True: 'white', False: 'red'}
     opts_im = dict(plot=dict(height=h, width=w), style=dict(cmap='Viridis'))
@@ -1144,10 +1144,11 @@ def visualize_seeds(max_proj, seeds, mask=None):
     else:
         vdims = ['index', 'seeds']
         opts_pts['style']['color'] = 'white'
-    return (regrid(hv.Image(max_proj, kdims=['width', 'height'])).opts(**opts_im)
-            * hv.Points(seeds,
-                        kdims=['width', 'height'],
-                        vdims=vdims).opts(**opts_pts))
+    im = hv.Image(max_proj, kdims=['width', 'height'])
+    pts = hv.Points(seeds, kdims=['width', 'height'], vdims=vdims)
+    if datashade:
+        im = regrid(im)
+    return (im.opts(**opts_im) * pts.opts(**opts_pts))
 
 
 def visualize_gmm_fit(values, gmm, bins):
