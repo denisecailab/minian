@@ -231,7 +231,7 @@ def stripe_correction(varr, reduce_dim='height', on='mean'):
         raise NotImplementedError("on {} not understood".format(on))
     mean1d = temp.mean(dim=reduce_dim)
     varr_sc = varr - mean1d
-    return varr_sc.rename(varray.name + "_Stripe_Corrected")
+    return varr_sc.rename(varr.name + "_Stripe_Corrected")
 
 
 def gaussian_blur(varray, ksize=(3, 3), sigmaX=0):
