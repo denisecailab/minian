@@ -610,12 +610,13 @@ def open_minian(dpath, fname='minian', backend='netcdf', chunks=None, post_proce
     if backend is 'netcdf':
         fname = fname + '.nc'
         if chunks is 'auto':
-            with xr.open_dataset(os.path.join(dpath, fname)) as ds:
+            mpath = pjoin(dpath, fname)
+            with xr.open_dataset(mpath) as ds:
                 dims = ds.dims
             chunks = dict([(d, 'auto') for d in dims])
             ds = xr.open_dataset(os.path.join(dpath, fname), chunks=chunks)
             if post_process:
-                ds = post_process(ds)
+                ds = post_process(ds, mpath)
         return ds
     elif backend is 'zarr':
         mpath = pjoin(dpath, fname)
@@ -624,7 +625,7 @@ def open_minian(dpath, fname='minian', backend='netcdf', chunks=None, post_proce
         if chunks is 'auto':
             chunks = dict([(d, 'auto') for d in ds.dims])
         if post_process:
-            ds = post_process(ds)
+            ds = post_process(ds, mpath)
         return ds.chunk(chunks)
     else:
         raise NotImplementedError("backend {} not supported".format(backend))
