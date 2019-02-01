@@ -606,20 +606,25 @@ def save_variable(var, fpath, fname, meta_dict=None):
     return ds
 
 
-def open_minian(dpath, fname='minian', backend='netcdf', chunks=None):
+def open_minian(dpath, fname='minian', backend='netcdf', chunks=None, post_process=None):
     if backend is 'netcdf':
         fname = fname + '.nc'
         if chunks is 'auto':
             with xr.open_dataset(os.path.join(dpath, fname)) as ds:
                 dims = ds.dims
             chunks = dict([(d, 'auto') for d in dims])
-        return xr.open_dataset(os.path.join(dpath, fname), chunks=chunks)
+            ds = xr.open_dataset(os.path.join(dpath, fname), chunks=chunks)
+            if post_process:
+                ds = post_process(ds)
+        return ds
     elif backend is 'zarr':
         mpath = pjoin(dpath, fname)
         dslist = [xr.open_zarr(pjoin(mpath, d)) for d in listdir(mpath) if isdir(pjoin(mpath, d))]
         ds = xr.merge(dslist)
         if chunks is 'auto':
             chunks = dict([(d, 'auto') for d in ds.dims])
+        if post_process:
+            ds = post_process(ds)
         return ds.chunk(chunks)
     else:
         raise NotImplementedError("backend {} not supported".format(backend))
