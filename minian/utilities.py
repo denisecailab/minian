@@ -711,12 +711,9 @@ def update_meta(dpath, pattern=r'^minian\.nc$', meta_dict=None, backend='netcdf'
             f_path = os.path.join(dirpath, fname)
             pathlist = os.path.normpath(dirpath).split(os.sep)
             new_ds = xr.Dataset()
-            if backend == 'netcdf':
-                with xr.open_dataset(f_path) as old_ds:
-                    new_ds.attrs = deepcopy(old_ds.attrs)
-            elif backend == 'zarr':
-                with xr.open_zarr(f_path) as old_ds:
-                    new_ds.attrs = deepcopy(old_ds.attrs)
+            old_ds = open_minian(f_path, f_path, backend)
+            new_ds.attrs = deepcopy(old_ds.attrs)
+            old_ds.close()
             new_ds = new_ds.assign_coords(**dict([(
                 cdname,
                 pathlist[cdval]) for cdname, cdval in meta_dict.items()]))
