@@ -268,9 +268,9 @@ def initialize(varr, seeds, thres_corr=0.8, wnd=10, chk=None):
     print("initializing backgrounds")
     if not chk:
         chk = dict(height='auto', width='auto', frame='auto', unit_id='auto')
+    A = A.reindex_like(varr.isel(frame=0)).fillna(0)
     A = A.chunk(dict(height=chk['height'], width=chk['width'], unit_id=-1))
     C = C.chunk(dict(frame=chk['frame'], unit_id=-1))
-    A = A.reindex_like(varr.isel(frame=0)).fillna(0)
     varr = varr.chunk(dict(frame=chk['frame'], height=chk['height'], width=chk['width']))
     AC = xr.apply_ufunc(
         da.dot, A, C,
