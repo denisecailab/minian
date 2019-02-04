@@ -90,7 +90,8 @@ def estimate_shifts(minian_df, by='session', to='first', temp_var='org', templat
         except KeyError:
             raise KeyError(
                 "variable {} not found in dataset".format(temp_var))
-        temps = xr.concat(temp_ls, dim=by)
+        temps = (xr.concat(temp_ls, dim=by).expand_dims(grp_dims)
+                 .reset_coords(drop=True))
         res = estimate_shift_fft(temps, dim=by, pct_thres=pct_thres, on=to)
         shifts = res.sel(variable=['height', 'width'])
         corrs = res.sel(variable='corr')
