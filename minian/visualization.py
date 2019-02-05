@@ -1285,6 +1285,16 @@ def visualize_temporal_update(YA_dict, C_dict, S_dict, g_dict, sig_dict, A_dict,
             + hv_A.relabel("Spatial Footprint")).cols(2)
 
 
+def roi_draw(im):
+    h, w = im.sizes['height'], im.sizes['width']
+    opts_im = {'plot': {'height': h, 'width': w}, 'style': {'cmap': 'Viridis'}}
+    opts_box = {'style': {'fill_alpha': 0.3, 'line_color': 'white'}}
+    hv_im = regrid(hv.Image(im, kdims=['width', 'height'])).opts(**opts_im)
+    hv_box = hv.Polygons([]).opts(**opts_box)
+    str_box = BoxEdit(source=hv_box)
+    return hv_im * hv_box, str_box
+
+
 def flatten(l):
     for el in l:
         if isinstance(el, collections.Iterable) and not isinstance(el, basestring):
