@@ -1127,8 +1127,10 @@ def centroid(A, verbose=False):
     cents_df = (cents.rename('cents').to_series().dropna()
                 .unstack('dim').rename_axis(None, axis='columns')
                 .reset_index())
-    cents_df['height'] *= A.coords['height'].max().values
-    cents_df['width'] *= A.coords['width'].max().values
+    h_rg = (A.coords['height'].min().values, A.coords['height'].max().values)
+    w_rg = (A.coords['width'].min().values, A.coords['width'].max().values)
+    cents_df['height'] = cents_df['height'] * (h_rg[1] - h_rg[0]) + h_rg[0]
+    cents_df['width'] = cents_df['width'] * (w_rg[1] - w_rg[0]) + w_rg[0]
     return cents_df
 
 
