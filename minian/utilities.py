@@ -639,10 +639,14 @@ def open_minian_mf(dpath, index_dims, result_format='xarray', pattern=r'minian\.
             continue
         flist = list(filter(lambda f: re.search(pattern, f), filelist + dirlist))
         if flist:
-            minian = open_minian(nextdir, fname=flist[-1], **kwargs)
+            print("opening dataset under {}".format(nextdir))
+            if len(flist > 1):
+                warnings.warn("multiple dataset found: {}".format(flist))
+            fname = flist[-1]
+            print("opening {}".format(fname))
+            minian = open_minian(nextdir, fname=fname, **kwargs)
             key = tuple([np.array_str(minian[d].values) for d in index_dims])
             minian_dict[key] = minian
-            print("opening dataset under {}".format(nextdir))
             print(["{}: {}".format(d, v) for d, v in zip(index_dims, key)])
     if result_format is 'xarray':
         return xrconcat_recursive(minian_dict, index_dims)
