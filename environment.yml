@@ -37,7 +37,7 @@ dependencies:
   # - cryptography-vectors=2.4.2
   # - curl=7.63.0
   # - cvxopt=1.2.1
-  - cvxpy=1.0.8
+  - cvxpy
   # - cycler=0.10.0
   # - cytoolz=0.9.0.1
   - dask=1.0.0
@@ -51,7 +51,7 @@ dependencies:
   - distributed=1.25.1
   # - docutils=0.14
   # - dsdp=5.8
-  - ecos=2.0.7
+  - ecos
   # - entrypoints=0.2.3
   # - expat=2.2.5
   # - fastcache=1.0.2
@@ -143,6 +143,7 @@ dependencies:
   - netcdf4=1.4.1
   # - nettle=3.3
   - networkx=2.2
+  - nodejs
   # - notebook=5.7.4
   - numba=0.41.0
   # - numcodecs=0.6.2
@@ -206,7 +207,7 @@ dependencies:
   # - scikit-image=0.14.1
   - scikit-learn=0.20.0
   - scipy=1.1.0
-  - scs=2.0.2
+  - scs
   # - seaborn=0.9.0
   # - selenium=3.141.0
   # - send2trash=1.5.0
