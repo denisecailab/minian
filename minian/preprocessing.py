@@ -5,6 +5,8 @@ import functools as fct
 import cv2
 import skimage as ski
 import scipy.ndimage as ndi
+import scipy.stats as stat
+import numba as nb
 from dask import delayed, compute
 from dask.diagnostics import ProgressBar
 from collections import OrderedDict
@@ -197,7 +199,7 @@ def remove_background_perframe_old(fid, fm, varr, window):
     varr.loc[dict(frame=fid)] = f
 
 
-def remove_background(varr, method, wnd, compute=True):
+def remove_background(varr, method, wnd):
     selem = disk(wnd)
     res = xr.apply_ufunc(
         remove_background_perframe,
@@ -208,9 +210,6 @@ def remove_background(varr, method, wnd, compute=True):
         dask='parallelized',
         output_dtypes=[varr.dtype],
         kwargs=dict(method=method, wnd=wnd, selem=selem))
-    if compute:
-        with ProgressBar():
-            res = res.persist()
     return res.rename(varr.name + "_subtracted")
 
 
@@ -221,14 +220,18 @@ def remove_background_perframe(fm, method, wnd, selem):
         return white_tophat(fm, selem)
 
 
-def stripe_correction(varray, reduce_dim='height'):
-    varr_sc = varray.astype(np.float32)
-    mean1d = varray.mean(dim='frame').mean(dim=reduce_dim)
-    varr_sc -= mean1d
-    return scale_varr(
-        varr_sc.rename(varray.name + "_Stripe_Corrected"), (0, 255),
-        inplace=True).astype(
-            np.uint8, copy=False)
+def stripe_correction(varr, reduce_dim='height', on='mean'):
+    if on == 'mean':
+        temp = varr.mean(dim='frame')
+    elif on == 'max':
+        temp = varr.max(dim='frame')
+    elif on == 'perframe':
+        temp = varr
+    else:
+        raise NotImplementedError("on {} not understood".format(on))
+    mean1d = temp.mean(dim=reduce_dim)
+    varr_sc = varr - mean1d
+    return varr_sc.rename(varr.name + "_Stripe_Corrected")
 
 
 def gaussian_blur(varray, ksize=(3, 3), sigmaX=0):
@@ -236,10 +239,20 @@ def gaussian_blur(varray, ksize=(3, 3), sigmaX=0):
         lambda fm: cv2.GaussianBlur(fm.values, ksize, sigmaX))
 
 
-def denoise(varr, method, compute=True, **kwargs):
-    kwargs['method'] = method
+def denoise(varr, method, **kwargs):
+    if method == 'gaussian':
+        func = cv2.GaussianBlur
+    elif method == 'anisotropic':
+        func = anisotropic_diffusion
+    elif method == 'median':
+        func = cv2.medianBlur
+    elif method == 'bilateral':
+        func = cv2.bilateralFilter
+    else:
+        raise NotImplementedError(
+            "denoise method {} not understood".format(method))
     res = xr.apply_ufunc(
-        denoise_perframe,
+        func,
         varr,
         input_core_dims=[['height', 'width']],
         output_core_dims=[['height', 'width']],
@@ -247,9 +260,6 @@ def denoise(varr, method, compute=True, **kwargs):
         dask='parallelized',
         output_dtypes=[varr.dtype],
         kwargs=kwargs)
-    if compute:
-        with ProgressBar():
-            res = res.persist()
     return res.rename(varr.name + "_denoised")
 
 
@@ -293,7 +303,7 @@ def remove_brightspot(varr, thres=3):
 
 def remove_brightspot_perframe(fm, k_mean, thres):
     f_mean = ndi.convolve(fm, k_mean)
-    f_diff = zscore(fm - f_mean)
+    f_diff = np.nan_to_num(stat.zscore(fm - f_mean))
     if thres == 'min':
         f_mask = f_diff > -np.min(f_diff)
     else:
