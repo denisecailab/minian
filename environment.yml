@@ -56,7 +56,7 @@ dependencies:
   # - expat=2.2.5
   # - fastcache=1.0.2
   # - fasteners=0.14.1
-  # - ffmpeg=4.0.2
+  - ffmpeg=4.0.2
   - fftw=3.3.8
   # - fontconfig=2.13.0
   # - freetype=2.8.1
