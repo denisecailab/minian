@@ -4,6 +4,7 @@ MiniAn is an analysis pipeline and visualization tool inspired by both [CaImAn](
 
 # Quick Start Guide
 1. Download and install [conda](https://conda.io/projects/conda/en/latest/).
+2. Make sure your conda is up to date: `conda update -n base -c default conda`
 2. Download the MiniAn package: `git clone https://github.com/phildong/minian.git`
 3. Go into MiniAn folder you just cloned: `cd minian/`
 4. Create an conda environment: `conda env create -n minian -f environment.yml`
