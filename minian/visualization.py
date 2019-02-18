@@ -492,10 +492,10 @@ class CNMFViewer_old():
     
 class CNMFViewer():
     def __init__(self, minian=None, A=None, C=None, S=None, org=None, sortNN=True):
-        self._A = A if A else minian['A']
-        self._C = C if C else minian['C']
-        self._S = S if S else minian['S']
-        self._org = org if org else minian['org']
+        self._A = A if A is not None else minian['A']
+        self._C = C if C is not None else minian['C']
+        self._S = S if S is not None else minian['S']
+        self._org = org if org is not None else minian['org']
         self._C_norm = xr.apply_ufunc(
                 normalize, self._C.chunk(dict(frame=-1, unit_id='auto')),
                 input_core_dims=[['frame']],

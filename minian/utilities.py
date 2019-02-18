@@ -41,7 +41,7 @@ try:
     import pycuda.autoinit
     import pycuda.gpuarray as gpuarray
     import skcuda.linalg as culin
-    
+
 except:
     print("cannot use cuda accelerate")
 
@@ -640,7 +640,7 @@ def open_minian_mf(dpath, index_dims, result_format='xarray', pattern=r'minian\.
         flist = list(filter(lambda f: re.search(pattern, f), filelist + dirlist))
         if flist:
             print("opening dataset under {}".format(nextdir))
-            if len(flist > 1):
+            if len(flist) > 1:
                 warnings.warn("multiple dataset found: {}".format(flist))
             fname = flist[-1]
             print("opening {}".format(fname))
