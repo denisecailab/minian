@@ -49,12 +49,19 @@ from scipy.spatial import cKDTree
 
 
 class VArrayViewer():
-    def __init__(self, varr, framerate=30, rerange=None, compute=True, datashading=True):
+    def __init__(self, varr, framerate=30, rerange=None, compute=True, datashading=True, layout=True):
         if isinstance(varr, list):
             self.ds = xr.merge(varr)
-        else:
+        elif isinstance(varr, xr.DataArray):
             self.ds = varr.to_dataset()
-        # self.ds = hv.Dataset(varr)
+        elif isinstance(varr, xr.Dataset):
+            self.ds = varr
+        else:
+            raise NotImplementedError(
+                "video array of type {} not supported".format(type(varr)))
+        self._compute = compute
+        self._datashade = datashading
+        self._layout = layout
         self.mean = self.ds.mean(['height', 'width'])
         self.max = self.ds.max(['height', 'width'])
         self.min = self.ds.min(['height', 'width'])
@@ -62,30 +69,38 @@ class VArrayViewer():
         self._f = self.ds.coords['frame'].values
         self._h = self.ds.sizes['height']
         self._w = self.ds.sizes['width']
+        self.mask = dict()
         self.rerange = rerange
         CStream = Stream.define(
             'CStream',
             f=param.Integer(default=0, bounds=(self._f.min(), self._f.max())))
         self.stream = CStream()
+        self.str_box = BoxEdit()
         self.widgets = self._widgets()
-        self._compute = compute
-        self._datashade = datashading
+        if layout:
+            self.ds_sub = self.ds
+        else:
+            self.ds_sub = dict([list(self.ds.items())[0]])
         if compute:
             print("computing summary")
             with ProgressBar():
                 self.mean = self.mean.compute()
                 self.max = self.max.compute()
                 self.min = self.min.compute()
+        self.pnplot = pn.panel(self.get_hvobj())
 
-    def show(self):
+    def get_hvobj(self):
         imdict = OrderedDict()
         meandict = OrderedDict()
-        for vname, varr in self.ds.items():
+        for vname, varr in self.ds_sub.items():
             fim = fct.partial(self._img, dat=varr)
             im = hv.DynamicMap(fim, streams=[self.stream])
             im = regrid(im)
             im = im.opts(plot={'width': self._w, 'height': self._h},
                          style={'camp': 'Viridis'})
+            hv_box = hv.Polygons([]).opts(
+                style={'fill_alpha': 0.3, 'line_color': 'white'})
+            self.str_box = BoxEdit(source=hv_box)
             if self.rerange:
                 im = im.redim.range(**{vname: self.rerange})
             xyrange = RangeXY(source=im)
@@ -111,27 +126,32 @@ class VArrayViewer():
                 mean = mean.opts(
                     plot={'width': self._w, 'height': int(np.around(self._h * 0.6))})
                 meandict[vname] = mean
-            image = im.relabel(group=vname, label='Image')
+            image = (im * hv_box).relabel(group=vname, label='Image')
             histtogram = hist.relabel(group=vname, label='Histogram')
             imdict[vname] = (image << histtogram).map(lambda p: p.opts(style=dict(cmap='Viridis')))
-        return hv.Layout(list(imdict.values()) + list(meandict.values())).cols(
-            len(self.ds))
+        hvobjs = hv.Layout(list(imdict.values()) + list(meandict.values())).cols(len(self.ds))
+        return hvobjs
+
+    def show(self):
+        return pn.layout.Column(self.widgets, self.pnplot)
 
     def _widgets(self):
-        w_paly = iwgt.Play(
-            value=self._f[0],
-            min=self._f[0],
-            max=self._f[-1],
-            interval=1000 / self.framerate)
-        w_frame = iwgt.SelectionSlider(
-            value = self._f[0],
-            options = self._f.tolist(),
-            continuous_update=False,
-            description="Frame:"
-        )
-        iwgt.link((w_paly, 'value'), (w_frame, 'value'))
-        iwgt.interactive(self.stream.event, f=w_frame)
-        return iwgt.HBox([w_paly, w_frame])
+        w_play = pnwgt.Player(
+            length=len(self._f), interval=10,
+            value=0, width=500)
+        def play(f):
+            if not f.old == f.new:
+                self.stream.event(f=int(self._f[f.new]))
+        w_play.param.watch(play, 'value')
+        w_box = pnwgt.Button(name='Update Mask', button_type='primary')
+        w_box.param.watch(self._update_box, 'clicks')
+        if not self._layout:
+            w_meta = pnwgt.Select(name='file', options=list(self.ds.keys()))
+            w_meta.param.watch(self._update_meta, 'value')
+            wgts = pn.widgets.WidgetBox(w_meta, w_box, w_play)
+        else:
+            wgts = pn.widgets.WidgetBox(w_box, w_play)
+        return wgts
 
     def _img(self, dat, f):
         return hv.Image(dat.sel(frame=f).compute(), kdims=['width', 'height'])
@@ -142,6 +162,20 @@ class VArrayViewer():
         else:
             im = self._img(dat=dat, f=f)
         return hv.operation.histogram(im, frequency_label='freq', num_bins=50)
+
+    def _update_meta(self, vname):
+        if not vname.old == vname.new:
+            vname = vname.new
+            self.ds_sub = self.ds[vname].to_dataset()
+            self.pnplot.objects[0].object = self.get_hvobj()
+
+    def _update_box(self, click):
+        box = self.str_box.data
+        self.mask.update({
+            list(self.ds_sub.keys())[0]: {
+                'height': slice(box['y0'], box['y1']),
+                'width': slice(box['x0'], box['x1'])}})
+
 
 
 class MCViewer():
