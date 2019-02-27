@@ -358,7 +358,7 @@ def estimate_shift_fft(varr, dim='frame', on='first', pad_f=1, pct_thres=None):
     varr = varr.chunk(dict(height=-1, width=-1))
     dims = list(varr.dims)
     dims.remove(dim)
-    sizes = [varr.sizes[d] for d in dims]
+    sizes = [varr.sizes[d] for d in ['height', 'width']]
     if not pct_thres:
         pct_thres = (1 - 10 / (sizes[0] * sizes[1])) * 100
     print(pct_thres)
