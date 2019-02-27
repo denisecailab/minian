@@ -530,6 +530,13 @@ class CNMFViewer():
         self._C = C if C is not None else minian['C']
         self._S = S if S is not None else minian['S']
         self._org = org if org is not None else minian['org']
+        try:
+            self.unit_labels = minian['unit_labels']
+        except KeyError:
+            self.unit_labels = xr.DataArray(
+                minian['unit_id'].values.copy(),
+                dims=minian['unit_id'].dims,
+                coords=minian['unit_id'].coords).rename('unit_labels')
         self._C_norm = xr.apply_ufunc(
                 normalize, self._C.chunk(dict(frame=-1, unit_id='auto')),
                 input_core_dims=[['frame']],
@@ -579,6 +586,7 @@ class CNMFViewer():
             usub=param.List())
         self.strm_usub = Stream_usub()
         self.strm_usub.add_subscriber(self.callback_usub)
+        self.usub_sel = self.strm_usub.usub
         self._AC = self._org.sel(**self.metas)
         self._mov = self._org.sel(**self.metas)
         self.pipAC = Pipe([])
@@ -589,6 +597,7 @@ class CNMFViewer():
         self.spatial_all = self._spatial_all()
         self.temp_comp_sub = self._temp_comp_sub(self._u[:5])
         self.wgt_temp_comp = self._temp_comp_wgt()
+        self.wgt_man = self._man_wgt()
 
 
     def update_subs(self):
@@ -696,7 +705,8 @@ class CNMFViewer():
                         self.wgt_spatial_all
                     ),
                     self.wgt_temp_comp),
-                self.temp_comp_sub))
+                self.temp_comp_sub,
+                self.wgt_man))
     
     def _temp_comp_sub(self, usub=None):
         if usub is None:
@@ -812,6 +822,50 @@ class CNMFViewer():
             pn.layout.WidgetBox(wgt_norm, wgt_showC, wgt_showS, wgt_grp, width=150),
             pn.layout.WidgetBox(wgt_grp_prv, wgt_grp_nxt, width=150))
         return pn.layout.Column(wgt_groups, wgt_play)
+
+    def _man_wgt(self):
+        usub = self.strm_usub.usub
+        usub.reverse()
+        wgt_sel = {uid: pnwgt.Select(
+            name='Unit Label', options=usub+[-1], value=uid,
+            height=50, width=100) for uid in usub}
+        def callback_ulab(value, uid):
+            self.unit_labels.loc[uid] = value.new
+        for uid, sel in wgt_sel.items():
+            cb = fct.partial(callback_ulab, uid=uid)
+            sel.param.watch(cb, 'value')
+        wgt_check = {uid: pnwgt.Checkbox(
+            name='Unit ID: {}'.format(uid), value=False,
+            height=50, width=100) for uid in usub}
+        def callback_chk(val, uid):
+            if not val.old == val.new:
+                if val.new:
+                    self.usub_sel.append(uid)
+                else:
+                    self.usub_sel.remove(uid)
+        for uid, chk in wgt_check.items():
+            cb = fct.partial(callback_chk, uid=uid)
+            chk.param.watch(cb, 'value')
+        wgt_discard = pnwgt.Button(
+            name='Discard Selected',
+            button_type='primary', width=200)
+        def callback_discard(clicks):
+            for uid in self.usub_sel:
+                wgt_sel[uid].value = -1
+        wgt_discard.param.watch(callback_discard, 'clicks')
+        wgt_merge = pnwgt.Button(
+            name='Merge Selected',
+            button_type='primary', width=200)
+        def callback_merge(clicks):
+            for uid in self.usub_sel:
+                wgt_sel[uid].value = self.usub_sel[0]
+        wgt_merge.param.watch(callback_merge, 'clicks')
+        return pn.layout.Column(
+            pn.layout.WidgetBox(wgt_discard, wgt_merge, width=200),
+            pn.layout.Row(
+                pn.layout.WidgetBox(*wgt_check.values(), width=100),
+                pn.layout.WidgetBox(*wgt_sel.values(), width=100)))
+
     
     def update_temp_comp_wgt(self):
         self.wgt_temp_comp.objects = self._temp_comp_wgt().objects
