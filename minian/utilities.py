@@ -46,10 +46,15 @@ except:
     print("cannot use cuda accelerate")
 
 
-def norm_params(param):
+def load_params(param):
     try:
         param = ast.literal_eval(param)
     except (ValueError, SyntaxError):
+        pass
+    try:
+        if re.search(r'^slice\([0-9]+, *[0-9]+ *,*[0-9]*\)$', param):
+            param = eval(param)
+    except TypeError:
         pass
     if type(param) is dict:
         param = {k: norm_params(v) for k, v in param.items()}
