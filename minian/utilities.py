@@ -103,7 +103,7 @@ def load_videos(vpath,
         varr, dims=['frame', 'height', 'width'],
         coords=dict(
             frame=np.arange(varr.shape[0]),
-            height=np.arange(varr.shape[1]),
+            height=np.arange(varr.shape[1], 0, -1),
             width=np.arange(varr.shape[2])))
     if dtype:
         varr = varr.astype(dtype)
