@@ -173,8 +173,8 @@ class VArrayViewer():
         box = self.str_box.data
         self.mask.update({
             list(self.ds_sub.keys())[0]: {
-                'height': slice(box['y0'], box['y1']),
-                'width': slice(box['x0'], box['x1'])}})
+                'height': slice(box['y0'][0], box['y1'][0]),
+                'width': slice(box['x0'][0], box['x1'][0])}})
 
 
 
