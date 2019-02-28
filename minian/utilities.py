@@ -57,7 +57,7 @@ def load_params(param):
     except TypeError:
         pass
     if type(param) is dict:
-        param = {k: norm_params(v) for k, v in param.items()}
+        param = {k: load_params(v) for k, v in param.items()}
     return param
 
 def load_videos(vpath,
