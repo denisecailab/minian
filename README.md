@@ -8,7 +8,7 @@ MiniAn is an analysis pipeline and visualization tool inspired by both [CaImAn](
 2. Download the MiniAn package: `git clone https://github.com/phildong/minian.git`
 3. Go into MiniAn folder you just cloned: `cd minian/`
 4. Create an conda environment: `conda env create -n minian -f environment.yml`
-5. Activate the conda enviornment you created during CaImAn installation: `source activate caiman`
+5. Activate the conda enviornment you created during CaImAn installation: `source activate minian`
 6. Fire up jupyter: `jupyter notebook` and open the notebook "pipeline_noted.ipynb"
 
 # Additional steps for Windows:
