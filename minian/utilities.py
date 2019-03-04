@@ -610,13 +610,14 @@ def open_minian(dpath, fname='minian', backend='netcdf', chunks=None, post_proce
     if backend is 'netcdf':
         fname = fname + '.nc'
         if chunks is 'auto':
-            mpath = pjoin(dpath, fname)
-            with xr.open_dataset(mpath) as ds:
-                dims = ds.dims
-            chunks = dict([(d, 'auto') for d in dims])
-            ds = xr.open_dataset(os.path.join(dpath, fname), chunks=chunks)
-            if post_process:
-                ds = post_process(ds, mpath)
+            chunks = dict([(d, 'auto') for d in ds.dims])
+        mpath = pjoin(dpath, fname)
+        with xr.open_dataset(mpath) as ds:
+            dims = ds.dims
+        chunks = dict([(d, 'auto') for d in dims])
+        ds = xr.open_dataset(os.path.join(dpath, fname), chunks=chunks)
+        if post_process:
+            ds = post_process(ds, mpath)
         return ds
     elif backend is 'zarr':
         mpath = pjoin(dpath, fname)
