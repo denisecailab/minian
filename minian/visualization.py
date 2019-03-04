@@ -752,6 +752,7 @@ class CNMFViewer():
     
     def update_temp_comp_sub(self, usub=None):
         self.temp_comp_sub.objects = self._temp_comp_sub(usub).objects
+        self.wgt_man = self._man_wgt().objects
         
     def update_norm(self, norm):
         self._normalize = norm.new
