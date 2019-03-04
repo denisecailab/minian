@@ -62,7 +62,10 @@ except:
 
 
 def load_params(param):
-    return eval(param)
+    try:
+        return eval(param)
+    except TypeError:
+        return param
 
 
 def load_videos(vpath,
