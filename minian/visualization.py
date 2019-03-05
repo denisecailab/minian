@@ -596,8 +596,8 @@ class CNMFViewer():
         self.wgt_spatial_all = self._spatial_all_wgt()
         self.spatial_all = self._spatial_all()
         self.temp_comp_sub = self._temp_comp_sub(self._u[:5])
-        self.wgt_temp_comp = self._temp_comp_wgt()
         self.wgt_man = self._man_wgt()
+        self.wgt_temp_comp = self._temp_comp_wgt()
 
 
     def update_subs(self):
@@ -752,7 +752,7 @@ class CNMFViewer():
     
     def update_temp_comp_sub(self, usub=None):
         self.temp_comp_sub.objects = self._temp_comp_sub(usub).objects
-        self.wgt_man = self._man_wgt().objects
+        self.wgt_man.objects = self._man_wgt().objects
         
     def update_norm(self, norm):
         self._normalize = norm.new
@@ -826,6 +826,7 @@ class CNMFViewer():
 
     def _man_wgt(self):
         usub = self.strm_usub.usub
+        usub.sort()
         usub.reverse()
         wgt_sel = {uid: pnwgt.Select(
             name='Unit Label', options=usub+[-1], value=uid,
