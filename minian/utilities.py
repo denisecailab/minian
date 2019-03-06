@@ -63,9 +63,12 @@ except:
 
 def load_params(param):
     try:
-        return eval(param)
-    except TypeError:
-        return param
+        param = eval(param)
+    except:
+        pass
+    if type(param) is dict:
+        param = {k: load_params(v) for k, v in param.items()}
+    return param
 
 
 def load_videos(vpath,
