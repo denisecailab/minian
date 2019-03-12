@@ -531,7 +531,7 @@ class CNMFViewer():
         self._S = S if S is not None else minian['S']
         self._org = org if org is not None else minian['org']
         try:
-            self.unit_labels = minian['unit_labels']
+            self.unit_labels = minian['unit_labels'].compute()
         except KeyError:
             self.unit_labels = xr.DataArray(
                 minian['unit_id'].values.copy(),
