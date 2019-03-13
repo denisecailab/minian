@@ -51,7 +51,7 @@ from scipy.spatial import cKDTree
 
 class VArrayViewer():
     def __init__(self, varr, framerate=30, rerange=None, summary=['mean', 'diff'],
-                 meta_dims=None, datashading=True, layout=True, histogram=False):
+                 meta_dims=None, datashading=True, layout=False, histogram=False):
         if isinstance(varr, list):
             for iv, v in enumerate(varr):
                 varr[iv] = v.assign_coords(data_var=v.name)
@@ -64,10 +64,14 @@ class VArrayViewer():
         else:
             raise NotImplementedError(
                 "video array of type {} not supported".format(type(varr)))
-        self.meta_dicts = OrderedDict(
-            [(d, list(self.ds.coords[d].values)) for d in meta_dims])
-        self.cur_metas = OrderedDict(
-            [(d, v[0]) for d, v in self.meta_dicts.items()])
+        try:
+            self.meta_dicts = OrderedDict(
+                [(d, list(self.ds.coords[d].values)) for d in meta_dims])
+            self.cur_metas = OrderedDict(
+                [(d, v[0]) for d, v in self.meta_dicts.items()])
+        except TypeError:
+            self.meta_dicts = dict()
+            self.cur_metas = dict()
         self._datashade = datashading
         self._layout = layout
         self._histogram = histogram
@@ -151,7 +155,7 @@ class VArrayViewer():
                              style=dict(cmap='Viridis')))
                 im_ovly = (im_ovly << his).map(lambda p: p.opts(style=dict(cmap='Viridis')))
             return im_ovly
-        if self._layout:
+        if self._layout and self.meta_dicts:
             im_dict = OrderedDict()
             for meta in itt.product(*list(self.meta_dicts.values())):
                 mdict = {k: v for k, v in zip(list(self.meta_dicts.keys()), meta)}
