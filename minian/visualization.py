@@ -828,9 +828,10 @@ class CNMFViewer():
         usub = self.strm_usub.usub
         usub.sort()
         usub.reverse()
+        ulabs = self.unit_labels.sel(unit_id=usub).values
         wgt_sel = {uid: pnwgt.Select(
-            name='Unit Label', options=usub+[-1], value=uid,
-            height=50, width=100) for uid in usub}
+            name='Unit Label', options=usub+[-1], value=ulb,
+            height=50, width=100) for uid, ulb in zip(usub, ulabs)}
         def callback_ulab(value, uid):
             self.unit_labels.loc[uid] = value.new
         for uid, sel in wgt_sel.items():
