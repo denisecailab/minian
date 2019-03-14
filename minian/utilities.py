@@ -119,7 +119,7 @@ def load_videos(vpath,
         varr, dims=['frame', 'height', 'width'],
         coords=dict(
             frame=np.arange(varr.shape[0]),
-            height=np.arange(varr.shape[1], 0, -1),
+            height=np.arange(varr.shape[1]),
             width=np.arange(varr.shape[2])))
     if dtype:
         varr = varr.astype(dtype)
@@ -159,7 +159,8 @@ def load_avi_perframe(fname, fid):
     cap.set(cv2.CAP_PROP_POS_FRAMES, fid)
     ret, fm = cap.read()
     if ret:
-        return cv2.cvtColor(fm, cv2.COLOR_RGB2GRAY)
+        return np.flip(
+            cv2.cvtColor(fm, cv2.COLOR_RGB2GRAY), axis=0)
     else:
         print("frame read failed for frame {}".format(fid))
         return fm

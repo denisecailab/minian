@@ -580,11 +580,11 @@ class CNMFViewer():
         self._org = org if org is not None else minian['org']
         try:
             self.unit_labels = minian['unit_labels'].compute()
-        except KeyError:
+        except:
             self.unit_labels = xr.DataArray(
-                minian['unit_id'].values.copy(),
-                dims=minian['unit_id'].dims,
-                coords=minian['unit_id'].coords).rename('unit_labels')
+                self._A['unit_id'].values.copy(),
+                dims=self._A['unit_id'].dims,
+                coords=self._A['unit_id'].coords).rename('unit_labels')
         self._C_norm = xr.apply_ufunc(
                 normalize, self._C.chunk(dict(frame=-1, unit_id='auto')),
                 input_core_dims=[['frame']],
@@ -775,7 +775,7 @@ class CNMFViewer():
                            .compute().rename("Intensity (A. U.)")
                            .dropna('frame', how='all')).to(hv.Curve, 'frame'))
         cur_vl = (hv.DynamicMap(
-            lambda f, y: hv.ViLine(f) if f else hv.VLine(0),
+            lambda f, y: hv.VLine(f) if f else hv.VLine(0),
             streams=[self.strm_f])
                   .opts(style=dict(color='red')))
         cur_cv = hv.Curve([], kdims=['frame'], vdims=['Internsity (A.U.)'])
@@ -1190,7 +1190,7 @@ def generate_videos(minian, vpath, chk=None, pre_compute=False):
         dim='height')
     print("writing videos")
     with ProgressBar():
-        vwrite(vpath, vid.transpose('frame', 'height', 'width').values)
+        vwrite(vpath, np.flip(vid.transpose('frame', 'height', 'width').values, axis=1))
 #     vwrt = FFmpegWriter(vpath)
 #     for fid, fm in vid.rolling(frame=1):
 #         print("writing frame {}".format(fid.values), end='\r')
