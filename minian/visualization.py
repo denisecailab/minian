@@ -1185,8 +1185,8 @@ def generate_videos(minian, vpath, chk=None, pre_compute=False):
 #         AC_norm = AC_norm.compute()
 #         res_norm = res_norm.compute()
     vid = xr.concat([
-        xr.concat([res_norm, AC_norm], 'width')],
-        xr.concat([org_norm, Y_norm], 'width'),
+        xr.concat([res_norm, AC_norm], 'width'),
+        xr.concat([org_norm, Y_norm], 'width')],
         dim='height')
     print("writing videos")
     with ProgressBar():
