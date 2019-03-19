@@ -36,6 +36,7 @@ from os.path import isdir, abspath
 from os import listdir
 from os.path import join as pjoin
 from itertools import compress
+from dask_image.imread import imread as load_tif_lazy
 
 try:
     import pycuda.autoinit
@@ -97,7 +98,16 @@ def load_videos(vpath,
               " found in the specified folder {}".format(pattern, vpath))
         return
     print("loading {} videos in folder {}".format(len(vlist), vpath))
-    varr_list = [load_avi_lazy(v) for v in vlist]
+
+    file_extension = os.path.splitext(vlist[0])[1]
+    if file_extension == '.avi':
+        movie_load_func = load_avi_lazy
+    elif file_extension == '.tif':
+        movie_load_func = load_tif_lazy
+    else:
+        raise ValueError('Extension not supported.')
+
+    varr_list = [movie_load_func(v) for v in vlist]
     varr = darr.concatenate(varr_list, axis=0)
     varr = xr.DataArray(
         varr, dims=['frame', 'height', 'width'],
@@ -147,6 +157,9 @@ def load_avi_perframe(fname, fid):
     else:
         print("frame read failed for frame {}".format(fid))
         return fm
+
+#def load_tif_perframe(fname, fid):
+
 
     
 def handle_crash(varr, vpath, ssname, vlist, varr_list, frame_dict):
@@ -1130,3 +1143,129 @@ def save_cnmf_from_mat(matpath,
 #             process_data(dirname, movpath, pltpath, roi)
 #         else:
 #             print("empty folder: " + dirname + " proceed")
+if __name__ == '__main__':
+    minian_path = "L:/"
+    #dpath = "L:/minian/demo_movies"
+    dpath = "L:\\Minian data folders\\BLA\\Mundilfari\\08_06_2018_Shock\\"
+    chunks = {"frame": 1000, "height": 50, "width": 50, "unit_id": 100}
+    subset = None
+    subset_mc = None
+    in_memory = True
+    interactive = True
+    output_size = 60
+    param_load_videos = {
+        'pattern': 'msCam[0-9]+\.tif$',
+        'dtype': np.float32,
+        'in_memory': in_memory,
+        'downsample': dict(frame=2),
+        'downsample_strategy': 'subset'}
+    param_glow_removal = {
+        'method': 'uniform',
+        'wnd': 51}
+    param_brightspot_removal = {
+        'thres': 2}
+    param_first_denoise = {
+        'method': 'median',
+        'ksize': 5}
+    param_second_denoise = {
+        'method': 'gaussian',
+        'sigmaX': 0,
+        'ksize': (5, 5)}
+    param_estimate_shift = {
+        'dim': 'frame',
+        'on': 'first',
+        'pad_f': 1,
+        'pct_thres': 99.99}
+    param_background_removal = {
+        'method': 'tophat',
+        'wnd': 10}
+    param_seeds_init = {
+        'wnd_size': 2000,
+        'method': 'rolling',
+        'stp_size': 1000,
+        'nchunk': 100,
+        'max_wnd': 10}
+    param_gmm_refine = {
+        'q': (0.1, 99.9),
+        'n_components': 2,
+        'valid_components': 1,
+        'mean_mask': True}
+    param_pnr_refine = {
+        'noise_freq': 0.06,
+        'thres': 'auto'}
+    param_ks_refine = {
+        'sig': 0.05}
+    param_seeds_merge = {
+        'thres_dist': 5,
+        'thres_corr': 0.7,
+        'noise_freq': 'envelope'}
+    param_initialize = {
+        'thres_corr': 0.8,
+        'wnd': 10}
+    param_get_noise = {
+        'noise_range': (0.06, 0.5),
+        'noise_method': 'logmexp'}
+    param_first_spatial = {
+        'dl_wnd': 5,
+        'sparse_penal': 0.1,
+        'update_background': False,
+        'post_scal': True,
+        'zero_thres': 'eps'}
+    param_first_temporal = {
+        'noise_freq': 0.06,
+        'sparse_penal': 1,
+        'p': 2,
+        'add_lag': 20,
+        'use_spatial': False,
+        'chk': chunks,
+        'jac_thres': 0.1,
+        'zero_thres': 1e-8,
+        'max_iters': 200,
+        'use_smooth': True,
+        'scs_fallback': False,
+        'post_scal': True}
+    param_first_merge = {
+        'thres_corr': 0.9}
+    param_second_spatial = {
+        'dl_wnd': 5,
+        'sparse_penal': 0.05,
+        'update_background': False,
+        'post_scal': True,
+        'zero_thres': 'eps'}
+    param_second_temporal = {
+        'noise_freq': 0.06,
+        'sparse_penal': 1,
+        'p': 2,
+        'add_lag': 20,
+        'use_spatial': False,
+        'chk': chunks,
+        'jac_thres': 0.1,
+        'zero_thres': 1e-8,
+        'max_iters': 500,
+        'use_smooth': True,
+        'scs_fallback': False,
+        'post_scal': True}
+    param_second_merge = {
+        'thres_corr': 0.9}
+    param_save_minian = {
+        'dpath': dpath,
+        'fname': 'minian',
+        'backend': 'zarr',
+        'meta_dict': dict(session=-1, animal=-2),
+        'overwrite': True}
+
+    dpath = os.path.abspath(dpath)
+    para_norm_list = ['meta_dict', 'chunks', 'subset']
+    for par_key in list(globals().keys()):
+        if par_key in para_norm_list or par_key.startswith('param_'):
+            globals()[par_key] = norm_params(globals()[par_key])
+    if interactive:
+        hv.notebook_extension('bokeh', width=100)
+        pbar = ProgressBar()
+        pbar.register()
+    else:
+        hv.notebook_extension('matplotlib')
+
+    varr = load_videos(dpath, **param_load_videos)
+    if in_memory:
+        varr = varr.persist()
