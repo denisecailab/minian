@@ -46,14 +46,30 @@ except:
     print("cannot use cuda accelerate")
 
 
-def norm_params(param):
+# def load_params(param):
+#     try:
+#         param = ast.literal_eval(param)
+#     except (ValueError, SyntaxError):
+#         pass
+#     try:
+#         if re.search(r'^slice\([0-9]+, *[0-9]+ *,*[0-9]*\)$', param):
+#             param = eval(param)
+#     except TypeError:
+#         pass
+#     if type(param) is dict:
+#         param = {k: load_params(v) for k, v in param.items()}
+#     return param
+
+
+def load_params(param):
     try:
-        param = ast.literal_eval(param)
-    except (ValueError, SyntaxError):
+        param = eval(param)
+    except:
         pass
     if type(param) is dict:
-        param = {k: norm_params(v) for k, v in param.items()}
+        param = {k: load_params(v) for k, v in param.items()}
     return param
+
 
 def load_videos(vpath,
                 pattern='msCam[0-9]+\.avi$',
@@ -93,9 +109,9 @@ def load_videos(vpath,
         vpath + os.sep + v for v in os.listdir(vpath) if re.search(pattern, v)
     ])
     if not vlist:
-        print("No data with pattern {}"
-              " found in the specified folder {}".format(pattern, vpath))
-        return
+        raise FileNotFoundError(
+            "No data with pattern {}"
+            " found in the specified folder {}".format(pattern, vpath))
     print("loading {} videos in folder {}".format(len(vlist), vpath))
     varr_list = [load_avi_lazy(v) for v in vlist]
     varr = darr.concatenate(varr_list, axis=0)
@@ -103,7 +119,7 @@ def load_videos(vpath,
         varr, dims=['frame', 'height', 'width'],
         coords=dict(
             frame=np.arange(varr.shape[0]),
-            height=np.arange(varr.shape[1], 0, -1),
+            height=np.arange(varr.shape[1]),
             width=np.arange(varr.shape[2])))
     if dtype:
         varr = varr.astype(dtype)
@@ -143,7 +159,8 @@ def load_avi_perframe(fname, fid):
     cap.set(cv2.CAP_PROP_POS_FRAMES, fid)
     ret, fm = cap.read()
     if ret:
-        return cv2.cvtColor(fm, cv2.COLOR_RGB2GRAY)
+        return np.flip(
+            cv2.cvtColor(fm, cv2.COLOR_RGB2GRAY), axis=0)
     else:
         print("frame read failed for frame {}".format(fid))
         return fm
