@@ -29,14 +29,13 @@ from natsort import natsorted
 from matplotlib import pyplot as plt
 from matplotlib import animation as anim
 from collections import Iterable
-from tifffile import imsave, imread
+from tifffile import imsave, imread, TiffFile
 from pandas import Timestamp
 from IPython.core.debugger import set_trace
 from os.path import isdir, abspath
 from os import listdir
 from os.path import join as pjoin
 from itertools import compress
-from dask_image.imread import imread as load_tif_lazy
 
 try:
     import pycuda.autoinit
@@ -148,6 +147,19 @@ def load_avi_lazy(fname):
     return da.array.stack(arr, axis=0)
 
 
+def load_tif_lazy(fname):
+    with TiffFile(fname) as tif:
+        data = tif.asarray()
+
+    f = int(data.shape[0])
+    fmread = da.delayed(load_tif_perframe)
+    flist = [fmread(fname, i) for i in range(f)]
+    sample = flist[0].compute()
+    arr = [da.array.from_delayed(
+        fm, dtype=sample.dtype, shape=sample.shape) for fm in flist]
+    return da.array.stack(arr, axis=0)
+
+
 def load_avi_perframe(fname, fid):
     cap = cv2.VideoCapture(fname)
     cap.set(cv2.CAP_PROP_POS_FRAMES, fid)
@@ -158,8 +170,8 @@ def load_avi_perframe(fname, fid):
         print("frame read failed for frame {}".format(fid))
         return fm
 
-#def load_tif_perframe(fname, fid):
-
+def load_tif_perframe(fname, fid):
+    return imread(fname, key=fid)
 
     
 def handle_crash(varr, vpath, ssname, vlist, varr_list, frame_dict):
