@@ -1,4 +1,5 @@
 import functools as fct
+import itertools as itt
 import numpy as np
 import holoviews as hv
 import xarray as xr
@@ -49,99 +50,180 @@ from scipy.spatial import cKDTree
 
 
 class VArrayViewer():
-    def __init__(self, varr, framerate=30, rerange=None, compute=True, datashading=True):
+    def __init__(self, varr, framerate=30, rerange=None, summary=['mean', 'diff'],
+                 meta_dims=None, datashading=True, layout=False, histogram=False):
         if isinstance(varr, list):
-            self.ds = xr.merge(varr)
-        else:
+            for iv, v in enumerate(varr):
+                varr[iv] = v.assign_coords(data_var=v.name)
+            self.ds = xr.concat(varr, dim='data_var')
+            meta_dims=['data_var']
+        elif isinstance(varr, xr.DataArray):
             self.ds = varr.to_dataset()
-        # self.ds = hv.Dataset(varr)
-        self.mean = self.ds.mean(['height', 'width'])
-        self.max = self.ds.max(['height', 'width'])
-        self.min = self.ds.min(['height', 'width'])
+        elif isinstance(varr, xr.Dataset):
+            self.ds = varr
+        else:
+            raise NotImplementedError(
+                "video array of type {} not supported".format(type(varr)))
+        try:
+            self.meta_dicts = OrderedDict(
+                [(d, list(self.ds.coords[d].values)) for d in meta_dims])
+            self.cur_metas = OrderedDict(
+                [(d, v[0]) for d, v in self.meta_dicts.items()])
+        except TypeError:
+            self.meta_dicts = dict()
+            self.cur_metas = dict()
+        self._datashade = datashading
+        self._layout = layout
+        self._histogram = histogram
         self.framerate = framerate
         self._f = self.ds.coords['frame'].values
         self._h = self.ds.sizes['height']
         self._w = self.ds.sizes['width']
+        self.mask = dict()
         self.rerange = rerange
         CStream = Stream.define(
             'CStream',
             f=param.Integer(default=0, bounds=(self._f.min(), self._f.max())))
-        self.stream = CStream()
+        self.strm_f = CStream()
+        self.str_box = BoxEdit()
         self.widgets = self._widgets()
-        self._compute = compute
-        self._datashade = datashading
-        if compute:
-            print("computing summary")
-            with ProgressBar():
-                self.mean = self.mean.compute()
-                self.max = self.max.compute()
-                self.min = self.min.compute()
+        if type(summary) is list:
+            summ_all = {
+                'mean': self.ds.mean(['height', 'width']),
+                'max': self.ds.max(['height', 'width']),
+                'min': self.ds.min(['height', 'width']),
+                'diff': self.ds.diff('frame').mean(['height', 'width'])
+            }
+            try:
+                summ = {k: summ_all[k] for k in summary}
+            except KeyError:
+                print("{} Not understood for specifying summary".format(summary))
+            if summ:
+                print("computing summary")
+                sum_list = []
+                for k, v in summ.items():
+                    sum_list.append(v.compute().assign_coords(sum_var=k))
+                summary = xr.concat(sum_list, dim='sum_var')
+        self.summary = summary
+        if layout:
+            self.ds_sub = self.ds
+            self.sum_sub = self.summary
+        else:
+            self.ds_sub = self.ds.sel(**self.cur_metas)
+            try:
+                self.sum_sub = self.summary.sel(**self.cur_metas)
+            except AttributeError:
+                self.sum_sub = self.summary
+        self.pnplot = pn.panel(self.get_hvobj())
 
-    def show(self):
-        imdict = OrderedDict()
-        meandict = OrderedDict()
-        for vname, varr in self.ds.items():
-            fim = fct.partial(self._img, dat=varr)
-            im = hv.DynamicMap(fim, streams=[self.stream])
-            im = regrid(im)
-            im = im.opts(plot={'width': self._w, 'height': self._h},
-                         style={'camp': 'Viridis'})
+    def get_hvobj(self):
+        def get_im_ovly(meta):
+            def img(f, ds):
+                return hv.Image(
+                    ds.sel(frame=f).compute(), kdims=['width', 'height'])
+            try:
+                curds = self.ds_sub.sel(**meta)
+            except ValueError:
+                curds = self.ds_sub
+            fim = fct.partial(img, ds=curds)
+            im = (regrid(hv.DynamicMap(fim, streams=[self.strm_f]))
+                  .opts(plot=dict(width=self._w, height=self._h),
+                        style=dict(cmap='Viridis')))
             if self.rerange:
                 im = im.redim.range(**{vname: self.rerange})
-            xyrange = RangeXY(source=im)
-            xyrange = xyrange.rename(x_range='w', y_range='h')
-            fhist = fct.partial(self._hist, dat=varr)
-            hist = hv.DynamicMap(fhist, streams=[self.stream, xyrange])
-            hist = hist.opts(plot={'width': int(np.around(self._w * 0.35)), 'height': self._h},
-                             style={'cmap': 'Viridis'})
-            if self._compute:
-                cur_mdict = OrderedDict()
-                dmean = hv.Curve(self.mean, kdims='frame', vdims=vname)
-                cur_mdict['mean'] = dmean.opts(plot={'tools': ['hover']})
-                dmax = hv.Curve(self.max, kdims='frame', vdims=vname)
-                cur_mdict['max'] = dmax.opts(plot={'tools': ['hover']})
-                dmin = hv.Curve(self.min, kdims='frame', vdims=vname)
-                cur_mdict['min'] = dmin.opts(plot={'tools': ['hover']})
-                mean = hv.NdOverlay(cur_mdict, kdims=['variable'])
-                if self._datashade:
-                    mean = datashade_ndcurve(mean)
-                vl = hv.DynamicMap(lambda f: hv.VLine(f), streams=[self.stream])
-                vl = vl.opts(style={'color': 'red'})
-                mean = (mean * vl).relabel(group=vname, label='Mean')
-                mean = mean.opts(
-                    plot={'width': self._w, 'height': int(np.around(self._h * 0.6))})
-                meandict[vname] = mean
-            image = im.relabel(group=vname, label='Image')
-            histtogram = hist.relabel(group=vname, label='Histogram')
-            imdict[vname] = (image << histtogram).map(lambda p: p.opts(style=dict(cmap='Viridis')))
-        return hv.Layout(list(imdict.values()) + list(meandict.values())).cols(
-            len(self.ds))
+            self.xyrange = RangeXY(source=im).rename(x_range='w', y_range='h')
+            if not self._layout:
+                hv_box = hv.Polygons([]).opts(
+                    style={'fill_alpha': 0.3, 'line_color': 'white'})
+                self.str_box = BoxEdit(source=hv_box)
+                im_ovly = im * hv_box
+            else:
+                im_ovly = im
+            if self._histogram:
+                def hist(f, w, h, ds):
+                    if w and h:
+                        cur_im = (hv.Image(
+                            ds.sel(frame=f).compute(), kdims=['width', 'height'])
+                                  .select(height=h, width=w))
+                    else:
+                        cur_im = hv.Image(
+                            ds.sel(frame=f).compute(), kdims=['width', 'height'])
+                    return hv.operation.histogram(cur_im, frequency_label='freq', num_bins=50)
+                fhist = fct.partial(hist, ds=curds)
+                his = (hv.DynamicMap(fhist, streams=[self.strm_f, self.xyrange])
+                       .opts(plot=dict(width=int(np.around(self._w * 0.35)), height=self._h),
+                             style=dict(cmap='Viridis')))
+                im_ovly = (im_ovly << his).map(lambda p: p.opts(style=dict(cmap='Viridis')))
+            return im_ovly
+        if self._layout and self.meta_dicts:
+            im_dict = OrderedDict()
+            for meta in itt.product(*list(self.meta_dicts.values())):
+                mdict = {k: v for k, v in zip(list(self.meta_dicts.keys()), meta)}
+                im_dict[meta] = get_im_ovly(mdict)
+            ims = hv.NdLayout(im_dict, kdims=list(self.meta_dicts.keys()))
+        else:
+            ims = get_im_ovly(self.cur_metas)
+        if self.summary is not None:
+            hvsum = datashade_ndcurve(
+                hv.Dataset(self.sum_sub)
+                .to(hv.Curve, kdims=['frame']).overlay('sum_var'),
+                kdim='sum_var')
+            try:
+                hvsum = hvsum.layout(list(self.meta_dicts.keys()))
+            except:
+                pass
+            vl = (hv.DynamicMap(lambda f: hv.VLine(f), streams=[self.strm_f])
+                  .opts(style=dict(color='red')))
+            sum_w = int(np.around(1.35 * self._w)) if self._histogram else self._w
+            summ = ((hvsum * vl).map(
+                lambda p: p.opts(plot=dict(width=sum_w, height=int(np.around(self._h * 0.6))))))
+        else:
+            summ = hv.Div('')
+        hvobj = (ims + summ).cols(1)
+        return hvobj
+
+    def show(self):
+        return pn.layout.Column(self.widgets, self.pnplot)
 
     def _widgets(self):
-        w_paly = iwgt.Play(
-            value=self._f[0],
-            min=self._f[0],
-            max=self._f[-1],
-            interval=1000 / self.framerate)
-        w_frame = iwgt.SelectionSlider(
-            value = self._f[0],
-            options = self._f.tolist(),
-            continuous_update=False,
-            description="Frame:"
-        )
-        iwgt.link((w_paly, 'value'), (w_frame, 'value'))
-        iwgt.interactive(self.stream.event, f=w_frame)
-        return iwgt.HBox([w_paly, w_frame])
-
-    def _img(self, dat, f):
-        return hv.Image(dat.sel(frame=f).compute(), kdims=['width', 'height'])
-
-    def _hist(self, dat, f, w, h):
-        if w and h:
-            im = self._img(dat=dat, f=f).select(frame=f, height=h, width=w)
+        w_play = pnwgt.Player(
+            length=len(self._f), interval=10,
+            value=0, width=500)
+        def play(f):
+            if not f.old == f.new:
+                self.strm_f.event(f=int(self._f[f.new]))
+        w_play.param.watch(play, 'value')
+        w_box = pnwgt.Button(name='Update Mask', button_type='primary')
+        w_box.param.watch(self._update_box, 'clicks')
+        if not self._layout:
+            wgt_meta = {d: pnwgt.Select(
+                name=d, options=v, height=45, width=120)
+                        for d, v in self.meta_dicts.items()}
+            def make_update_func(meta_name):
+                def _update(x):
+                    self.cur_metas[meta_name] = x.new
+                    self._update_subs()
+                return _update
+            for d, wgt in wgt_meta.items():
+                cur_update = make_update_func(d)
+                wgt.param.watch(cur_update, 'value')
+            wgts = pn.widgets.WidgetBox(w_box, w_play, *list(wgt_meta.values()))
         else:
-            im = self._img(dat=dat, f=f)
-        return hv.operation.histogram(im, frequency_label='freq', num_bins=50)
+            wgts = pn.widgets.WidgetBox(w_box, w_play)
+        return wgts
+
+    def _update_subs(self):
+        self.ds_sub = self.ds.sel(**self.cur_metas)
+        if self.sum_sub is not None:
+            self.sum_sub = self.summary.sel(**self.cur_metas)
+        self.pnplot.objects[0].object = self.get_hvobj()
+
+    def _update_box(self, click):
+        box = self.str_box.data
+        self.mask.update({
+            tuple(self.cur_metas.values()): {
+                'height': slice(box['y0'][0], box['y1'][0]),
+                'width': slice(box['x0'][0], box['x1'][0])}})
 
 
 class MCViewer():
@@ -496,6 +578,13 @@ class CNMFViewer():
         self._C = C if C is not None else minian['C']
         self._S = S if S is not None else minian['S']
         self._org = org if org is not None else minian['org']
+        try:
+            self.unit_labels = minian['unit_labels'].compute()
+        except:
+            self.unit_labels = xr.DataArray(
+                self._A['unit_id'].values.copy(),
+                dims=self._A['unit_id'].dims,
+                coords=self._A['unit_id'].coords).rename('unit_labels')
         self._C_norm = xr.apply_ufunc(
                 normalize, self._C.chunk(dict(frame=-1, unit_id='auto')),
                 input_core_dims=[['frame']],
@@ -545,6 +634,7 @@ class CNMFViewer():
             usub=param.List())
         self.strm_usub = Stream_usub()
         self.strm_usub.add_subscriber(self.callback_usub)
+        self.usub_sel = self.strm_usub.usub
         self._AC = self._org.sel(**self.metas)
         self._mov = self._org.sel(**self.metas)
         self.pipAC = Pipe([])
@@ -554,6 +644,7 @@ class CNMFViewer():
         self.wgt_spatial_all = self._spatial_all_wgt()
         self.spatial_all = self._spatial_all()
         self.temp_comp_sub = self._temp_comp_sub(self._u[:5])
+        self.wgt_man = self._man_wgt()
         self.wgt_temp_comp = self._temp_comp_wgt()
 
 
@@ -662,7 +753,8 @@ class CNMFViewer():
                         self.wgt_spatial_all
                     ),
                     self.wgt_temp_comp),
-                self.temp_comp_sub))
+                self.temp_comp_sub,
+                self.wgt_man))
     
     def _temp_comp_sub(self, usub=None):
         if usub is None:
@@ -708,6 +800,7 @@ class CNMFViewer():
     
     def update_temp_comp_sub(self, usub=None):
         self.temp_comp_sub.objects = self._temp_comp_sub(usub).objects
+        self.wgt_man.objects = self._man_wgt().objects
         
     def update_norm(self, norm):
         self._normalize = norm.new
@@ -778,6 +871,52 @@ class CNMFViewer():
             pn.layout.WidgetBox(wgt_norm, wgt_showC, wgt_showS, wgt_grp, width=150),
             pn.layout.WidgetBox(wgt_grp_prv, wgt_grp_nxt, width=150))
         return pn.layout.Column(wgt_groups, wgt_play)
+
+    def _man_wgt(self):
+        usub = self.strm_usub.usub
+        usub.sort()
+        usub.reverse()
+        ulabs = self.unit_labels.sel(unit_id=usub).values
+        wgt_sel = {uid: pnwgt.Select(
+            name='Unit Label', options=usub+[-1], value=ulb,
+            height=50, width=100) for uid, ulb in zip(usub, ulabs)}
+        def callback_ulab(value, uid):
+            self.unit_labels.loc[uid] = value.new
+        for uid, sel in wgt_sel.items():
+            cb = fct.partial(callback_ulab, uid=uid)
+            sel.param.watch(cb, 'value')
+        wgt_check = {uid: pnwgt.Checkbox(
+            name='Unit ID: {}'.format(uid), value=False,
+            height=50, width=100) for uid in usub}
+        def callback_chk(val, uid):
+            if not val.old == val.new:
+                if val.new:
+                    self.usub_sel.append(uid)
+                else:
+                    self.usub_sel.remove(uid)
+        for uid, chk in wgt_check.items():
+            cb = fct.partial(callback_chk, uid=uid)
+            chk.param.watch(cb, 'value')
+        wgt_discard = pnwgt.Button(
+            name='Discard Selected',
+            button_type='primary', width=200)
+        def callback_discard(clicks):
+            for uid in self.usub_sel:
+                wgt_sel[uid].value = -1
+        wgt_discard.param.watch(callback_discard, 'clicks')
+        wgt_merge = pnwgt.Button(
+            name='Merge Selected',
+            button_type='primary', width=200)
+        def callback_merge(clicks):
+            for uid in self.usub_sel:
+                wgt_sel[uid].value = self.usub_sel[0]
+        wgt_merge.param.watch(callback_merge, 'clicks')
+        return pn.layout.Column(
+            pn.layout.WidgetBox(wgt_discard, wgt_merge, width=200),
+            pn.layout.Row(
+                pn.layout.WidgetBox(*wgt_check.values(), width=100),
+                pn.layout.WidgetBox(*wgt_sel.values(), width=100)))
+
     
     def update_temp_comp_wgt(self):
         self.wgt_temp_comp.objects = self._temp_comp_wgt().objects
@@ -1046,12 +1185,12 @@ def generate_videos(minian, vpath, chk=None, pre_compute=False):
 #         AC_norm = AC_norm.compute()
 #         res_norm = res_norm.compute()
     vid = xr.concat([
-        xr.concat([org_norm, Y_norm], 'width'),
-        xr.concat([res_norm, AC_norm], 'width')],
+        xr.concat([res_norm, AC_norm], 'width'),
+        xr.concat([org_norm, Y_norm], 'width')],
         dim='height')
     print("writing videos")
     with ProgressBar():
-        vwrite(vpath, vid.transpose('frame', 'height', 'width').values)
+        vwrite(vpath, np.flip(vid.transpose('frame', 'height', 'width').values, axis=1))
 #     vwrt = FFmpegWriter(vpath)
 #     for fid, fm in vid.rolling(frame=1):
 #         print("writing frame {}".format(fid.values), end='\r')
