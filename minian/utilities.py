@@ -2,14 +2,26 @@ import glob
 import os
 import re
 import gc
+import time
 import matplotlib
 import pickle as pkl
-import skvideo.io as sio
+import skvideo.io as skv
+import skimage.io as ski
 import xarray as xr
 import numpy as np
 import functools as fct
 import holoviews as hv
 import dask as da
+import dask.array.image as daim
+import dask.array as darr
+import pandas as pd
+import subprocess
+import warnings
+import cv2
+import papermill as pm
+import ast
+from pathlib import Path
+from dask.diagnostics import ProgressBar
 from copy import deepcopy
 from scipy import ndimage as ndi
 from scipy.io import loadmat
@@ -20,15 +32,52 @@ from collections import Iterable
 from tifffile import imsave, imread
 from pandas import Timestamp
 from IPython.core.debugger import set_trace
+from os.path import isdir, abspath
+from os import listdir
+from os.path import join as pjoin
+from itertools import compress
 
-# import caiman as cm
-# from caiman import motion_correction
-# from caiman.components_evaluation import estimate_components_quality
-# from caiman.miniscope.plot import plot_components
-# from caiman.source_extraction import cnmf
+try:
+    import pycuda.autoinit
+    import pycuda.gpuarray as gpuarray
+    import skcuda.linalg as culin
+
+except:
+    print("cannot use cuda accelerate")
 
 
-def load_videos(vpath, pattern='msCam[0-9]+\.avi$'):
+# def load_params(param):
+#     try:
+#         param = ast.literal_eval(param)
+#     except (ValueError, SyntaxError):
+#         pass
+#     try:
+#         if re.search(r'^slice\([0-9]+, *[0-9]+ *,*[0-9]*\)$', param):
+#             param = eval(param)
+#     except TypeError:
+#         pass
+#     if type(param) is dict:
+#         param = {k: load_params(v) for k, v in param.items()}
+#     return param
+
+
+def load_params(param):
+    try:
+        param = eval(param)
+    except:
+        pass
+    if type(param) is dict:
+        param = {k: load_params(v) for k, v in param.items()}
+    return param
+
+
+def load_videos(vpath,
+                pattern='msCam[0-9]+\.avi$',
+                dtype=np.float64,
+                in_memory=False,
+                downsample=None,
+                downsample_strategy='subset',
+                post_process=None):
     """Load videos from a folder.
 
     Load videos from the folder specified in `vpath` and according to the regex
@@ -55,26 +104,117 @@ def load_videos(vpath, pattern='msCam[0-9]+\.avi$'):
 
     """
     vpath = os.path.normpath(vpath)
+    ssname = os.path.basename(vpath)
     vlist = natsorted([
         vpath + os.sep + v for v in os.listdir(vpath) if re.search(pattern, v)
     ])
     if not vlist:
-        print("No data with pattern {} found in the specified folder {}".
-              format(pattern, vpath))
-        return
+        raise FileNotFoundError(
+            "No data with pattern {}"
+            " found in the specified folder {}".format(pattern, vpath))
+    print("loading {} videos in folder {}".format(len(vlist), vpath))
+    varr_list = [load_avi_lazy(v) for v in vlist]
+    varr = darr.concatenate(varr_list, axis=0)
+    varr = xr.DataArray(
+        varr, dims=['frame', 'height', 'width'],
+        coords=dict(
+            frame=np.arange(varr.shape[0]),
+            height=np.arange(varr.shape[1]),
+            width=np.arange(varr.shape[2])))
+    if dtype:
+        varr = varr.astype(dtype)
+    if downsample:
+        for dim, binw in downsample.items():
+            binw = int(binw)
+            crd = varr.coords[dim]
+            bin_eg = np.arange(crd.values[0], crd.values[-1] + binw, binw)
+            if downsample_strategy == 'mean':
+                varr = (varr.groupby_bins(
+                    dim, bin_eg, labels=bin_eg[:-1], include_lowest=True)
+                        .mean(dim).rename({dim + '_bins': dim}))
+            elif downsample_strategy == 'subset':
+                varr = varr.sel(**{dim: bin_eg[:-1]})
+            else:
+                warnings.warn(
+                    "unrecognized downsampling strategy", RuntimeWarning)
+    varr = varr.rename(ssname)
+    if post_process:
+        varr = post_process(varr, vpath, ssname, vlist, varr_list)
+    return varr
+
+
+def load_avi_lazy(fname):
+    cap = cv2.VideoCapture(fname)
+    f = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    fmread = da.delayed(load_avi_perframe)
+    flist = [fmread(fname, i) for i in range(f)]
+    sample = flist[0].compute()
+    arr = [da.array.from_delayed(
+        fm, dtype=sample.dtype, shape=sample.shape) for fm in flist]
+    return da.array.stack(arr, axis=0)
+
+
+def load_avi_perframe(fname, fid):
+    cap = cv2.VideoCapture(fname)
+    cap.set(cv2.CAP_PROP_POS_FRAMES, fid)
+    ret, fm = cap.read()
+    if ret:
+        return np.flip(
+            cv2.cvtColor(fm, cv2.COLOR_RGB2GRAY), axis=0)
     else:
-        print("loading {} videos in folder {}".format(len(vlist), vpath))
-        varray = [sio.vread(v, as_grey=True) for v in vlist]
-        varray = np.squeeze(np.concatenate(varray))
-        return xr.DataArray(
-            varray,
-            dims=['frame', 'height', 'width'],
-            coords={
-                'frame': range(varray.shape[0]),
-                'height': range(varray.shape[1]),
-                'width': range(varray.shape[2])
-            },
-            name=os.path.basename(vpath))
+        print("frame read failed for frame {}".format(fid))
+        return fm
+
+    
+def handle_crash(varr, vpath, ssname, vlist, varr_list, frame_dict):
+    seg1_list = list(filter(lambda v: re.search('seg1', v), vlist))
+    seg2_list = list(filter(lambda v: re.search('seg2', v), vlist))
+    if seg1_list and seg2_list:
+        tframe = frame_dict[ssname]
+        varr1 = darr.concatenate(
+            list(compress(varr_list, seg1_list)),
+            axis=0)
+        varr2 = darr.concatenate(
+            list(compress(varr_list, seg2_list)),
+            axis=0)
+        fm1, fm2 = varr1.shape[0], varr2.shape[0]
+        fm_crds = varr.coords['frame']
+        fm_crds1 = fm_crds.sel(frame=slice(None, fm1 - 1)).values
+        fm_crds2 = fm_crds.sel(frame=slice(fm1, None)).values
+        fm_crds2 = fm_crds2 + (tframe - fm_crds2.max())
+        fm_crds_new = np.concatenate([fm_crds1, fm_crds2], axis=0)
+        return varr.assign_coords(frame=fm_crds_new)
+    else:
+        return varr
+
+
+def video_to_tiffs(ipath, opath, iptn='msCam[0-9]+\.avi$', optn='msCam-%05d.tiff'):
+    flist = natsorted([os.path.join(ipath, v) for v in os.listdir(ipath) if re.search(iptn, v)])
+    istr = "|".join(flist)
+    ostr = os.path.join(opath, optn)
+    cmd = 'ffmpeg -i "concat:{}" -pix_fmt rgba -compression_algo raw {}'.format(istr, ostr)
+    try:
+        os.makedirs(opath)
+    except OSError:
+        if not os.path.isdir(path):
+            raise
+    print("output directory: {}".format(opath))
+    subprocess.check_call(cmd, shell=True)
+
+
+def load_images(path, dtype=np.float64):
+    # imread = fct.partial(ski.imread, as_gray=True)
+    imread = fct.partial(imread_cv, dtype=dtype)
+    varr = daim.imread(path, imread)
+    varr = xr.DataArray(varr, dims=['frame', 'height', 'width'])
+    for dim, length in varr.sizes.items():
+        varr = varr.assign_coords(**{dim: np.arange(length)})
+    return varr
+
+
+def imread_cv(im, dtype=np.float64):
+    return (cv2.imread(im, flags=cv2.IMREAD_GRAYSCALE)
+            .astype(dtype))
 
 
 def create_fig(varlist, nrows, ncols, **kwargs):
@@ -190,7 +330,7 @@ def save_video(movpath, fname_mov_orig, fname_mov_rig, fname_AC, fname_ACbf,
     mov_rig = np.load(fname_mov_rig, mmap_mode='r')
     mov_ac = np.load(fname_AC, mmap_mode='r')
     mov_acbf = np.load(fname_ACbf, mmap_mode='r')
-    vw = sio.FFmpegWriter(
+    vw = skv.FFmpegWriter(
         movpath, inputdict={'-framerate': '30'}, outputdict={'-r': '30'})
     for fidx in range(0, mov_orig.shape[0], dsratio):
         print("writing frame: " + str(fidx))
@@ -226,8 +366,10 @@ def save_mp4(filename, dat):
     vw = sio.FFmpegWriter(
         filename,
         inputdict={'-framerate': '30'},
-        outputdict={'-r': '30',
-                    '-vcodec': 'rawvideo'})
+        outputdict={
+            '-r': '30',
+            '-vcodec': 'rawvideo'
+        })
     for fid, f in enumerate(dat):
         print("writing frame: {}".format(fid), end='\r')
         vw.writeFrame(f)
@@ -288,20 +430,43 @@ def varr_to_float32(varr):
     return varr_norm
 
 
-def scale_varr(varr, scale=(0, 1), inplace=True):
-    copy = not inplace
-    if np.issubdtype(varr.dtype, np.floating):
-        dtype = varr.dtype
+def scale_varr(varr, scale=(0, 1), inplace=False, pre_compute=False):
+    varr_max = varr.max()
+    varr_min = varr.min()
+    if pre_compute:
+        print("pre-computing min and max")
+        with ProgressBar():
+            varr_max = varr_max.compute()
+            varr_min = varr_min.compute()
+    if inplace:
+        varr_norm = varr
+        varr_norm -= varr_min
+        varr_norm *= 1 / (varr_max - varr_min)
+        varr_norm *= (scale[1] - scale[0])
+        varr_norm += scale[0]
     else:
-        dtype = np.float32
-    varr_norm = varr.astype(dtype, copy=copy)
-    varr_max = varr_norm.max()
-    varr_min = varr_norm.min()
-    varr_norm -= varr_min
-    varr_norm *= 1 / (varr_max - varr_min)
-    varr_norm *= (scale[1] - scale[0])
-    varr_norm += scale[0]
-    return varr_norm.astype(varr.dtype, copy=False)
+        varr_norm = ((varr - varr_min) * (scale[1] - scale[0])
+                     / (varr_max - varr_min)) + scale[0]
+    return varr_norm
+
+
+def scale_varr_da(varr, scale=(0, 1)):
+    return ((varr - darr.nanmin(varr)) * (scale[1] - scale[0])
+           / (darr.nanmax(varr) - darr.nanmin(varr))) + scale[0]
+
+
+def normalize(a, scale=(0, 1), copy=False):
+    if copy:
+        a_norm = a.copy()
+    else:
+        a_norm = a
+    a_max = np.nanmax(a_norm)
+    a_min = np.nanmin(a_norm)
+    a_norm -= a_min
+    a_norm *= 1 / (a_max - a_min)
+    a_norm *= (scale[1] - scale[0])
+    a_norm += scale[0]
+    return a_norm
 
 
 def varray_to_tif(filename, varr):
@@ -365,27 +530,35 @@ def save_cnmf(cnmf,
     dims = cnmf.dims
     A = xr.DataArray(
         cnmf.A.toarray().reshape(dims + (-1, ), order=order),
-        coords={'height': h,
-                'width': w,
-                'unit_id': range(cnmf.A.shape[-1])},
+        coords={
+            'height': h,
+            'width': w,
+            'unit_id': range(cnmf.A.shape[-1])
+        },
         dims=['height', 'width', 'unit_id'],
         name='A')
     C = xr.DataArray(
         cnmf.C,
-        coords={'unit_id': range(cnmf.C.shape[0]),
-                'frame': f},
+        coords={
+            'unit_id': range(cnmf.C.shape[0]),
+            'frame': f
+        },
         dims=['unit_id', 'frame'],
         name='C')
     S = xr.DataArray(
         cnmf.S,
-        coords={'unit_id': range(cnmf.S.shape[0]),
-                'frame': f},
+        coords={
+            'unit_id': range(cnmf.S.shape[0]),
+            'frame': f
+        },
         dims=['unit_id', 'frame'],
         name='S')
     YrA = xr.DataArray(
         cnmf.YrA,
-        coords={'unit_id': range(cnmf.S.shape[0]),
-                'frame': f},
+        coords={
+            'unit_id': range(cnmf.S.shape[0]),
+            'frame': f
+        },
         dims=['unit_id', 'frame'],
         name='YrA')
     b = xr.DataArray(
@@ -399,8 +572,10 @@ def save_cnmf(cnmf,
         name='b')
     f = xr.DataArray(
         cnmf.f,
-        coords={'background_id': range(cnmf.f.shape[0]),
-                'frame': f},
+        coords={
+            'background_id': range(cnmf.f.shape[0]),
+            'frame': f
+        },
         dims=['background_id', 'frame'],
         name='f')
     ds = xr.merge([A, C, S, YrA, b, f])
@@ -411,9 +586,9 @@ def save_cnmf(cnmf,
             unit_mask = np.arange(ds.sizes['unit_id'])
         if meta_dict is not None:
             pathlist = os.path.normpath(dpath).split(os.sep)
-            ds = ds.assign_coords(
-                **dict([(cdname, pathlist[cdval])
-                        for cdname, cdval in meta_dict.items()]))
+            ds = ds.assign_coords(**dict([(
+                cdname,
+                pathlist[cdval]) for cdname, cdval in meta_dict.items()]))
         ds = ds.assign_attrs({
             'unit_mask': unit_mask,
             'file_path': dpath + os.sep + "cnm.nc"
@@ -448,20 +623,132 @@ def save_variable(var, fpath, fname, meta_dict=None):
     return ds
 
 
-def update_meta(dpath, pattern=r'^varr_mc_int.nc$', meta_dict=None):
+def open_minian(dpath, fname='minian', backend='netcdf', chunks=None, post_process=None):
+    if backend is 'netcdf':
+        fname = fname + '.nc'
+        if chunks is 'auto':
+            chunks = dict([(d, 'auto') for d in ds.dims])
+        mpath = pjoin(dpath, fname)
+        with xr.open_dataset(mpath) as ds:
+            dims = ds.dims
+        chunks = dict([(d, 'auto') for d in dims])
+        ds = xr.open_dataset(os.path.join(dpath, fname), chunks=chunks)
+        if post_process:
+            ds = post_process(ds, mpath)
+        return ds
+    elif backend is 'zarr':
+        mpath = pjoin(dpath, fname)
+        dslist = [xr.open_zarr(pjoin(mpath, d)) for d in listdir(mpath) if isdir(pjoin(mpath, d))]
+        ds = xr.merge(dslist)
+        if chunks is 'auto':
+            chunks = dict([(d, 'auto') for d in ds.dims])
+        if post_process:
+            ds = post_process(ds, mpath)
+        return ds.chunk(chunks)
+    else:
+        raise NotImplementedError("backend {} not supported".format(backend))
+
+
+def open_minian_mf(dpath, index_dims, result_format='xarray', pattern=r'minian\.[0-9]+$', exclude_dirs=[], **kwargs):
+    minian_dict = dict()
+    for nextdir, dirlist, filelist in os.walk(dpath, topdown=False):
+        cur_path = Path(nextdir)
+        if any([Path(epath) in cur_path.parents for epath in exclude_dirs]):
+            continue
+        flist = list(filter(lambda f: re.search(pattern, f), filelist + dirlist))
+        if flist:
+            print("opening dataset under {}".format(nextdir))
+            if len(flist) > 1:
+                warnings.warn("multiple dataset found: {}".format(flist))
+            fname = flist[-1]
+            print("opening {}".format(fname))
+            minian = open_minian(nextdir, fname=fname, **kwargs)
+            key = tuple([np.array_str(minian[d].values) for d in index_dims])
+            minian_dict[key] = minian
+            print(["{}: {}".format(d, v) for d, v in zip(index_dims, key)])
+    if result_format is 'xarray':
+        return xrconcat_recursive(minian_dict, index_dims)
+    elif result_format is 'pandas':
+        minian_df = pd.Series(minian_dict).rename('minian')
+        minian_df.index.set_names(index_dims, inplace=True)
+        return minian_df.to_frame()
+    else:
+        raise NotImplementedError(
+            "format {} not understood".format(result_format))
+
+
+def save_minian(var, dpath, fname='minian', backend='netcdf', meta_dict=None, overwrite=False):
+    dpath = os.path.normpath(dpath)
+    ds = var.to_dataset()
+    if meta_dict is not None:
+        pathlist = os.path.abspath(dpath).split(os.sep)
+        ds = ds.assign_coords(
+            **dict([(dn, pathlist[di]) for dn, di in meta_dict.items()]))
+    if backend is 'netcdf':
+        try:
+            md = {True: 'w', False: 'a'}[overwrite]
+            ds.to_netcdf(os.path.join(dpath, fname + '.nc'), mode=md)
+        except FileNotFoundError:
+            ds.to_netcdf(os.path.join(dpath, fname + '.nc'), mode=md)
+        return ds
+    elif backend is 'zarr':
+        md = {True: 'w', False: 'w-'}[overwrite]
+        ds.to_zarr(os.path.join(dpath, fname, var.name + '.zarr'), mode=md)
+        return ds
+    else:
+        raise NotImplementedError("backend {} not supported".format(backend))
+
+def delete_variable(fpath, varlist, del_org=False):
+    fpath_bak = fpath + ".{}.backup".format(int(time.time()))
+    os.rename(fpath, fpath_bak)
+    with xr.open_dataset(fpath_bak) as ds:
+        new_ds = ds.drop(varlist)
+        new_ds.to_netcdf(fpath)
+    if del_org:
+        os.remove(fpath_bak)
+    return "deleted {} in file {}".format(str(varlist), fpath)
+
+
+def xrconcat_recursive(var_dict, dims):
+    if len(dims) > 1:
+        try:
+            var_dict = {k: v.to_dataset() for k, v in var_dict.items()}
+        except AttributeError:
+            pass
+        var_ps = pd.Series(var_dict)
+        var_ps.index.set_names(dims, inplace=True)
+        xr_ls = []
+        for idx, var in var_ps.groupby(level=dims[0]):
+            var.index = var.index.droplevel(dims[0])
+            xarr = xrconcat_recursive(var.to_dict(), dims[1:])
+            xr_ls.append(xarr)
+        return xr.concat(xr_ls, dim=dims[0])
+    else:
+        return xr.concat(var_dict.values(), dim=dims[0])
+
+
+def update_meta(dpath, pattern=r'^minian\.nc$', meta_dict=None, backend='netcdf'):
     for dirpath, dirnames, fnames in os.walk(dpath):
-        fnames = filter(lambda fn: re.search(pattern, fn), fnames)
+        if backend == 'netcdf':
+            fnames = filter(lambda fn: re.search(pattern, fn), fnames)
+        elif backend == 'zarr':
+            fnames = filter(lambda fn: re.search(pattern, fn), dirnames)
+        else:
+            raise NotImplementedError("backend {} not supported".format(backend))
         for fname in fnames:
             f_path = os.path.join(dirpath, fname)
             pathlist = os.path.normpath(dirpath).split(os.sep)
             new_ds = xr.Dataset()
-            with xr.open_dataset(f_path) as old_ds:
-                new_ds.attrs = deepcopy(old_ds.attrs)
-            new_ds = new_ds.assign_coords(
-                **dict([(cdname, pathlist[cdval])
-                        for cdname, cdval in meta_dict.items()]))
-            new_ds = new_ds.assign_attrs(dict(file_path=f_path))
-            new_ds.to_netcdf(f_path, mode='a')
+            old_ds = open_minian(f_path, f_path, backend)
+            new_ds.attrs = deepcopy(old_ds.attrs)
+            old_ds.close()
+            new_ds = new_ds.assign_coords(**dict([(
+                cdname,
+                pathlist[cdval]) for cdname, cdval in meta_dict.items()]))
+            if backend == 'netcdf':
+                new_ds.to_netcdf(f_path, mode='a')
+            elif backend == 'zarr':
+                new_ds.to_zarr(f_path, mode='w')
             print("updated: {}".format(f_path))
 
 
@@ -478,7 +765,6 @@ def update_meta(dpath, pattern=r'^varr_mc_int.nc$', meta_dict=None):
 #                 ds = old_ds.load().copy()
 #                 ds = ds.rename({vname: 'varr_mc_int'})
 #             ds.to_netcdf(f_path, mode='w')
-
 
 # def resave_cnmf(dpath, pattern=r'^cnm.nc$'):
 #     for dirpath, fdpath, fpath in os.walk(dpath):
@@ -599,14 +885,18 @@ def save_cnmf_from_mat(matpath,
         name='A')
     C = xr.DataArray(
         cnmf.C,
-        coords={'unit_id': range(cnmf.C.shape[0]),
-                'frame': T_coord},
+        coords={
+            'unit_id': range(cnmf.C.shape[0]),
+            'frame': T_coord
+        },
         dims=['unit_id', 'frame'],
         name='C')
     S = xr.DataArray(
         cnmf.S,
-        coords={'unit_id': range(cnmf.S.shape[0]),
-                'frame': T_coord},
+        coords={
+            'unit_id': range(cnmf.S.shape[0]),
+            'frame': T_coord
+        },
         dims=['unit_id', 'frame'],
         name='S')
     if cnmf.b.any():
@@ -629,8 +919,10 @@ def save_cnmf_from_mat(matpath,
     if cnmf.f.any():
         f = xr.DataArray(
             cnmf.f,
-            coords={'background_id': range(cnmf.f.shape[0]),
-                    'frame': T_coord},
+            coords={
+                'background_id': range(cnmf.f.shape[0]),
+                'frame': T_coord
+            },
             dims=['background_id', 'frame'],
             name='f')
     else:
