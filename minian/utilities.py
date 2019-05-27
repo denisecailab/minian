@@ -731,8 +731,14 @@ def delete_variable(fpath, varlist, del_org=False):
     return "deleted {} in file {}".format(str(varlist), fpath)
 
 
-def xrconcat_recursive(var_dict, dims):
+def xrconcat_recursive(var, dims):
     if len(dims) > 1:
+        if type(var) is dict:
+            var_dict = var
+        elif type(var) is list:
+            var_dict = {tuple([np.asscalar(v[d]) for d in dims]): v for v in var}
+        else:
+            raise NotImplementedError("type {} not supported".format(type(var)))
         try:
             var_dict = {k: v.to_dataset() for k, v in var_dict.items()}
         except AttributeError:
@@ -740,13 +746,15 @@ def xrconcat_recursive(var_dict, dims):
         var_ps = pd.Series(var_dict)
         var_ps.index.set_names(dims, inplace=True)
         xr_ls = []
-        for idx, var in var_ps.groupby(level=dims[0]):
-            var.index = var.index.droplevel(dims[0])
-            xarr = xrconcat_recursive(var.to_dict(), dims[1:])
+        for idx, v in var_ps.groupby(level=dims[0]):
+            v.index = v.index.droplevel(dims[0])
+            xarr = xrconcat_recursive(v.to_dict(), dims[1:])
             xr_ls.append(xarr)
         return xr.concat(xr_ls, dim=dims[0])
     else:
-        return xr.concat(var_dict.values(), dim=dims[0])
+        if type(var) is dict:
+            var = var.values()
+        return xr.concat(var, dim=dims[0])
 
 
 def update_meta(dpath, pattern=r'^minian\.nc$', meta_dict=None, backend='netcdf'):
