@@ -668,11 +668,14 @@ def open_minian(dpath, fname='minian', backend='netcdf', chunks=None, post_proce
         raise NotImplementedError("backend {} not supported".format(backend))
 
 
-def open_minian_mf(dpath, index_dims, result_format='xarray', pattern=r'minian\.[0-9]+$', exclude_dirs=[], **kwargs):
+def open_minian_mf(dpath, index_dims, result_format='xarray', pattern=r'minian\.[0-9]+$', sub_dirs=[], exclude=True, **kwargs):
     minian_dict = dict()
     for nextdir, dirlist, filelist in os.walk(dpath, topdown=False):
+        nextdir = os.path.abspath(nextdir)
         cur_path = Path(nextdir)
-        if any([Path(epath) in cur_path.parents for epath in exclude_dirs]):
+        dir_tag = bool(((any([Path(epath) in cur_path.parents for epath in sub_dirs]))
+                        or nextdir in sub_dirs))
+        if exclude == dir_tag:
             continue
         flist = list(filter(lambda f: re.search(pattern, f), filelist + dirlist))
         if flist:
