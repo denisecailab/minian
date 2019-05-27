@@ -20,6 +20,7 @@ import warnings
 import cv2
 import papermill as pm
 import ast
+import pims
 from pathlib import Path
 from dask.diagnostics import ProgressBar
 from copy import deepcopy
@@ -164,6 +165,22 @@ def load_avi_perframe(fname, fid):
     else:
         print("frame read failed for frame {}".format(fid))
         return fm
+
+
+def load_avi_lazy_pims(fname):
+    vid = pims.open(fname)
+    f = len(vid)
+    def _read_fm(i):
+        fm = vid[i]
+        r, g, b = fm[:, :, 0], fm[:, :, 1], fm[:, :, 2]
+        return np.asarray(0.2125 * r + 0.7154 * g + 0.0721 * b)
+    _read_fm_dl = da.delayed(_read_fm)
+    flist = [_read_fm_dl(i) for i in range(f)]
+    sample = flist[0].compute()
+    arr = [da.array.from_delayed(
+        fm, dtype=sample.dtype, shape=sample.shape) for fm in flist]
+    return da.array.stack(arr, axis=0)
+
 
     
 def handle_crash(varr, vpath, ssname, vlist, varr_list, frame_dict):
