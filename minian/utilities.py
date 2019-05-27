@@ -157,6 +157,8 @@ def load_avi_lazy(fname):
 
 def load_avi_perframe(fname, fid):
     cap = cv2.VideoCapture(fname)
+    h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     cap.set(cv2.CAP_PROP_POS_FRAMES, fid)
     ret, fm = cap.read()
     if ret:
@@ -164,7 +166,7 @@ def load_avi_perframe(fname, fid):
             cv2.cvtColor(fm, cv2.COLOR_RGB2GRAY), axis=0)
     else:
         print("frame read failed for frame {}".format(fid))
-        return fm
+        return np.zeros((h, w))
 
 
 def load_avi_lazy_pims(fname):
