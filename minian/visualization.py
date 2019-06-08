@@ -1273,6 +1273,47 @@ def centroid(A, verbose=False):
     return cents_df
 
 
+def visualize_preprocess(fm, fn=None, **kwargs):
+    fh, fw = fm.sizes['height'], fm.sizes['width']
+    opts_im = {
+        'plot': {'frame_height': fh, 'frame_width': fw,
+                 'title': 'Image {label} {group} {dimensions}'},
+        'style': {'cmap': 'viridis'}}
+    opts_cnt = {
+        'plot': {'frame_height': fh, 'frame_width': fw,
+                 'title': 'Contours {label} {group} {dimensions}'},
+        'style': {'cmap': 'viridis'}}
+    def _vis(f):
+        im = (hv.Image(f, kdims=['width', 'height'])
+                  .opts(**opts_im))
+        cnt = (hv.operation.contours(im)
+                   .opts(**opts_cnt))
+        return im, cnt
+    if fn is not None:
+        pkey = kwargs.keys()
+        pval = kwargs.values()
+        im_dict = dict()
+        cnt_dict = dict()
+        for params in itt.product(*pval):
+            fm_res = fn(fm, **dict(zip(pkey, params)))
+            cur_im, cur_cnt = _vis(fm_res)
+            cur_im = cur_im.relabel('After')
+            cur_cnt = cur_cnt.relabel('After')
+            im_dict[params] = cur_im
+            cnt_dict[params] = cur_cnt
+        hv_im = (regrid(hv.HoloMap(im_dict, kdims=list(pkey)), precompute=True)
+                 .opts(**opts_im))
+        hv_cnt = (datashade(
+            hv.HoloMap(cnt_dict, kdims=list(pkey)), precompute=True, cmap=Viridis256)
+                  .opts(**opts_cnt))
+        return hv_im + hv_cnt
+    else:
+        im, cnt = _vis(fm)
+        im = im.relabel('Before')
+        cnt = cnt.relabel('Before')
+        return im + cnt
+
+
 def visualize_seeds(max_proj, seeds, mask=None, datashade=True):
     h, w = max_proj.sizes['height'], max_proj.sizes['width']
     pt_cmap = {True: 'white', False: 'red'}
