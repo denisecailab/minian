@@ -1379,23 +1379,23 @@ def visualize_spatial_update(A_dict, C_dict, kdims=None, norm=True):
                                    kdims=['width', 'height'])
         hv_C_dict[key] = hv.Dataset(C.rename('C')).to(hv.Curve, kdims='frame')
     cropts = {'plot': {
-        'height': int(np.around(0.13 * w)),
-        'width': int(np.around(1.8 * w))}}
+        'frame_height': int(np.around(0.13 * w)),
+        'frame_width': int(np.around(1.3 * w))}}
     hv_pts = hv.HoloMap(hv_pts_dict, kdims=kdims)
     hv_A = (regrid(hv.HoloMap(hv_A_dict, kdims=kdims))
-            .opts(plot=dict(height=h, width=w, colorbar=True),
+            .opts(plot=dict(frame_height=h, frame_width=w, colorbar=True),
                   style=dict(cmap='Viridis')))
     hv_Ab = (regrid(hv.HoloMap(hv_Ab_dict, kdims=kdims))
-            .opts(plot=dict(height=h, width=w, colorbar=True),
+            .opts(plot=dict(frame_height=h, frame_width=w, colorbar=True),
                   style=dict(cmap='Viridis')))
     hv_C = (datashade(hv.HoloMap(hv_C_dict, kdims=kdims).collate()
                       .grid('unit_id').add_dimension('time', 0, 0),
                       min_alpha=128)
             .map(lambda cr: cr.opts(**cropts), hv.RGB))
-    return ((hv_pts * hv_A).relabel('Spatial Matrix')
-            + (hv_pts * hv_Ab).relabel('Binary Spatial Matrix')
-            + hv_C.relabel('Temporal Components')
-            + hv.Div('')).cols(2)
+    return (hv.NdLayout({
+        'pseudo-color': (hv_pts * hv_A),
+        'binary': (hv_pts * hv_Ab)}, kdims='Spatial Matrix').cols(1)
+            + hv_C.relabel('Temporal Components'))
 
 
 def visualize_temporal_update(YA_dict, C_dict, S_dict, g_dict, sig_dict, A_dict, kdims=None, norm=True, datashading=True):
@@ -1456,15 +1456,14 @@ def visualize_temporal_update(YA_dict, C_dict, S_dict, g_dict, sig_dict, A_dict,
         hv_pul = hv.DynamicMap(hv_pul)
         hv_A = hv.DynamicMap(hvobjs[6])
     # hv_unit = hv_unit.opts(plot=dict(height=h, width=2*w))
-    hv_unit = hv_unit.map(lambda p: p.opts(plot=dict(height=h, width=2*w)))
-    hv_pul = (hv_pul.opts(plot=dict(height=h, width=w))
+    hv_unit = hv_unit.map(lambda p: p.opts(plot=dict(frame_height=h, frame_width=2*w)))
+    hv_pul = (hv_pul.opts(plot=dict(frame_height=h, frame_width=w))
               .redim(t=hv.Dimension('t', soft_range=pul_range)))
-    hv_pul = hv_pul.map(lambda p: p.opts(plot=dict(height=h, width=w)))
-    hv_A = hv_A.opts(plot=dict(height=h, width=w), style=dict(cmap='Viridis'))
-    return (hv_unit.relabel("Temporal Traces")
-            + hv.Div('')
-            + hv_pul.relabel("Simulated Pulse Response")
-            + hv_A.relabel("Spatial Footprint")).cols(2)
+    hv_A = hv_A.opts(plot=dict(frame_height=h, frame_width=w), style=dict(cmap='Viridis'))
+    return (hv_unit.relabel("Current Unit: Temporal Traces")
+            + hv.NdLayout({
+                'Simulated Pulse Response': hv_pul,
+                'Spatial Footprint': hv_A}, kdims='Current Unit')).cols(1)
 
 
 def roi_draw(im):
