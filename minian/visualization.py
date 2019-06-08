@@ -207,9 +207,9 @@ class VArrayViewer():
             for d, wgt in wgt_meta.items():
                 cur_update = make_update_func(d)
                 wgt.param.watch(cur_update, 'value')
-            wgts = pn.widgets.WidgetBox(w_box, w_play, *list(wgt_meta.values()))
+            wgts = pn.layout.WidgetBox(w_box, w_play, *list(wgt_meta.values()))
         else:
-            wgts = pn.widgets.WidgetBox(w_box, w_play)
+            wgts = pn.layout.WidgetBox(w_box, w_play)
         return wgts
 
     def _update_subs(self):
