@@ -20,7 +20,6 @@ import warnings
 import cv2
 import papermill as pm
 import ast
-import pims
 from pathlib import Path
 from dask.diagnostics import ProgressBar
 from copy import deepcopy
