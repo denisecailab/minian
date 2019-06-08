@@ -1273,7 +1273,7 @@ def centroid(A, verbose=False):
     return cents_df
 
 
-def visualize_preprocess(fm, fn=None, **kwargs):
+def visualize_preprocess(fm, fn=None, include_org=True, **kwargs):
     fh, fw = fm.sizes['height'], fm.sizes['width']
     opts_im = {
         'plot': {'frame_height': fh, 'frame_width': fw,
@@ -1306,7 +1306,12 @@ def visualize_preprocess(fm, fn=None, **kwargs):
         hv_cnt = (datashade(
             hv.HoloMap(cnt_dict, kdims=list(pkey)), precompute=True, cmap=Viridis256)
                   .opts(**opts_cnt))
-        return hv_im + hv_cnt
+        if include_org:
+            im, cnt = _vis(fm)
+            im = regrid(im, precompute=True).relabel('Before').opts(**opts_im)
+            cnt = (datashade(cnt, precompute=True, cmap=Viridis256)
+                   .relabel('Before').opts(**opts_cnt))
+        return (im + cnt + hv_im + hv_cnt).cols(2)
     else:
         im, cnt = _vis(fm)
         im = im.relabel('Before')
