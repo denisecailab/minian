@@ -1299,8 +1299,9 @@ def visualize_preprocess(fm, fn=None, include_org=True, **kwargs):
             cur_im, cur_cnt = _vis(fm_res)
             cur_im = cur_im.relabel('After')
             cur_cnt = cur_cnt.relabel('After')
-            im_dict[params] = cur_im
-            cnt_dict[params] = cur_cnt
+            p_str = tuple([str(p) if not isinstance(p, (int, float)) else p for p in params])
+            im_dict[p_str] = cur_im
+            cnt_dict[p_str] = cur_cnt
         hv_im = (regrid(hv.HoloMap(im_dict, kdims=list(pkey)), precompute=True)
                  .opts(**opts_im))
         hv_cnt = (datashade(
