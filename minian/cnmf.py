@@ -25,6 +25,7 @@ import cvxpy as cvx
 import pyfftw.interfaces.dask_fft as fftw
 from timeit import timeit
 import warnings
+from .utilities import get_chk, rechunk_like
 
 
 def get_noise_fft(varr, noise_range=(0.25, 0.5), noise_method='logmexp', compute=True):
@@ -158,9 +159,7 @@ def update_spatial(Y,
                    sparse_penal=0.5,
                    update_background=False,
                    post_scal=True,
-                   zero_thres='eps',
-                   compute=True,
-                   chk=50):
+                   zero_thres='eps'):
     _T = len(Y.coords['frame'])
     print("estimating penalty parameter")
     cct = C.dot(C, 'frame')
@@ -189,18 +188,17 @@ def update_spatial(Y,
     print("fitting spatial matrix")
     A_new = xr.apply_ufunc(
         update_spatial_perpx,
-        Y.chunk(chk).chunk(dict(frame=-1)),
-        C.chunk(chk).chunk(dict(frame=-1, unit_id=-1)),
-        alpha.chunk(chk),
-        sub.chunk(chk).chunk(dict(unit_id=-1)),
+        Y.chunk(dict(frame=-1)),
+        C.chunk(dict(frame=-1, unit_id=-1)),
+        alpha,
+        sub.chunk(dict(unit_id=-1)),
         input_core_dims=[['frame'], ['frame', 'unit_id'], [], ['unit_id']],
         output_core_dims=[['unit_id']],
         vectorize=True,
         dask='parallelized',
         output_dtypes=[Y.dtype],
     )
-    if compute:
-        A_new = A_new.persist()
+    A_new = A_new.persist()
     if zero_thres == 'eps':
         zero_thres = np.finfo(A_new.dtype).eps
     A_new = A_new.where(A_new > zero_thres).fillna(0)
@@ -242,8 +240,8 @@ def update_spatial(Y,
     non_empty = A_new.sum(['width', 'height']) > 0
     A_new = A_new.where(non_empty, drop=True)
     C_new = C.where(non_empty, drop=True)
-    if compute:
-        A_new, C_new = A_new.persist(), C_new.persist()
+    A_new = rechunk_like(A_new.persist(), A)
+    C_new = rechunk_like(C_new.persist(), C)
     return A_new, b_new, C_new, f
 
 
@@ -356,9 +354,6 @@ def update_temporal(Y,
                     max_iters=200,
                     use_smooth=True,
                     compute=True,
-                    chk={
-                        'height':'auto', 'width':'auto',
-                        'frame':'auto', 'unit_id':'auto'},
                     post_scal=True,
                     scs_fallback=False,
                     cvx_sched='processes'):
@@ -477,9 +472,9 @@ def update_temporal(Y,
     else:
         result_iso = xr.apply_ufunc(
             update_temporal_cvxpy,
-            YrA.where(unit_labels == -1, drop=True).chunk(dict(frame=-1, unit_id=5)),
-            g.where(unit_labels == -1, drop=True).chunk(dict(lag=-1, unit_id=5)),
-            sn_temp.where(unit_labels == -1, drop=True).chunk(dict(unit_id=5)),
+            YrA.where(unit_labels == -1, drop=True).chunk(dict(frame=-1)),
+            g.where(unit_labels == -1, drop=True).chunk(dict(lag=-1)),
+            sn_temp.where(unit_labels == -1, drop=True),
             input_core_dims=[['frame'], ['lag'], []],
             output_core_dims=[['trace', 'frame']],
             vectorize=True,
@@ -496,10 +491,7 @@ def update_temporal(Y,
     print("updating overlapping temporal components")
     res_list = []
     g_ovlp = g.where(unit_labels >= 0, drop=True)
-    try:
-        gg = g_ovlp.groupby('unit_labels')
-    except:
-        set_trace()
+    gg = g_ovlp.groupby('unit_labels')
     for cur_labl, cur_g in g_ovlp.groupby('unit_labels'):
         if use_spatial:
             cur_A = A_flt_ovlp.where(unit_labels == cur_labl, drop=True)
@@ -524,9 +516,9 @@ def update_temporal(Y,
             cur_sn_temp = sn_temp.where(unit_labels == cur_labl, drop=True)
             cur_res = delayed(xr.apply_ufunc)(
                 update_temporal_cvxpy,
-                cur_YrA,
-                cur_g,
-                cur_sn_temp,
+                cur_YrA.compute(),
+                cur_g.compute(),
+                cur_sn_temp.compute(),
                 input_core_dims=[['unit_id', 'frame'], ['unit_id', 'lag'],
                                  ['unit_id']],
                 output_core_dims=[['trace', 'unit_id', 'frame']],
@@ -572,8 +564,8 @@ def update_temporal(Y,
             return np.linalg.lstsq(a, b, rcond=-1)[0]
         scal = xr.apply_ufunc(
             lstsq,
-            C_new.chunk(dict(frame=-1, unit_id='auto')),
-            b_lstsq.chunk(dict(frame=-1, unit_id='auto')),
+            C_new.chunk(dict(frame=-1)),
+            b_lstsq.chunk(dict(frame=-1)),
             input_core_dims=[['frame'], ['frame']],
             output_core_dims=[[]],
             vectorize=True,
@@ -586,7 +578,13 @@ def update_temporal(Y,
         S_new = S_new * scal
     else:
         scal=None
-    sig_new = C0_new * dc_new + B_new + C_new
+    C_new = rechunk_like(C_new.persist(), C)
+    S_new = rechunk_like(S_new.persist(), C)
+    B_new = rechunk_like(B_new.persist(), C)
+    C0_new = rechunk_like(C0_new.persist(), C)
+    g_new = rechunk_like(g_new.persist(), C)
+    scal = rechunk_like(scal, C)
+    sig_new = (C0_new * dc_new + B_new + C_new).persist()
     return (YrA, C_new, S_new, B_new, C0_new, sig_new, g_new, scal)
 
 
@@ -760,18 +758,24 @@ def unit_merge(A, C, add_list=None, thres_corr=0.9):
         input_core_dims=[['unit_id', 'unit_id_cp']],
         output_core_dims=[['unit_id']])
     print("merging units")
-    A_merge = A.assign_coords(unit_labels=unit_labels).groupby(
-        'unit_labels').sum('unit_id').rename(unit_labels='unit_id')
-    C_merge = C.assign_coords(unit_labels=unit_labels).groupby(
-        'unit_labels').mean('unit_id').rename(unit_labels='unit_id')
+    A_merge = (A.assign_coords(unit_labels=unit_labels)
+               .groupby('unit_labels').sum('unit_id')
+               .persist().rename(unit_labels='unit_id'))
+    C_merge = (C.assign_coords(unit_labels=unit_labels)
+               .groupby('unit_labels').mean('unit_id')
+               .persist().rename(unit_labels='unit_id'))
+    A_merge = rechunk_like(A_merge, A)
+    C_merge = rechunk_like(C_merge, C)
     if add_list:
         for ivar, var in enumerate(add_list):
-            add_list[ivar] = (var.assign_coords(unit_labels=unit_labels)
-                              .groupby('unit_labels').mean('unit_id')
-                              .rename(unit_labels='unit_id'))
+            var_mrg = (var.assign_coords(unit_labels=unit_labels)
+                       .groupby('unit_labels').mean('unit_id')
+                       .persist().rename(unit_labels='unit_id'))
+            add_list[ivar] = rechunk_like(var_mrg, var)
         return A_merge, C_merge, add_list
     else:
         return A_merge, C_merge
+
 
 def label_connected(adj, only_connected=False):
     np.fill_diagonal(adj, 0)
