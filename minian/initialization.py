@@ -17,6 +17,7 @@ from IPython.core.debugger import set_trace
 from scipy.signal import butter, lfilter
 from tqdm import tqdm_notebook
 from .cnmf import smooth_sig, label_connected
+from .utilities import get_optimal_chk
 from scipy.ndimage.filters import median_filter
 
 
@@ -44,7 +45,7 @@ def seeds_init(varr, wnd_size=500, method='rolling', stp_size=200, nchunk=100, m
     print("calculating local maximum")
     loc_max = xr.apply_ufunc(
         local_max,
-        max_res,
+        max_res.chunk(dict(height=-1, width=-1)),
         input_core_dims=[['height', 'width']],
         output_core_dims=[['height', 'width']],
         vectorize=True,
@@ -253,25 +254,27 @@ def seeds_merge(varr, seeds, thres_dist=5, thres_corr=0.6, noise_freq='envelope'
     return seeds
 
 
-def initialize(varr, seeds, thres_corr=0.8, wnd=10, chk=None):
+def initialize(varr, seeds, thres_corr=0.8, wnd=10):
     print("creating parallel schedule")
     harr, warr = seeds['height'].values, seeds['width'].values
-    res_ls = [init_perseed(varr, h, w, wnd, thres_corr) for h, w in zip(harr, warr)]
-    print("computing rois")
+    varr_rechk = varr.chunk(dict(frame=-1))
+    res_ls = [init_perseed(varr_rechk, h, w, wnd, thres_corr)
+              for h, w in zip(harr, warr)]
+    print("computing ROIs")
     res_ls = dask.compute(res_ls)[0]
     print("concatenating results")
     A = (xr.concat([r[0] for r in res_ls], 'unit_id')
-         .assign_coords(unit_id = np.arange(len(res_ls)))
-         .fillna(0))
+         .assign_coords(unit_id = np.arange(len(res_ls))))
     C = (xr.concat([r[1] for r in res_ls], 'unit_id')
          .assign_coords(unit_id = np.arange(len(res_ls))))
     print("initializing backgrounds")
-    if not chk:
-        chk = dict(height='auto', width='auto', frame='auto', unit_id='auto')
     A = A.reindex_like(varr.isel(frame=0)).fillna(0)
-    A = A.chunk(dict(height=chk['height'], width=chk['width'], unit_id=-1))
-    C = C.chunk(dict(frame=chk['frame'], unit_id=-1))
-    varr = varr.chunk(dict(frame=chk['frame'], height=chk['height'], width=chk['width']))
+    chk = {d: c for d, c in zip(varr.dims, varr.chunks)}
+    uchkA = get_optimal_chk(A)['unit_id']
+    uchkC = get_optimal_chk(C)['unit_id']
+    uchk = uchkA if len(uchkA) > len(uchkC) else uchkC
+    A = A.chunk(dict(height=chk['height'], width=chk['width'], unit_id=uchk))
+    C = C.chunk(dict(frame=chk['frame'], unit_id=uchk))
     AC = xr.apply_ufunc(
         da.dot, A, C,
         input_core_dims=[['height', 'width', 'unit_id'], ['unit_id', 'frame']],
@@ -279,10 +282,8 @@ def initialize(varr, seeds, thres_corr=0.8, wnd=10, chk=None):
         dask='allowed',
         output_dtypes=[A.dtype])
     Yr = varr - AC
-    b = (Yr.chunk(dict(frame=-1, height=chk['height'], width=chk['width']))
-         .mean('frame').compute())
-    f = (Yr.chunk(dict(frame=chk['frame'], height=-1, width=-1))
-         .mean('height').mean('width').compute())
+    b = Yr.mean('frame').persist()
+    f = Yr.mean(['height', 'width']).persist()
     return A, C, b, f
 
 
