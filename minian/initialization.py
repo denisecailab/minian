@@ -272,7 +272,7 @@ def initialize(varr, seeds, thres_corr=0.8, wnd=10):
     chk = {d: c for d, c in zip(varr.dims, varr.chunks)}
     uchkA = get_optimal_chk(A)['unit_id']
     uchkC = get_optimal_chk(C)['unit_id']
-    uchk = uchkA if len(uchkA) > len(uchkC) else uchkC
+    uchk = min(uchkA, uchkC)
     A = A.chunk(dict(height=chk['height'], width=chk['width'], unit_id=uchk))
     C = C.chunk(dict(frame=chk['frame'], unit_id=uchk))
     AC = xr.apply_ufunc(
