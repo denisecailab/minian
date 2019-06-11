@@ -17,7 +17,7 @@ from IPython.core.debugger import set_trace
 from scipy.signal import butter, lfilter
 from tqdm import tqdm_notebook
 from .cnmf import smooth_sig, label_connected
-from .utilities import get_optimal_chk
+from .utilities import get_optimal_chk, rechunk_like
 from scipy.ndimage.filters import median_filter
 
 
@@ -276,14 +276,17 @@ def initialize(varr, seeds, thres_corr=0.8, wnd=10):
     A = A.chunk(dict(height=chk['height'], width=chk['width'], unit_id=uchk))
     C = C.chunk(dict(frame=chk['frame'], unit_id=uchk))
     AC = xr.apply_ufunc(
-        da.dot, A, C,
+        da.dot,
+        A.chunk(dict(unit_id=-1, height=-1, width=-1)),
+        C.chunk(dict(unit_id=-1)),
         input_core_dims=[['height', 'width', 'unit_id'], ['unit_id', 'frame']],
         output_core_dims=[['height', 'width', 'frame']],
         dask='allowed',
         output_dtypes=[A.dtype])
-    Yr = varr - AC
+    Yr = varr.chunk(dict(height=-1, width=-1)) - AC
     b = Yr.mean('frame').persist()
     f = Yr.mean(['height', 'width']).persist()
+    b = rechunk_like(b, varr)
     return A, C, b, f
 
 
