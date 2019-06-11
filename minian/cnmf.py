@@ -256,26 +256,29 @@ def update_spatial_perpx(y, C, alpha, sub):
 
 def compute_trace(Y, A, b, C, f, noise_freq=None):
     nunits = len(A.coords['unit_id'])
+    A_rechk = A.chunk(dict(height=-1, width=-1))
+    C_rechk = C.chunk(dict(unit_id=-1))
+    Y_rechk = Y.chunk(dict(height=-1, width=-1))
     AA = xr.apply_ufunc(
         da.array.tensordot,
-        A,
-        (A.rename(dict(unit_id='unit_id_cp'))),
+        A_rechk,
+        A_rechk.rename(dict(unit_id='unit_id_cp')),
         input_core_dims=[['unit_id', 'height', 'width'], ['height', 'width', 'unit_id_cp']],
         output_core_dims=[['unit_id', 'unit_id_cp']],
         dask='allowed',
         kwargs=dict(axes=([1, 2], [0, 1])),
         output_dtypes=[A.dtype])
-    nA = (A**2).sum(['height', 'width'])
+    nA = (A_rechk**2).sum(['height', 'width']).compute()
     nA_inv = xr.apply_ufunc(
         lambda x: np.asarray(diags(x).todense()),
-        (1 / nA).chunk(dict(unit_id=-1)),
+        1 / nA,
         input_core_dims=[['unit_id']],
         output_core_dims=[['unit_id', 'unit_id_cp']],
         dask='parallelized',
         output_dtypes=[nA.dtype],
         output_sizes=dict(unit_id_cp = nunits))
     nA_inv = nA_inv.assign_coords(unit_id_temp=AA.coords['unit_id_cp'])
-    b = b.expand_dims('dot')
+    b = b.expand_dims('dot').chunk(dict(height=-1, width=-1))
     f = f.expand_dims('dot')
     B = xr.apply_ufunc(
         da.array.dot,
@@ -285,11 +288,11 @@ def compute_trace(Y, A, b, C, f, noise_freq=None):
         output_core_dims=[['height', 'width', 'frame']],
         dask='allowed',
         output_dtypes=[b.dtype])
-    Y = Y - B
+    Y = Y_rechk - B
     YA = (xr.apply_ufunc(
         da.array.tensordot,
         Y,
-        A,
+        A_rechk.chunk(dict(unit_id=-1)),
         input_core_dims=[['frame', 'height', 'width'], ['height', 'width', 'unit_id']],
         output_core_dims=[['frame', 'unit_id']],
         dask='allowed',
@@ -306,8 +309,8 @@ def compute_trace(Y, A, b, C, f, noise_freq=None):
         output_dtypes=[YA.dtype])
     CA = xr.apply_ufunc(
         da.array.dot,
-        C,
-        AA,
+        C_rechk,
+        AA.chunk(dict(unit_id=-1, unit_id_cp=-1)),
         input_core_dims=[['frame', 'unit_id'], ['unit_id', 'unit_id_cp']],
         output_core_dims=[['frame', 'unit_id_cp']],
         dask='allowed',
@@ -320,7 +323,7 @@ def compute_trace(Y, A, b, C, f, noise_freq=None):
         output_core_dims=[['frame', 'unit_id']],
         dask='allowed',
         output_dtypes=[CA.dtype])
-    YrA = YA_norm - CA_norm + C
+    YrA = YA_norm - CA_norm + C_rechk
     if noise_freq:
         print("smoothing signals")
         but_b, but_a = butter(2, noise_freq, btype='low', analog=False)
@@ -393,6 +396,7 @@ def update_temporal(Y,
     else:
         print("computing trace")
         YrA = compute_trace(Y, A, b, C, f).persist()
+        YrA = YrA.chunk(dict(frame=-1, unit_id=1))
     YrA = YrA.assign_coords(unit_labels=unit_labels)
     sn_temp = get_noise_fft(YrA, noise_range=(noise_freq, 1))
     sn_temp = sn_temp.assign_coords(unit_labels=unit_labels)
@@ -407,7 +411,7 @@ def update_temporal(Y,
         but_b, but_a = butter(2, noise_freq, btype='low', analog=False)
         YrA_smth = xr.apply_ufunc(
             lambda x: lfilter(but_b, but_a, x),
-            YrA.chunk(dict(frame=-1)),
+            YrA,
             input_core_dims=[['frame']],
             output_core_dims=[['frame']],
             vectorize=True,
@@ -424,7 +428,7 @@ def update_temporal(Y,
         print("estimating order p for each neuron")
         p = xr.apply_ufunc(
             get_p,
-            YrA_smth.chunk(dict(frame=-1)),
+            YrA_smth,
             input_core_dims=[['frame']],
             vectorize=True,
             dask='parallelized',
@@ -449,7 +453,7 @@ def update_temporal(Y,
         output_sizes=dict(lag=p_max))
     g = g.assign_coords(lag=np.arange(1, p_max + 1), unit_labels=unit_labels)
     if compute:
-        g = g.compute()
+        g = g.persist()
     print("updating isolated temporal components")
     if use_spatial is 'full':
         result_iso = xr.apply_ufunc(
@@ -472,7 +476,7 @@ def update_temporal(Y,
     else:
         result_iso = xr.apply_ufunc(
             update_temporal_cvxpy,
-            YrA.where(unit_labels == -1, drop=True).chunk(dict(frame=-1)),
+            YrA.where(unit_labels == -1, drop=True),
             g.where(unit_labels == -1, drop=True).chunk(dict(lag=-1)),
             sn_temp.where(unit_labels == -1, drop=True),
             input_core_dims=[['frame'], ['lag'], []],
