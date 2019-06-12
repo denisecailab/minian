@@ -396,7 +396,7 @@ def update_temporal(Y,
     else:
         print("computing trace")
         YrA = compute_trace(Y, A, b, C, f).persist()
-        YrA = YrA.chunk(dict(frame=-1, unit_id=1))
+    YrA = YrA.chunk(dict(frame=-1, unit_id=1))
     YrA = YrA.assign_coords(unit_labels=unit_labels)
     sn_temp = get_noise_fft(YrA, noise_range=(noise_freq, 1))
     sn_temp = sn_temp.assign_coords(unit_labels=unit_labels)
