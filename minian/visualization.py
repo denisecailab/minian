@@ -207,9 +207,9 @@ class VArrayViewer():
             for d, wgt in wgt_meta.items():
                 cur_update = make_update_func(d)
                 wgt.param.watch(cur_update, 'value')
-            wgts = pn.widgets.WidgetBox(w_box, w_play, *list(wgt_meta.values()))
+            wgts = pn.layout.WidgetBox(w_box, w_play, *list(wgt_meta.values()))
         else:
-            wgts = pn.widgets.WidgetBox(w_box, w_play)
+            wgts = pn.layout.WidgetBox(w_box, w_play)
         return wgts
 
     def _update_subs(self):
@@ -878,8 +878,8 @@ class CNMFViewer():
         usub.reverse()
         ulabs = self.unit_labels.sel(unit_id=usub).values
         wgt_sel = {uid: pnwgt.Select(
-            name='Unit Label', options=usub+[-1], value=ulb,
-            height=50, width=100) for uid, ulb in zip(usub, ulabs)}
+            name='Unit Label', options=usub+[-1]+ulabs.tolist(),
+            value=ulb, height=50, width=100) for uid, ulb in zip(usub, ulabs)}
         def callback_ulab(value, uid):
             self.unit_labels.loc[uid] = value.new
         for uid, sel in wgt_sel.items():
@@ -1273,6 +1273,53 @@ def centroid(A, verbose=False):
     return cents_df
 
 
+def visualize_preprocess(fm, fn=None, include_org=True, **kwargs):
+    fh, fw = fm.sizes['height'], fm.sizes['width']
+    opts_im = {
+        'plot': {'frame_height': fh, 'frame_width': fw,
+                 'title': 'Image {label} {group} {dimensions}'},
+        'style': {'cmap': 'viridis'}}
+    opts_cnt = {
+        'plot': {'frame_height': fh, 'frame_width': fw,
+                 'title': 'Contours {label} {group} {dimensions}'},
+        'style': {'cmap': 'viridis'}}
+    def _vis(f):
+        im = (hv.Image(f, kdims=['width', 'height'])
+                  .opts(**opts_im))
+        cnt = (hv.operation.contours(im)
+                   .opts(**opts_cnt))
+        return im, cnt
+    if fn is not None:
+        pkey = kwargs.keys()
+        pval = kwargs.values()
+        im_dict = dict()
+        cnt_dict = dict()
+        for params in itt.product(*pval):
+            fm_res = fn(fm, **dict(zip(pkey, params)))
+            cur_im, cur_cnt = _vis(fm_res)
+            cur_im = cur_im.relabel('After')
+            cur_cnt = cur_cnt.relabel('After')
+            p_str = tuple([str(p) if not isinstance(p, (int, float)) else p for p in params])
+            im_dict[p_str] = cur_im
+            cnt_dict[p_str] = cur_cnt
+        hv_im = (regrid(hv.HoloMap(im_dict, kdims=list(pkey)), precompute=True)
+                 .opts(**opts_im))
+        hv_cnt = (datashade(
+            hv.HoloMap(cnt_dict, kdims=list(pkey)), precompute=True, cmap=Viridis256)
+                  .opts(**opts_cnt))
+        if include_org:
+            im, cnt = _vis(fm)
+            im = regrid(im, precompute=True).relabel('Before').opts(**opts_im)
+            cnt = (datashade(cnt, precompute=True, cmap=Viridis256)
+                   .relabel('Before').opts(**opts_cnt))
+        return (im + cnt + hv_im + hv_cnt).cols(2)
+    else:
+        im, cnt = _vis(fm)
+        im = im.relabel('Before')
+        cnt = cnt.relabel('Before')
+        return im + cnt
+
+
 def visualize_seeds(max_proj, seeds, mask=None, datashade=True):
     h, w = max_proj.sizes['height'], max_proj.sizes['width']
     pt_cmap = {True: 'white', False: 'red'}
@@ -1338,23 +1385,23 @@ def visualize_spatial_update(A_dict, C_dict, kdims=None, norm=True):
                                    kdims=['width', 'height'])
         hv_C_dict[key] = hv.Dataset(C.rename('C')).to(hv.Curve, kdims='frame')
     cropts = {'plot': {
-        'height': int(np.around(0.13 * w)),
-        'width': int(np.around(1.8 * w))}}
+        'frame_height': int(np.around(0.13 * w)),
+        'frame_width': int(np.around(1.3 * w))}}
     hv_pts = hv.HoloMap(hv_pts_dict, kdims=kdims)
     hv_A = (regrid(hv.HoloMap(hv_A_dict, kdims=kdims))
-            .opts(plot=dict(height=h, width=w, colorbar=True),
+            .opts(plot=dict(frame_height=h, frame_width=w, colorbar=True),
                   style=dict(cmap='Viridis')))
     hv_Ab = (regrid(hv.HoloMap(hv_Ab_dict, kdims=kdims))
-            .opts(plot=dict(height=h, width=w, colorbar=True),
+            .opts(plot=dict(frame_height=h, frame_width=w, colorbar=True),
                   style=dict(cmap='Viridis')))
     hv_C = (datashade(hv.HoloMap(hv_C_dict, kdims=kdims).collate()
                       .grid('unit_id').add_dimension('time', 0, 0),
                       min_alpha=128)
             .map(lambda cr: cr.opts(**cropts), hv.RGB))
-    return ((hv_pts * hv_A).relabel('Spatial Matrix')
-            + (hv_pts * hv_Ab).relabel('Binary Spatial Matrix')
-            + hv_C.relabel('Temporal Components')
-            + hv.Div('')).cols(2)
+    return (hv.NdLayout({
+        'pseudo-color': (hv_pts * hv_A),
+        'binary': (hv_pts * hv_Ab)}, kdims='Spatial Matrix').cols(1)
+            + hv_C.relabel('Temporal Components'))
 
 
 def visualize_temporal_update(YA_dict, C_dict, S_dict, g_dict, sig_dict, A_dict, kdims=None, norm=True, datashading=True):
@@ -1415,15 +1462,14 @@ def visualize_temporal_update(YA_dict, C_dict, S_dict, g_dict, sig_dict, A_dict,
         hv_pul = hv.DynamicMap(hv_pul)
         hv_A = hv.DynamicMap(hvobjs[6])
     # hv_unit = hv_unit.opts(plot=dict(height=h, width=2*w))
-    hv_unit = hv_unit.map(lambda p: p.opts(plot=dict(height=h, width=2*w)))
-    hv_pul = (hv_pul.opts(plot=dict(height=h, width=w))
+    hv_unit = hv_unit.map(lambda p: p.opts(plot=dict(frame_height=h, frame_width=2*w)))
+    hv_pul = (hv_pul.opts(plot=dict(frame_height=h, frame_width=w))
               .redim(t=hv.Dimension('t', soft_range=pul_range)))
-    hv_pul = hv_pul.map(lambda p: p.opts(plot=dict(height=h, width=w)))
-    hv_A = hv_A.opts(plot=dict(height=h, width=w), style=dict(cmap='Viridis'))
-    return (hv_unit.relabel("Temporal Traces")
-            + hv.Div('')
-            + hv_pul.relabel("Simulated Pulse Response")
-            + hv_A.relabel("Spatial Footprint")).cols(2)
+    hv_A = hv_A.opts(plot=dict(frame_height=h, frame_width=w), style=dict(cmap='Viridis'))
+    return (hv_unit.relabel("Current Unit: Temporal Traces")
+            + hv.NdLayout({
+                'Simulated Pulse Response': hv_pul,
+                'Spatial Footprint': hv_A}, kdims='Current Unit')).cols(1)
 
 
 def roi_draw(im):
