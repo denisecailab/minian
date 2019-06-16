@@ -1431,15 +1431,16 @@ def visualize_temporal_update(YA_dict, C_dict, S_dict, g_dict, sig_dict, A_dict,
         ins[:] = [i.compute() for i in ins]
         ya, c, s, sig, g = ins
         f_crd = ya.coords['frame']
+        pul_crd = f_crd.values[:500]
         s_pul, c_pul = xr.apply_ufunc(
             construct_pulse_response, g,
             input_core_dims=[['lag']],
             output_core_dims=[['t'], ['t']],
             vectorize=True,
-            # kwargs=dict(length=len(f_crd)),
-            output_sizes=dict(t=500))
-        s_pul, c_pul = (s_pul.assign_coords(t=f_crd.values[:500]),
-                        c_pul.assign_coords(t=f_crd.values[:500]))
+            kwargs=dict(length=len(pul_crd)),
+            output_sizes=dict(t=len(pul_crd)))
+        s_pul, c_pul = (s_pul.assign_coords(t=pul_crd),
+                        c_pul.assign_coords(t=pul_crd))
         pul_range = (
             f_crd.min(),
             int(np.around(f_crd.min() + (f_crd.max() - f_crd.min()) / 2)))
