@@ -287,10 +287,14 @@ def initialize(varr, seeds, thres_corr=0.8, wnd=10, chk=None):
 
 
 def init_perseed(varr, h, w, wnd, thres_corr):
-    h_sur, w_sur = (slice(h - wnd, h + wnd),
-                    slice(w - wnd, w + wnd))
-    sur = varr.sel(height=h_sur, width=w_sur)
+    ih = np.where(varr.coords['height'] == h)[0][0]
+    iw = np.where(varr.coords['width'] == w)[0][0]
+    h_sur, w_sur = (slice(ih - wnd, ih + wnd),
+                    slice(iw - wnd, iw + wnd))
+    sur = varr.isel(height=h_sur, width=w_sur)
     sur_flt = sur.stack(spatial=['height', 'width'])
+    ih = np.where(sur.coords['height'] == h)[0][0]
+    iw = np.where(sur.coords['width'] == w)[0][0]
     sp_idxs = sur_flt.coords['spatial'].values
     corr = xr.apply_ufunc(
         da.corrcoef,
@@ -300,16 +304,16 @@ def init_perseed(varr, h, w, wnd, thres_corr):
         dask='allowed',
         output_sizes=dict(spatial_cp=len(sp_idxs)))
     sd_id = np.ravel_multi_index(
-        (h - sp_idxs[0][0], w - sp_idxs[0][1]),
+        (ih, iw),
         (sur.sizes['height'], sur.sizes['width']))
     corr = (corr.isel(spatial_cp=sd_id)
             .squeeze().unstack('spatial'))
     mask = corr > thres_corr
     mask_lb = xr.apply_ufunc(da_label, mask, dask='allowed')
-    sd_lb = mask_lb.sel(height=h, width=w)
+    sd_lb = mask_lb.isel(height=ih, width=iw)
     mask = (mask_lb == sd_lb)
     sur = sur.where(mask, 0)
-    sd = sur.sel(height=h, width=w)
+    sd = sur.isel(height=ih, width=iw)
     A = xr.apply_ufunc(
         da.dot, sur, sd,
         input_core_dims=[['height', 'width', 'frame'], ['frame']],
