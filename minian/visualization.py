@@ -799,7 +799,7 @@ class CNMFViewer():
         return pn.panel(temp_comp)
     
     def update_temp_comp_sub(self, usub=None):
-        self.temp_comp_sub.objects = self._temp_comp_sub(usub).objects
+        self.temp_comp_sub.object = self._temp_comp_sub(usub).object
         self.wgt_man.objects = self._man_wgt().objects
         
     def update_norm(self, norm):
