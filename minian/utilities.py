@@ -124,19 +124,16 @@ def load_videos(vpath,
     if dtype:
         varr = varr.astype(dtype)
     if downsample:
-        for dim, binw in downsample.items():
-            binw = int(binw)
-            crd = varr.coords[dim]
-            bin_eg = np.arange(crd.values[0], crd.values[-1] + binw, binw)
-            if downsample_strategy == 'mean':
-                varr = (varr.groupby_bins(
-                    dim, bin_eg, labels=bin_eg[:-1], include_lowest=True)
-                        .mean(dim).rename({dim + '_bins': dim}))
-            elif downsample_strategy == 'subset':
-                varr = varr.sel(**{dim: bin_eg[:-1]})
-            else:
-                warnings.warn(
-                    "unrecognized downsampling strategy", RuntimeWarning)
+        bin_eg = {d: np.arange(0, varr.sizes[d], w)
+                  for d, w in downsample.items()}
+        if downsample_strategy == 'mean':
+            varr = (varr.coarsen(**downsample, boundary='trim')
+                    .mean().assign_coords(**bin_eg))
+        elif downsample_strategy == 'subset':
+            varr = varr.sel(**bin_eg)
+        else:
+            warnings.warn(
+                "unrecognized downsampling strategy", RuntimeWarning)
     varr = varr.rename(ssname)
     if post_process:
         varr = post_process(varr, vpath, ssname, vlist, varr_list)
