@@ -256,12 +256,66 @@ def update_spatial_perpx(y, C, alpha, sub):
         res[np.where(sub)[0]] = coef
     return res
 
-def compute_trace(Y, A, b, C, f, noise_freq=None):
+
+def update_temporal(Y,
+                    A,
+                    b,
+                    C,
+                    f,
+                    sn_spatial,
+                    noise_freq=0.25,
+                    p=None,
+                    add_lag='p',
+                    jac_thres = 0.1,
+                    use_spatial=False,
+                    sparse_penal=1,
+                    zero_thres=1e-8,
+                    max_iters=200,
+                    use_smooth=True,
+                    compute=True,
+                    chk={'height':50, 'width':50, 'frame':1000, 'unit_id':20},
+                    post_scal=True,
+                    scs_fallback=False,
+                    cvx_sched='processes'):
     nunits = len(A.coords['unit_id'])
+    print("grouping overlaping units")
+    A_pos = (A > 0).astype(np.float32)
+    A_neg = (A == 0).astype(np.float32)
+    A_inter = xr.apply_ufunc(
+        da.array.tensordot,
+        A_pos.chunk(dict(height=-1, width=-1, unit_id=chk['unit_id'])),
+        (A_pos.chunk(dict(height=-1, width=-1, unit_id=chk['unit_id']))
+         .rename(unit_id='unit_id_cp')),
+        input_core_dims=[['unit_id', 'height', 'width'], ['height', 'width', 'unit_id_cp']],
+        output_core_dims=[['unit_id', 'unit_id_cp']],
+        dask='allowed',
+        kwargs=dict(axes=([1, 2], [0, 1])),
+        output_dtypes=[A_pos.dtype])
+    A_union = xr.apply_ufunc(
+        da.array.tensordot,
+        A_neg.chunk(dict(height=-1, width=-1, unit_id=chk['unit_id'])),
+        (A_neg.chunk(dict(height=-1, width=-1, unit_id=chk['unit_id']))
+         .rename(unit_id='unit_id_cp')),
+        input_core_dims=[['unit_id', 'height', 'width'], ['height', 'width', 'unit_id_cp']],
+        output_core_dims=[['unit_id', 'unit_id_cp']],
+        dask='allowed',
+        kwargs=dict(axes=([1, 2], [0, 1])),
+        output_dtypes=[A_neg.dtype])
+    A_jac = A_inter / (A.sizes['height'] * A.sizes['width'] - A_union)
+    if compute:
+        A_jac = A_jac.compute()
+    unit_labels = xr.apply_ufunc(
+        label_connected,
+        A_jac > jac_thres,
+        input_core_dims=[['unit_id', 'unit_id_cp']],
+        kwargs=dict(only_connected=True),
+        output_core_dims=[['unit_id']])
+    print("computing trace")
     AA = xr.apply_ufunc(
         da.array.tensordot,
-        A,
-        (A.rename(dict(unit_id='unit_id_cp'))),
+        A.chunk(dict(height=-1, width=-1, unit_id=chk['unit_id'])),
+        (A.chunk(dict(height=-1, width=-1, unit_id=chk['unit_id']))
+         .rename(dict(unit_id='unit_id_cp'))),
         input_core_dims=[['unit_id', 'height', 'width'], ['height', 'width', 'unit_id_cp']],
         output_core_dims=[['unit_id', 'unit_id_cp']],
         dask='allowed',
@@ -277,21 +331,24 @@ def compute_trace(Y, A, b, C, f, noise_freq=None):
         output_dtypes=[nA.dtype],
         output_sizes=dict(unit_id_cp = nunits))
     nA_inv = nA_inv.assign_coords(unit_id_temp=AA.coords['unit_id_cp'])
+    if compute:
+        nA_inv = nA_inv.compute()
     b = b.expand_dims('dot')
     f = f.expand_dims('dot')
     B = xr.apply_ufunc(
         da.array.dot,
-        b,
-        f,
+        b.chunk(dict(height=-1, width=-1)),
+        f.chunk(dict(frame=-1)),
         input_core_dims=[['height', 'width', 'dot'], ['dot', 'frame']],
         output_core_dims=[['height', 'width', 'frame']],
         dask='allowed',
-        output_dtypes=[b.dtype])
+        output_dtypes=[b.dtype]
+    )
     Y = Y - B
     YA = (xr.apply_ufunc(
         da.array.tensordot,
-        Y,
-        A,
+        Y.chunk(dict(height=-1, width=-1, frame=chk['frame'])),
+        A.chunk(dict(height=-1, width=-1, unit_id=chk['unit_id'])),
         input_core_dims=[['frame', 'height', 'width'], ['height', 'width', 'unit_id']],
         output_core_dims=[['frame', 'unit_id']],
         dask='allowed',
@@ -300,105 +357,32 @@ def compute_trace(Y, A, b, C, f, noise_freq=None):
           .rename(dict(unit_id='unit_id_cp')))
     YA_norm = xr.apply_ufunc(
         da.array.dot,
-        YA,
-        nA_inv,
+        YA.chunk(dict(unit_id_cp=-1, frame=chk['frame'])),
+        nA_inv.chunk(dict(unit_id_cp=-1, unit_id=chk['unit_id'])),
         input_core_dims=[['frame', 'unit_id_cp'], ['unit_id_cp', 'unit_id']],
         output_core_dims=[['frame', 'unit_id']],
         dask='allowed',
         output_dtypes=[YA.dtype])
     CA = xr.apply_ufunc(
         da.array.dot,
-        C,
-        AA,
+        C.chunk(dict(unit_id=-1, frame=chk['frame'])),
+        AA.chunk(dict(unit_id=-1, unit_id_cp=chk['unit_id'])),
         input_core_dims=[['frame', 'unit_id'], ['unit_id', 'unit_id_cp']],
         output_core_dims=[['frame', 'unit_id_cp']],
         dask='allowed',
         output_dtypes=[C.dtype])
     CA_norm = xr.apply_ufunc(
         da.array.dot,
-        CA,
-        nA_inv,
+        CA.chunk(dict(unit_id_cp=-1, frame=chk['frame'])),
+        nA_inv.chunk(dict(unit_id_cp=-1, unit_id=chk['unit_id'])),
         input_core_dims=[['frame', 'unit_id_cp'], ['unit_id_cp', 'unit_id']],
         output_core_dims=[['frame', 'unit_id']],
         dask='allowed',
         output_dtypes=[CA.dtype])
     YrA = YA_norm - CA_norm + C
-    if noise_freq:
-        print("smoothing signals")
-        but_b, but_a = butter(2, noise_freq, btype='low', analog=False)
-        YrA_smth = xr.apply_ufunc(
-            lambda x: lfilter(but_b, but_a, x),
-            YrA.chunk(dict(frame=-1)),
-            input_core_dims=[['frame']],
-            output_core_dims=[['frame']],
-            vectorize=True,
-            dask='parallelized',
-            output_dtypes=[YrA.dtype])
-    else:
-        YrA_smth = YrA
-    return YrA_smth
-
-
-def update_temporal(Y,
-                    A,
-                    b,
-                    C,
-                    f,
-                    sn_spatial,
-                    YrA=None,
-                    noise_freq=0.25,
-                    p=None,
-                    add_lag='p',
-                    jac_thres = 0.1,
-                    use_spatial=False,
-                    sparse_penal=1,
-                    zero_thres=1e-8,
-                    max_iters=200,
-                    use_smooth=True,
-                    compute=True,
-                    chk={
-                        'height':'auto', 'width':'auto',
-                        'frame':'auto', 'unit_id':'auto'},
-                    post_scal=True,
-                    scs_fallback=False,
-                    cvx_sched='processes'):
-    nunits = len(A.coords['unit_id'])
-    print("grouping overlaping units")
-    A_pos = (A > 0).astype(np.float32)
-    A_neg = (A == 0).astype(np.float32)
-    A_inter = xr.apply_ufunc(
-        da.array.tensordot,
-        A_pos,
-        A_pos.rename(unit_id='unit_id_cp'),
-        input_core_dims=[['unit_id', 'height', 'width'], ['height', 'width', 'unit_id_cp']],
-        output_core_dims=[['unit_id', 'unit_id_cp']],
-        dask='allowed',
-        kwargs=dict(axes=([1, 2], [0, 1])),
-        output_dtypes=[A_pos.dtype])
-    A_union = xr.apply_ufunc(
-        da.array.tensordot,
-        A_neg,
-        A_neg.rename(unit_id='unit_id_cp'),
-        input_core_dims=[['unit_id', 'height', 'width'], ['height', 'width', 'unit_id_cp']],
-        output_core_dims=[['unit_id', 'unit_id_cp']],
-        dask='allowed',
-        kwargs=dict(axes=([1, 2], [0, 1])),
-        output_dtypes=[A_neg.dtype])
-    A_jac = A_inter / (A.sizes['height'] * A.sizes['width'] - A_union)
     if compute:
-        A_jac = A_jac.compute()
-    unit_labels = xr.apply_ufunc(
-        label_connected,
-        A_jac > jac_thres,
-        input_core_dims=[['unit_id', 'unit_id_cp']],
-        kwargs=dict(only_connected=True),
-        output_core_dims=[['unit_id']])
-    if YrA is not None:
-        YrA = YrA
-    else:
-        print("computing trace")
-        YrA = compute_trace(Y, A, b, C, f).persist()
-    YrA = YrA.assign_coords(unit_labels=unit_labels)
+        YrA = YrA.compute()
+        YrA = YrA.assign_coords(unit_labels=unit_labels)
     sn_temp = get_noise_fft(YrA, noise_range=(noise_freq, 1))
     sn_temp = sn_temp.assign_coords(unit_labels=unit_labels)
     if use_spatial:
