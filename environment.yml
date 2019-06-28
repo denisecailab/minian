@@ -37,7 +37,7 @@ dependencies:
   # - cryptography-vectors=2.4.2
   # - curl=7.63.0
   # - cvxopt=1.2.1
-  - cvxpy
+  - cvxpy=1.0.1
   # - cycler=0.10.0
   # - cytoolz=0.9.0.1
   - dask=1.0.0
