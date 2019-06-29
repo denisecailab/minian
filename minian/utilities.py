@@ -29,7 +29,7 @@ from natsort import natsorted
 from matplotlib import pyplot as plt
 from matplotlib import animation as anim
 from collections import Iterable
-from tifffile import imsave, imread
+from tifffile import imsave, imread, TiffFile
 from pandas import Timestamp
 from IPython.core.debugger import set_trace
 from os.path import isdir, abspath
@@ -113,7 +113,16 @@ def load_videos(vpath,
             "No data with pattern {}"
             " found in the specified folder {}".format(pattern, vpath))
     print("loading {} videos in folder {}".format(len(vlist), vpath))
-    varr_list = [load_avi_lazy(v) for v in vlist]
+
+    file_extension = os.path.splitext(vlist[0])[1]
+    if file_extension == '.avi':
+        movie_load_func = load_avi_lazy
+    elif file_extension == '.tif':
+        movie_load_func = load_tif_lazy
+    else:
+        raise ValueError('Extension not supported.')
+
+    varr_list = [movie_load_func(v) for v in vlist]
     varr = darr.concatenate(varr_list, axis=0)
     varr = xr.DataArray(
         varr, dims=['frame', 'height', 'width'],
@@ -151,10 +160,21 @@ def load_avi_lazy(fname):
     return da.array.stack(arr, axis=0)
 
 
+def load_tif_lazy(fname):
+    with TiffFile(fname) as tif:
+        data = tif.asarray()
+
+    f = int(data.shape[0])
+    fmread = da.delayed(load_tif_perframe)
+    flist = [fmread(fname, i) for i in range(f)]
+    sample = flist[0].compute()
+    arr = [da.array.from_delayed(
+        fm, dtype=sample.dtype, shape=sample.shape) for fm in flist]
+    return da.array.stack(arr, axis=0)
+
+
 def load_avi_perframe(fname, fid):
     cap = cv2.VideoCapture(fname)
-    h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     cap.set(cv2.CAP_PROP_POS_FRAMES, fid)
     ret, fm = cap.read()
     if ret:
@@ -162,25 +182,13 @@ def load_avi_perframe(fname, fid):
             cv2.cvtColor(fm, cv2.COLOR_RGB2GRAY), axis=0)
     else:
         print("frame read failed for frame {}".format(fid))
-        return np.zeros((h, w))
+        return fm
 
 
-def load_avi_lazy_pims(fname):
-    vid = pims.open(fname)
-    f = len(vid)
-    def _read_fm(i):
-        fm = vid[i]
-        r, g, b = fm[:, :, 0], fm[:, :, 1], fm[:, :, 2]
-        return np.asarray(0.2125 * r + 0.7154 * g + 0.0721 * b)
-    _read_fm_dl = da.delayed(_read_fm)
-    flist = [_read_fm_dl(i) for i in range(f)]
-    sample = flist[0].compute()
-    arr = [da.array.from_delayed(
-        fm, dtype=sample.dtype, shape=sample.shape) for fm in flist]
-    return da.array.stack(arr, axis=0)
+def load_tif_perframe(fname, fid):
+    return imread(fname, key=fid)
 
 
-    
 def handle_crash(varr, vpath, ssname, vlist, varr_list, frame_dict):
     seg1_list = list(filter(lambda v: re.search('seg1', v), vlist))
     seg2_list = list(filter(lambda v: re.search('seg2', v), vlist))
@@ -467,7 +475,7 @@ def scale_varr(varr, scale=(0, 1), inplace=False, pre_compute=False):
 
 def scale_varr_da(varr, scale=(0, 1)):
     return ((varr - darr.nanmin(varr)) * (scale[1] - scale[0])
-           / (darr.nanmax(varr) - darr.nanmin(varr))) + scale[0]
+            / (darr.nanmax(varr) - darr.nanmin(varr))) + scale[0]
 
 
 def normalize(a, scale=(0, 1), copy=False):
@@ -544,7 +552,7 @@ def save_cnmf(cnmf,
     w = varr.coords['width']
     dims = cnmf.dims
     A = xr.DataArray(
-        cnmf.A.toarray().reshape(dims + (-1, ), order=order),
+        cnmf.A.toarray().reshape(dims + (-1,), order=order),
         coords={
             'height': h,
             'width': w,
@@ -577,7 +585,7 @@ def save_cnmf(cnmf,
         dims=['unit_id', 'frame'],
         name='YrA')
     b = xr.DataArray(
-        cnmf.b.reshape(dims + (-1, ), order=order),
+        cnmf.b.reshape(dims + (-1,), order=order),
         coords={
             'height': h,
             'width': w,
@@ -664,14 +672,11 @@ def open_minian(dpath, fname='minian', backend='netcdf', chunks=None, post_proce
         raise NotImplementedError("backend {} not supported".format(backend))
 
 
-def open_minian_mf(dpath, index_dims, result_format='xarray', pattern=r'minian\.[0-9]+$', sub_dirs=[], exclude=True, **kwargs):
+def open_minian_mf(dpath, index_dims, result_format='xarray', pattern=r'minian\.[0-9]+$', exclude_dirs=[], **kwargs):
     minian_dict = dict()
     for nextdir, dirlist, filelist in os.walk(dpath, topdown=False):
-        nextdir = os.path.abspath(nextdir)
         cur_path = Path(nextdir)
-        dir_tag = bool(((any([Path(epath) in cur_path.parents for epath in sub_dirs]))
-                        or nextdir in sub_dirs))
-        if exclude == dir_tag:
+        if any([Path(epath) in cur_path.parents for epath in exclude_dirs]):
             continue
         flist = list(filter(lambda f: re.search(pattern, f), filelist + dirlist))
         if flist:
@@ -716,6 +721,7 @@ def save_minian(var, dpath, fname='minian', backend='netcdf', meta_dict=None, ov
     else:
         raise NotImplementedError("backend {} not supported".format(backend))
 
+
 def delete_variable(fpath, varlist, del_org=False):
     fpath_bak = fpath + ".{}.backup".format(int(time.time()))
     os.rename(fpath, fpath_bak)
@@ -727,14 +733,8 @@ def delete_variable(fpath, varlist, del_org=False):
     return "deleted {} in file {}".format(str(varlist), fpath)
 
 
-def xrconcat_recursive(var, dims):
+def xrconcat_recursive(var_dict, dims):
     if len(dims) > 1:
-        if type(var) is dict:
-            var_dict = var
-        elif type(var) is list:
-            var_dict = {tuple([np.asscalar(v[d]) for d in dims]): v for v in var}
-        else:
-            raise NotImplementedError("type {} not supported".format(type(var)))
         try:
             var_dict = {k: v.to_dataset() for k, v in var_dict.items()}
         except AttributeError:
@@ -742,15 +742,13 @@ def xrconcat_recursive(var, dims):
         var_ps = pd.Series(var_dict)
         var_ps.index.set_names(dims, inplace=True)
         xr_ls = []
-        for idx, v in var_ps.groupby(level=dims[0]):
-            v.index = v.index.droplevel(dims[0])
-            xarr = xrconcat_recursive(v.to_dict(), dims[1:])
+        for idx, var in var_ps.groupby(level=dims[0]):
+            var.index = var.index.droplevel(dims[0])
+            xarr = xrconcat_recursive(var.to_dict(), dims[1:])
             xr_ls.append(xarr)
         return xr.concat(xr_ls, dim=dims[0])
     else:
-        if type(var) is dict:
-            var = var.values()
-        return xr.concat(var, dim=dims[0])
+        return xr.concat(var_dict.values(), dim=dims[0])
 
 
 def update_meta(dpath, pattern=r'^minian\.nc$', meta_dict=None, backend='netcdf'):
@@ -808,6 +806,7 @@ def get_optimal_chk(arr, dim_grp=None):
         opt_chk.update(re_dict)
     return opt_chk
 
+
 # def resave_varr_again(dpath, pattern=r'^varr_mc_int.nc$'):
 #     for dirpath, dirnames, fnames in os.walk(dpath):
 #         fnames = filter(lambda fn: re.search(pattern, fn), fnames)
@@ -854,7 +853,7 @@ def save_movies(cnmf, dpath, Y=None, mask=None, Y_only=True, order='C'):
         print("calculating b * f")
         b_dot_f = cnmd['b'].dot(cnmd['f']).astype(np.float32)
         A_dot_C = xr.DataArray(
-            A_dot_C.reshape(dims + (-1, ), order=order),
+            A_dot_C.reshape(dims + (-1,), order=order),
             coords={
                 'height': range(dims[0]),
                 'width': range(dims[1]),
@@ -863,7 +862,7 @@ def save_movies(cnmf, dpath, Y=None, mask=None, Y_only=True, order='C'):
             dims=['height', 'width', 'frame'],
             name='A_dot_C')
         b_dot_f = xr.DataArray(
-            b_dot_f.reshape(dims + (-1, ), order=order),
+            b_dot_f.reshape(dims + (-1,), order=order),
             coords={
                 'height': range(dims[0]),
                 'width': range(dims[1]),
@@ -931,7 +930,7 @@ def save_cnmf_from_mat(matpath,
         T_coord = np.linspace(0, T - 1, cnmf.C.shape[1])
         T = cnmf.C.shape[1]
     A = xr.DataArray(
-        cnmf.A.reshape(dims + (-1, ), order=order),
+        cnmf.A.reshape(dims + (-1,), order=order),
         coords={
             'height': dims_coord[0],
             'width': dims_coord[1],
@@ -957,7 +956,7 @@ def save_cnmf_from_mat(matpath,
         name='S')
     if cnmf.b.any():
         b = xr.DataArray(
-            cnmf.b.reshape(dims + (-1, ), order=order),
+            cnmf.b.reshape(dims + (-1,), order=order),
             coords={
                 'height': dims_coord[0],
                 'width': dims_coord[1],
@@ -967,7 +966,7 @@ def save_cnmf_from_mat(matpath,
             name='b')
     else:
         b = xr.DataArray(
-            np.zeros(dims + (1, )),
+            np.zeros(dims + (1,)),
             coords=dict(
                 height=dims_coord[0], width=dims_coord[1], background_id=[0]),
             dims=['height', 'width', 'background_id'],
@@ -1001,7 +1000,6 @@ def save_cnmf_from_mat(matpath,
     })
     ds.to_netcdf(dpath + os.sep + "cnm_from_mat.nc")
     return ds
-
 
 # def process_data(dpath, movpath, pltpath, roi):
 #     params_movie = {
@@ -1203,3 +1201,129 @@ def save_cnmf_from_mat(matpath,
 #             process_data(dirname, movpath, pltpath, roi)
 #         else:
 #             print("empty folder: " + dirname + " proceed")
+# if __name__ == '__main__':
+#     minian_path = "L:/"
+#     #dpath = "L:/minian/demo_movies"
+#     dpath = "L:\\Minian data folders\\BLA\\Mundilfari\\08_06_2018_Shock\\"
+#     chunks = {"frame": 1000, "height": 50, "width": 50, "unit_id": 100}
+#     subset = None
+#     subset_mc = None
+#     in_memory = True
+#     interactive = True
+#     output_size = 60
+#     param_load_videos = {
+#         'pattern': 'msCam[0-9]+\.tif$',
+#         'dtype': np.float32,
+#         'in_memory': in_memory,
+#         'downsample': dict(frame=2),
+#         'downsample_strategy': 'subset'}
+#     param_glow_removal = {
+#         'method': 'uniform',
+#         'wnd': 51}
+#     param_brightspot_removal = {
+#         'thres': 2}
+#     param_first_denoise = {
+#         'method': 'median',
+#         'ksize': 5}
+#     param_second_denoise = {
+#         'method': 'gaussian',
+#         'sigmaX': 0,
+#         'ksize': (5, 5)}
+#     param_estimate_shift = {
+#         'dim': 'frame',
+#         'on': 'first',
+#         'pad_f': 1,
+#         'pct_thres': 99.99}
+#     param_background_removal = {
+#         'method': 'tophat',
+#         'wnd': 10}
+#     param_seeds_init = {
+#         'wnd_size': 2000,
+#         'method': 'rolling',
+#         'stp_size': 1000,
+#         'nchunk': 100,
+#         'max_wnd': 10}
+#     param_gmm_refine = {
+#         'q': (0.1, 99.9),
+#         'n_components': 2,
+#         'valid_components': 1,
+#         'mean_mask': True}
+#     param_pnr_refine = {
+#         'noise_freq': 0.06,
+#         'thres': 'auto'}
+#     param_ks_refine = {
+#         'sig': 0.05}
+#     param_seeds_merge = {
+#         'thres_dist': 5,
+#         'thres_corr': 0.7,
+#         'noise_freq': 'envelope'}
+#     param_initialize = {
+#         'thres_corr': 0.8,
+#         'wnd': 10}
+#     param_get_noise = {
+#         'noise_range': (0.06, 0.5),
+#         'noise_method': 'logmexp'}
+#     param_first_spatial = {
+#         'dl_wnd': 5,
+#         'sparse_penal': 0.1,
+#         'update_background': False,
+#         'post_scal': True,
+#         'zero_thres': 'eps'}
+#     param_first_temporal = {
+#         'noise_freq': 0.06,
+#         'sparse_penal': 1,
+#         'p': 2,
+#         'add_lag': 20,
+#         'use_spatial': False,
+#         'chk': chunks,
+#         'jac_thres': 0.1,
+#         'zero_thres': 1e-8,
+#         'max_iters': 200,
+#         'use_smooth': True,
+#         'scs_fallback': False,
+#         'post_scal': True}
+#     param_first_merge = {
+#         'thres_corr': 0.9}
+#     param_second_spatial = {
+#         'dl_wnd': 5,
+#         'sparse_penal': 0.05,
+#         'update_background': False,
+#         'post_scal': True,
+#         'zero_thres': 'eps'}
+#     param_second_temporal = {
+#         'noise_freq': 0.06,
+#         'sparse_penal': 1,
+#         'p': 2,
+#         'add_lag': 20,
+#         'use_spatial': False,
+#         'chk': chunks,
+#         'jac_thres': 0.1,
+#         'zero_thres': 1e-8,
+#         'max_iters': 500,
+#         'use_smooth': True,
+#         'scs_fallback': False,
+#         'post_scal': True}
+#     param_second_merge = {
+#         'thres_corr': 0.9}
+#     param_save_minian = {
+#         'dpath': dpath,
+#         'fname': 'minian',
+#         'backend': 'zarr',
+#         'meta_dict': dict(session=-1, animal=-2),
+#         'overwrite': True}
+#
+#     dpath = os.path.abspath(dpath)
+#     para_norm_list = ['meta_dict', 'chunks', 'subset']
+#     for par_key in list(globals().keys()):
+#         if par_key in para_norm_list or par_key.startswith('param_'):
+#             globals()[par_key] = norm_params(globals()[par_key])
+#     if interactive:
+#         hv.notebook_extension('bokeh', width=100)
+#         pbar = ProgressBar()
+#         pbar.register()
+#     else:
+#         hv.notebook_extension('matplotlib')
+#
+#     varr = load_videos(dpath, **param_load_videos)
+#     if in_memory:
+#         varr = varr.persist()
