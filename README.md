@@ -10,8 +10,3 @@ MiniAn is an analysis pipeline and visualization tool inspired by both [CaImAn](
 4. Create an conda environment: `conda env create -n minian -f environment.yml`
 5. Activate the conda enviornment you created during minian installation: `source activate minian`
 6. Fire up jupyter: `jupyter notebook` and open the notebook "pipeline_noted.ipynb"
-
-# Additional steps for Windows:
-The package `cvxpy` in `conda-forge` channel is out-dated and you would need to install with `pip`. Here are the steps:
-1. Download and install [Visual C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/)
-2. Within the `minian` environment, do: `pip install --upgrade cvxpy`
