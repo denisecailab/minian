@@ -133,19 +133,16 @@ def load_videos(vpath,
     if dtype:
         varr = varr.astype(dtype)
     if downsample:
-        for dim, binw in downsample.items():
-            binw = int(binw)
-            crd = varr.coords[dim]
-            bin_eg = np.arange(crd.values[0], crd.values[-1] + binw, binw)
-            if downsample_strategy == 'mean':
-                varr = (varr.groupby_bins(
-                    dim, bin_eg, labels=bin_eg[:-1], include_lowest=True)
-                        .mean(dim).rename({dim + '_bins': dim}))
-            elif downsample_strategy == 'subset':
-                varr = varr.sel(**{dim: bin_eg[:-1]})
-            else:
-                warnings.warn(
-                    "unrecognized downsampling strategy", RuntimeWarning)
+        bin_eg = {d: np.arange(0, varr.sizes[d], w)
+                  for d, w in downsample.items()}
+        if downsample_strategy == 'mean':
+            varr = (varr.coarsen(**downsample, boundary='trim')
+                    .mean().assign_coords(**bin_eg))
+        elif downsample_strategy == 'subset':
+            varr = varr.sel(**bin_eg)
+        else:
+            warnings.warn(
+                "unrecognized downsampling strategy", RuntimeWarning)
     varr = varr.rename(ssname)
     if post_process:
         varr = post_process(varr, vpath, ssname, vlist, varr_list)
@@ -776,6 +773,36 @@ def update_meta(dpath, pattern=r'^minian\.nc$', meta_dict=None, backend='netcdf'
                 new_ds.to_zarr(f_path, mode='w')
             print("updated: {}".format(f_path))
 
+
+def get_chk(arr):
+    return {d: c for d, c in zip(arr.dims, arr.chunks)}
+
+
+def rechunk_like(x, y):
+    try:
+        dst_chk = get_chk(y)
+        comm_dim = set(x.dims).intersection(set(dst_chk.keys()))
+        dst_chk = {d: max(dst_chk[d]) for d in comm_dim}
+        return x.chunk(dst_chk)
+    except TypeError:
+        return x.compute()
+
+
+def get_optimal_chk(arr, dim_grp=None):
+    dims = arr.dims
+    if not dim_grp:
+        dim_grp = [(d,) for d in dims]
+    opt_chk = dict()
+    for dg in dim_grp:
+        d_rest = set(dims) - set(dg)
+        dg_dict = {d: 'auto' for d in dg}
+        dr_dict = {d: -1 for d in d_rest}
+        dg_dict.update(dr_dict)
+        arr_chk = arr.chunk(dg_dict)
+        re_dict = {d: c for d, c in zip(dims, arr_chk.chunks)}
+        re_dict = {d: max(re_dict[d]) for d in dg}
+        opt_chk.update(re_dict)
+    return opt_chk
 
 # def resave_varr_again(dpath, pattern=r'^varr_mc_int.nc$'):
 #     for dirpath, dirnames, fnames in os.walk(dpath):

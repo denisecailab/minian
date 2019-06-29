@@ -790,8 +790,8 @@ class CNMFViewer():
                                          'trace')                     
                      .opts(plot=dict(shared_xaxis=True))
                      .map(lambda p: p.opts(
-                         plot=dict(height=h_cv,
-                                   width=w_cv)),
+                         plot=dict(frame_height=h_cv,
+                                   frame_width=w_cv)),
                           hv.RGB)
                      * cur_vl)
         temp_comp[temp_comp.keys()[0]] = (temp_comp[temp_comp.keys()[0]]
@@ -799,7 +799,7 @@ class CNMFViewer():
         return pn.panel(temp_comp)
     
     def update_temp_comp_sub(self, usub=None):
-        self.temp_comp_sub.objects = self._temp_comp_sub(usub).objects
+        self.temp_comp_sub.object = self._temp_comp_sub(usub).object
         self.wgt_man.objects = self._man_wgt().objects
         
     def update_norm(self, norm):
@@ -978,7 +978,9 @@ class CNMFViewer():
         metas = self.metas
         Asum = (regrid(hv.Image(
             self.Asum.sel(**metas), ['width', 'height']), precompute=True)
-                .opts(plot=dict(height=len(self._h), width=len(self._w)),
+                .opts(plot=dict(
+                    frame_height=len(self._h),
+                    frame_width=len(self._w)),
                       style=dict(cmap='Viridis')))
         cents = (hv.Dataset(
             self.cents_sub.drop(list(self.meta_dicts.keys()), axis='columns'),
@@ -996,11 +998,15 @@ class CNMFViewer():
         fim = fct.partial(hv.Image, kdims=['width', 'height'])
         AC = (regrid(hv.DynamicMap(fim, streams=[self.pipAC]),
                      precompute=True)
-              .opts(plot=dict(height=len(self._h), width=len(self._w)),
+              .opts(plot=dict(
+                  frame_height=len(self._h),
+                  frame_width=len(self._w)),
                     style=dict(cmap='Viridis')))
         mov = (regrid(hv.DynamicMap(fim, streams=[self.pipmov]),
                       precompute=True)
-               .opts(plot=dict(height=len(self._h), width=len(self._w)),
+               .opts(plot=dict(
+                   frame_height=len(self._h),
+                   frame_width=len(self._w)),
                      style=dict(cmap='Viridis')))
         lab = fct.partial(hv.Labels, kdims=['width', 'height'], vdims=['unit_id'])
         ulab = (hv.DynamicMap(lab, streams=[self.pipusub])
@@ -1378,15 +1384,16 @@ def visualize_temporal_update(YA_dict, C_dict, S_dict, g_dict, sig_dict, A_dict,
         ins[:] = [i.compute() for i in ins]
         ya, c, s, sig, g = ins
         f_crd = ya.coords['frame']
+        pul_crd = f_crd.values[:500]
         s_pul, c_pul = xr.apply_ufunc(
             construct_pulse_response, g,
             input_core_dims=[['lag']],
             output_core_dims=[['t'], ['t']],
             vectorize=True,
-            # kwargs=dict(length=len(f_crd)),
-            output_sizes=dict(t=500))
-        s_pul, c_pul = (s_pul.assign_coords(t=f_crd.values[:500]),
-                        c_pul.assign_coords(t=f_crd.values[:500]))
+            kwargs=dict(length=len(pul_crd)),
+            output_sizes=dict(t=len(pul_crd)))
+        s_pul, c_pul = (s_pul.assign_coords(t=pul_crd),
+                        c_pul.assign_coords(t=pul_crd))
         pul_range = (
             f_crd.min(),
             int(np.around(f_crd.min() + (f_crd.max() - f_crd.min()) / 2)))

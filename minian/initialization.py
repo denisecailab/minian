@@ -17,6 +17,7 @@ from IPython.core.debugger import set_trace
 from scipy.signal import butter, lfilter
 from tqdm import tqdm_notebook
 from .cnmf import smooth_sig, label_connected
+from .utilities import get_optimal_chk, rechunk_like
 from scipy.ndimage.filters import median_filter
 
 
@@ -44,7 +45,7 @@ def seeds_init(varr, wnd_size=500, method='rolling', stp_size=200, nchunk=100, m
     print("calculating local maximum")
     loc_max = xr.apply_ufunc(
         local_max,
-        max_res,
+        max_res.chunk(dict(height=-1, width=-1)),
         input_core_dims=[['height', 'width']],
         output_core_dims=[['height', 'width']],
         vectorize=True,
@@ -253,44 +254,51 @@ def seeds_merge(varr, seeds, thres_dist=5, thres_corr=0.6, noise_freq='envelope'
     return seeds
 
 
-def initialize(varr, seeds, thres_corr=0.8, wnd=10, chk=None):
+def initialize(varr, seeds, thres_corr=0.8, wnd=10):
     print("creating parallel schedule")
     harr, warr = seeds['height'].values, seeds['width'].values
-    res_ls = [init_perseed(varr, h, w, wnd, thres_corr) for h, w in zip(harr, warr)]
-    print("computing rois")
+    varr_rechk = varr.chunk(dict(frame=-1))
+    res_ls = [init_perseed(varr_rechk, h, w, wnd, thres_corr)
+              for h, w in zip(harr, warr)]
+    print("computing ROIs")
     res_ls = dask.compute(res_ls)[0]
     print("concatenating results")
     A = (xr.concat([r[0] for r in res_ls], 'unit_id')
-         .assign_coords(unit_id = np.arange(len(res_ls)))
-         .fillna(0))
+         .assign_coords(unit_id = np.arange(len(res_ls))))
     C = (xr.concat([r[1] for r in res_ls], 'unit_id')
          .assign_coords(unit_id = np.arange(len(res_ls))))
     print("initializing backgrounds")
-    if not chk:
-        chk = dict(height='auto', width='auto', frame='auto', unit_id='auto')
     A = A.reindex_like(varr.isel(frame=0)).fillna(0)
-    A = A.chunk(dict(height=chk['height'], width=chk['width'], unit_id=-1))
-    C = C.chunk(dict(frame=chk['frame'], unit_id=-1))
-    varr = varr.chunk(dict(frame=chk['frame'], height=chk['height'], width=chk['width']))
+    chk = {d: c for d, c in zip(varr.dims, varr.chunks)}
+    uchkA = get_optimal_chk(A)['unit_id']
+    uchkC = get_optimal_chk(C)['unit_id']
+    uchk = min(uchkA, uchkC)
+    A = A.chunk(dict(height=chk['height'], width=chk['width'], unit_id=uchk))
+    C = C.chunk(dict(frame=chk['frame'], unit_id=uchk))
     AC = xr.apply_ufunc(
-        da.dot, A, C,
+        da.dot,
+        A.chunk(dict(unit_id=-1, height=-1, width=-1)),
+        C.chunk(dict(unit_id=-1)),
         input_core_dims=[['height', 'width', 'unit_id'], ['unit_id', 'frame']],
         output_core_dims=[['height', 'width', 'frame']],
         dask='allowed',
         output_dtypes=[A.dtype])
-    Yr = varr - AC
-    b = (Yr.chunk(dict(frame=-1, height=chk['height'], width=chk['width']))
-         .mean('frame').compute())
-    f = (Yr.chunk(dict(frame=chk['frame'], height=-1, width=-1))
-         .mean('height').mean('width').compute())
+    Yr = varr.chunk(dict(height=-1, width=-1)) - AC
+    b = Yr.mean('frame').persist()
+    f = Yr.mean(['height', 'width']).persist()
+    b = rechunk_like(b, varr)
     return A, C, b, f
 
 
 def init_perseed(varr, h, w, wnd, thres_corr):
-    h_sur, w_sur = (slice(h - wnd, h + wnd),
-                    slice(w - wnd, w + wnd))
-    sur = varr.sel(height=h_sur, width=w_sur)
+    ih = np.where(varr.coords['height'] == h)[0][0]
+    iw = np.where(varr.coords['width'] == w)[0][0]
+    h_sur, w_sur = (slice(ih - wnd, ih + wnd),
+                    slice(iw - wnd, iw + wnd))
+    sur = varr.isel(height=h_sur, width=w_sur)
     sur_flt = sur.stack(spatial=['height', 'width'])
+    ih = np.where(sur.coords['height'] == h)[0][0]
+    iw = np.where(sur.coords['width'] == w)[0][0]
     sp_idxs = sur_flt.coords['spatial'].values
     corr = xr.apply_ufunc(
         da.corrcoef,
@@ -300,16 +308,16 @@ def init_perseed(varr, h, w, wnd, thres_corr):
         dask='allowed',
         output_sizes=dict(spatial_cp=len(sp_idxs)))
     sd_id = np.ravel_multi_index(
-        (h - sp_idxs[0][0], w - sp_idxs[0][1]),
+        (ih, iw),
         (sur.sizes['height'], sur.sizes['width']))
     corr = (corr.isel(spatial_cp=sd_id)
             .squeeze().unstack('spatial'))
     mask = corr > thres_corr
     mask_lb = xr.apply_ufunc(da_label, mask, dask='allowed')
-    sd_lb = mask_lb.sel(height=h, width=w)
+    sd_lb = mask_lb.isel(height=ih, width=iw)
     mask = (mask_lb == sd_lb)
     sur = sur.where(mask, 0)
-    sd = sur.sel(height=h, width=w)
+    sd = sur.isel(height=ih, width=iw)
     A = xr.apply_ufunc(
         da.dot, sur, sd,
         input_core_dims=[['height', 'width', 'frame'], ['frame']],
