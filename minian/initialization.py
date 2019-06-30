@@ -293,8 +293,8 @@ def initialize(varr, seeds, thres_corr=0.8, wnd=10):
 def init_perseed(varr, h, w, wnd, thres_corr):
     ih = np.where(varr.coords['height'] == h)[0][0]
     iw = np.where(varr.coords['width'] == w)[0][0]
-    h_sur, w_sur = (slice(ih - wnd, ih + wnd),
-                    slice(iw - wnd, iw + wnd))
+    h_sur, w_sur = (slice(max(ih - wnd, 0), ih + wnd),
+                    slice(max(iw - wnd, 0), iw + wnd))
     sur = varr.isel(height=h_sur, width=w_sur)
     sur_flt = sur.stack(spatial=['height', 'width'])
     ih = np.where(sur.coords['height'] == h)[0][0]
