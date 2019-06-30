@@ -29,7 +29,7 @@ from natsort import natsorted
 from matplotlib import pyplot as plt
 from matplotlib import animation as anim
 from collections import Iterable
-from tifffile import imsave, imread
+from tifffile import imsave, imread, TiffFile
 from pandas import Timestamp
 from IPython.core.debugger import set_trace
 from os.path import isdir, abspath
@@ -113,7 +113,16 @@ def load_videos(vpath,
             "No data with pattern {}"
             " found in the specified folder {}".format(pattern, vpath))
     print("loading {} videos in folder {}".format(len(vlist), vpath))
-    varr_list = [load_avi_lazy(v) for v in vlist]
+
+    file_extension = os.path.splitext(vlist[0])[1]
+    if file_extension == '.avi':
+        movie_load_func = load_avi_lazy
+    elif file_extension == '.tif':
+        movie_load_func = load_tif_lazy
+    else:
+        raise ValueError('Extension not supported.')
+
+    varr_list = [movie_load_func(v) for v in vlist]
     varr = darr.concatenate(varr_list, axis=0)
     varr = xr.DataArray(
         varr, dims=['frame', 'height', 'width'],
@@ -138,6 +147,21 @@ def load_videos(vpath,
     if post_process:
         varr = post_process(varr, vpath, ssname, vlist, varr_list)
     return varr
+
+def load_tif_lazy(fname):
+    with TiffFile(fname) as tif:
+        data = tif.asarray()
+
+    f = int(data.shape[0])
+    fmread = da.delayed(load_tif_perframe)
+    flist = [fmread(fname, i) for i in range(f)]
+    sample = flist[0].compute()
+    arr = [da.array.from_delayed(
+        fm, dtype=sample.dtype, shape=sample.shape) for fm in flist]
+    return da.array.stack(arr, axis=0)
+
+def load_tif_perframe(fname, fid):
+    return imread(fname, key=fid)
 
 
 def load_avi_lazy(fname):
