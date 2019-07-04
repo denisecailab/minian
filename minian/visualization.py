@@ -1169,12 +1169,12 @@ def generate_videos(minian, vpath, chk=None, pre_compute=False):
     C = minian['C'].chunk(dict(frame=chk['frame'], unit_id=-1))
     Y = minian['Y'].chunk(dict(frame=chk['frame'], height=chk['height'], width=chk['width']))
     try:
-        B = minian['B'].chunk(dict(unit_id=-1))
+        bl = minian['bl'].chunk(dict(unit_id=-1))
     except KeyError:
         print("cannot find background term")
-        B = 0
+        bl = 0
     org = minian['org'].chunk(dict(frame=chk['frame'], height=chk['height'], width=chk['width']))
-    C = C + B
+    C = C + bl
     AC = xr.apply_ufunc(
         da.dot, A, C,
         input_core_dims=[['height', 'width', 'unit_id'], ['unit_id', 'frame']],
