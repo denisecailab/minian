@@ -29,7 +29,7 @@ from natsort import natsorted
 from matplotlib import pyplot as plt
 from matplotlib import animation as anim
 from collections import Iterable
-from tifffile import imsave, imread
+from tifffile import imsave, imread, TiffFile
 from pandas import Timestamp
 from IPython.core.debugger import set_trace
 from os.path import isdir, abspath
@@ -113,7 +113,16 @@ def load_videos(vpath,
             "No data with pattern {}"
             " found in the specified folder {}".format(pattern, vpath))
     print("loading {} videos in folder {}".format(len(vlist), vpath))
-    varr_list = [load_avi_lazy(v) for v in vlist]
+
+    file_extension = os.path.splitext(vlist[0])[1]
+    if file_extension == '.avi':
+        movie_load_func = load_avi_lazy
+    elif file_extension == '.tif':
+        movie_load_func = load_tif_lazy
+    else:
+        raise ValueError('Extension not supported.')
+
+    varr_list = [movie_load_func(v) for v in vlist]
     varr = darr.concatenate(varr_list, axis=0)
     varr = xr.DataArray(
         varr, dims=['frame', 'height', 'width'],
@@ -124,23 +133,35 @@ def load_videos(vpath,
     if dtype:
         varr = varr.astype(dtype)
     if downsample:
-        for dim, binw in downsample.items():
-            binw = int(binw)
-            crd = varr.coords[dim]
-            bin_eg = np.arange(crd.values[0], crd.values[-1] + binw, binw)
-            if downsample_strategy == 'mean':
-                varr = (varr.groupby_bins(
-                    dim, bin_eg, labels=bin_eg[:-1], include_lowest=True)
-                        .mean(dim).rename({dim + '_bins': dim}))
-            elif downsample_strategy == 'subset':
-                varr = varr.sel(**{dim: bin_eg[:-1]})
-            else:
-                warnings.warn(
-                    "unrecognized downsampling strategy", RuntimeWarning)
+        bin_eg = {d: np.arange(0, varr.sizes[d], w)
+                  for d, w in downsample.items()}
+        if downsample_strategy == 'mean':
+            varr = (varr.coarsen(**downsample, boundary='trim')
+                    .mean().assign_coords(**bin_eg))
+        elif downsample_strategy == 'subset':
+            varr = varr.sel(**bin_eg)
+        else:
+            warnings.warn(
+                "unrecognized downsampling strategy", RuntimeWarning)
     varr = varr.rename(ssname)
     if post_process:
         varr = post_process(varr, vpath, ssname, vlist, varr_list)
     return varr
+
+def load_tif_lazy(fname):
+    with TiffFile(fname) as tif:
+        data = tif.asarray()
+
+    f = int(data.shape[0])
+    fmread = da.delayed(load_tif_perframe)
+    flist = [fmread(fname, i) for i in range(f)]
+    sample = flist[0].compute()
+    arr = [da.array.from_delayed(
+        fm, dtype=sample.dtype, shape=sample.shape) for fm in flist]
+    return da.array.stack(arr, axis=0)
+
+def load_tif_perframe(fname, fid):
+    return imread(fname, key=fid)
 
 
 def load_avi_lazy(fname):
@@ -156,6 +177,8 @@ def load_avi_lazy(fname):
 
 def load_avi_perframe(fname, fid):
     cap = cv2.VideoCapture(fname)
+    h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     cap.set(cv2.CAP_PROP_POS_FRAMES, fid)
     ret, fm = cap.read()
     if ret:
@@ -163,7 +186,23 @@ def load_avi_perframe(fname, fid):
             cv2.cvtColor(fm, cv2.COLOR_RGB2GRAY), axis=0)
     else:
         print("frame read failed for frame {}".format(fid))
-        return fm
+        return np.zeros((h, w))
+
+
+def load_avi_lazy_pims(fname):
+    vid = pims.open(fname)
+    f = len(vid)
+    def _read_fm(i):
+        fm = vid[i]
+        r, g, b = fm[:, :, 0], fm[:, :, 1], fm[:, :, 2]
+        return np.asarray(0.2125 * r + 0.7154 * g + 0.0721 * b)
+    _read_fm_dl = da.delayed(_read_fm)
+    flist = [_read_fm_dl(i) for i in range(f)]
+    sample = flist[0].compute()
+    arr = [da.array.from_delayed(
+        fm, dtype=sample.dtype, shape=sample.shape) for fm in flist]
+    return da.array.stack(arr, axis=0)
+
 
     
 def handle_crash(varr, vpath, ssname, vlist, varr_list, frame_dict):
@@ -649,11 +688,14 @@ def open_minian(dpath, fname='minian', backend='netcdf', chunks=None, post_proce
         raise NotImplementedError("backend {} not supported".format(backend))
 
 
-def open_minian_mf(dpath, index_dims, result_format='xarray', pattern=r'minian\.[0-9]+$', exclude_dirs=[], **kwargs):
+def open_minian_mf(dpath, index_dims, result_format='xarray', pattern=r'minian\.[0-9]+$', sub_dirs=[], exclude=True, **kwargs):
     minian_dict = dict()
     for nextdir, dirlist, filelist in os.walk(dpath, topdown=False):
+        nextdir = os.path.abspath(nextdir)
         cur_path = Path(nextdir)
-        if any([Path(epath) in cur_path.parents for epath in exclude_dirs]):
+        dir_tag = bool(((any([Path(epath) in cur_path.parents for epath in sub_dirs]))
+                        or nextdir in sub_dirs))
+        if exclude == dir_tag:
             continue
         flist = list(filter(lambda f: re.search(pattern, f), filelist + dirlist))
         if flist:
@@ -709,8 +751,14 @@ def delete_variable(fpath, varlist, del_org=False):
     return "deleted {} in file {}".format(str(varlist), fpath)
 
 
-def xrconcat_recursive(var_dict, dims):
+def xrconcat_recursive(var, dims):
     if len(dims) > 1:
+        if type(var) is dict:
+            var_dict = var
+        elif type(var) is list:
+            var_dict = {tuple([np.asscalar(v[d]) for d in dims]): v for v in var}
+        else:
+            raise NotImplementedError("type {} not supported".format(type(var)))
         try:
             var_dict = {k: v.to_dataset() for k, v in var_dict.items()}
         except AttributeError:
@@ -718,13 +766,15 @@ def xrconcat_recursive(var_dict, dims):
         var_ps = pd.Series(var_dict)
         var_ps.index.set_names(dims, inplace=True)
         xr_ls = []
-        for idx, var in var_ps.groupby(level=dims[0]):
-            var.index = var.index.droplevel(dims[0])
-            xarr = xrconcat_recursive(var.to_dict(), dims[1:])
+        for idx, v in var_ps.groupby(level=dims[0]):
+            v.index = v.index.droplevel(dims[0])
+            xarr = xrconcat_recursive(v.to_dict(), dims[1:])
             xr_ls.append(xarr)
         return xr.concat(xr_ls, dim=dims[0])
     else:
-        return xr.concat(var_dict.values(), dim=dims[0])
+        if type(var) is dict:
+            var = var.values()
+        return xr.concat(var, dim=dims[0])
 
 
 def update_meta(dpath, pattern=r'^minian\.nc$', meta_dict=None, backend='netcdf'):
@@ -751,6 +801,36 @@ def update_meta(dpath, pattern=r'^minian\.nc$', meta_dict=None, backend='netcdf'
                 new_ds.to_zarr(f_path, mode='w')
             print("updated: {}".format(f_path))
 
+
+def get_chk(arr):
+    return {d: c for d, c in zip(arr.dims, arr.chunks)}
+
+
+def rechunk_like(x, y):
+    try:
+        dst_chk = get_chk(y)
+        comm_dim = set(x.dims).intersection(set(dst_chk.keys()))
+        dst_chk = {d: max(dst_chk[d]) for d in comm_dim}
+        return x.chunk(dst_chk)
+    except TypeError:
+        return x.compute()
+
+
+def get_optimal_chk(arr, dim_grp=None):
+    dims = arr.dims
+    if not dim_grp:
+        dim_grp = [(d,) for d in dims]
+    opt_chk = dict()
+    for dg in dim_grp:
+        d_rest = set(dims) - set(dg)
+        dg_dict = {d: 'auto' for d in dg}
+        dr_dict = {d: -1 for d in d_rest}
+        dg_dict.update(dr_dict)
+        arr_chk = arr.chunk(dg_dict)
+        re_dict = {d: c for d, c in zip(dims, arr_chk.chunks)}
+        re_dict = {d: max(re_dict[d]) for d in dg}
+        opt_chk.update(re_dict)
+    return opt_chk
 
 # def resave_varr_again(dpath, pattern=r'^varr_mc_int.nc$'):
 #     for dirpath, dirnames, fnames in os.walk(dpath):
