@@ -316,3 +316,4 @@ dependencies:
     # - ujson==1.35
     # - websocket-client==0.54.0
     # - websockets==7.0
+    - ffmpeg-python
