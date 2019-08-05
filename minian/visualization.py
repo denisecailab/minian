@@ -9,8 +9,12 @@ import colorsys
 import param
 import dask.array as da
 import panel as pn
+import os
+import dask
+import ffmpeg
 from .utilities import scale_varr
 from .motion_correction import shift_fft
+from uuid import uuid4
 from collections import OrderedDict
 from holoviews.streams import Stream, Pipe, RangeXY, DoubleTap, Tap, Selection1D, BoxEdit
 from holoviews.operation import contours, threshold
@@ -1160,48 +1164,76 @@ class AlignViewer():
         self.shiftds['corrs'].loc[dict(
             animal=cur_anm, session=cur_ss)] = cur_cor
 
-        
-def generate_videos(minian, vpath, chk=None, pre_compute=False):
+
+def write_vid_blk(arr, vpath):
+    uid = uuid4()
+    vname = "{}.mp4".format(uid)
+    fpath = os.path.join(vpath, vname)
+    vwrite(fpath, arr)
+    return fpath
+
+
+def write_video(arr, vname=None, vpath='.'):
+    if not vname:
+        vname = "{}.mp4".format(uuid4())
+    fname = os.path.join(vpath, vname)
+    paths = [dask.delayed(write_vid_blk)(np.asscalar(a), vpath)
+             for a in arr.data.to_delayed()]
+    paths = dask.compute(paths)[0]
+    streams = [ffmpeg.input(p) for p in paths]
+    (ffmpeg.concat(*streams)
+     .output(fname)
+     .run())
+    for vp in paths:
+        os.remove(vp)
+    return fname
+
+
+def generate_videos(
+        minian, vpath='.', vname='minian.mp4', pre_compute=True):
     print("generating traces")
-    if not chk:
-        chk = dict(height='auto', width='auto', frame='auto')
-    A = minian['A'].chunk(dict(height=chk['height'], width=chk['width'], unit_id=-1))
-    C = minian['C'].chunk(dict(frame=chk['frame'], unit_id=-1))
-    Y = minian['Y'].chunk(dict(frame=chk['frame'], height=chk['height'], width=chk['width']))
+    A = (minian['A'].compute()
+         .transpose('unit_id', 'height', 'width'))
+    C = minian['C'].chunk(dict(unit_id=-1)).transpose('frame', 'unit_id')
+    Y = (minian['Y'].chunk(dict(height=-1, width=-1))
+         .transpose('frame', 'height', 'width'))
+    org = (minian['org'].chunk(dict(height=-1, width=-1))
+           .transpose('frame', 'height', 'width'))
     try:
         B = minian['B'].chunk(dict(unit_id=-1))
     except KeyError:
         print("cannot find background term")
         B = 0
-    org = minian['org'].chunk(dict(frame=chk['frame'], height=chk['height'], width=chk['width']))
     C = C + B
     AC = xr.apply_ufunc(
-        da.dot, A, C,
-        input_core_dims=[['height', 'width', 'unit_id'], ['unit_id', 'frame']],
-        output_core_dims=[['height', 'width', 'frame']],
+        da.tensordot, C, A,
+        input_core_dims=[['frame', 'unit_id'], ['unit_id', 'height', 'width']],
+        output_core_dims=[['frame', 'height', 'width']],
         dask='allowed',
-        output_dtypes=[Y.dtype])
-    res = scale_varr(org, pre_compute=pre_compute) - scale_varr(AC, pre_compute=pre_compute)
-    org_norm = scale_varr(org, (0, 255), pre_compute=pre_compute).astype(np.uint8)
-    Y_norm = scale_varr(Y, (0, 255), pre_compute=pre_compute).astype(np.uint8)
-    AC_norm = scale_varr(AC, (0, 255), pre_compute=pre_compute).astype(np.uint8)
-    res_norm = scale_varr(res, (0, 255), pre_compute=pre_compute).astype(np.uint8)
-#     with ProgressBar():
-#         Y_norm = Y_norm.compute()
-#         AC_norm = AC_norm.compute()
-#         res_norm = res_norm.compute()
-    vid = xr.concat([
-        xr.concat([res_norm, AC_norm], 'width'),
-        xr.concat([org_norm, Y_norm], 'width')],
-        dim='height')
+        kwargs=dict(axes=(1, 0)),
+        output_dtypes=[A.dtype])
+    org_norm = scale_varr(org, (0, 255), pre_compute=pre_compute)
+    Y_norm = Y * 255
+    AC_norm = AC * 255
+    res_norm = org_norm - AC_norm
     print("writing videos")
-    with ProgressBar():
-        vwrite(vpath, np.flip(vid.transpose('frame', 'height', 'width').values, axis=1))
-#     vwrt = FFmpegWriter(vpath)
-#     for fid, fm in vid.rolling(frame=1):
-#         print("writing frame {}".format(fid.values), end='\r')
-#         vwrite(vpath, fm.values)
-#     vwrt.close()
+    path_org = write_video(org_norm, vpath=vpath)
+    path_Y = write_video(Y_norm, vpath=vpath)
+    path_AC = write_video(AC_norm, vpath=vpath)
+    path_res = write_video(res_norm, vpath=vpath)
+    print("concatenating results")
+    str_org = ffmpeg.input(path_org)
+    str_Y = ffmpeg.input(path_Y)
+    str_AC = ffmpeg.input(path_AC)
+    str_res = ffmpeg.input(path_res)
+    vtop = ffmpeg.filter([str_org, str_Y], 'hstack')
+    vbot = ffmpeg.filter([str_res, str_AC], 'hstack')
+    vid = ffmpeg.filter([vtop, vbot], 'vstack')
+    fname = os.path.join(vpath, vname)
+    vid.output(fname).run()
+    for p in [path_res, path_AC, path_Y, path_org]:
+        os.remove(p)
+    return fname
 
 
 def datashade_ndcurve(ovly, kdim=None, spread=False):
