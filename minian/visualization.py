@@ -1288,14 +1288,18 @@ def centroid(A, verbose=False):
             im = np.nan_to_num(im)
         cent = np.array(center_of_mass(im))
         return cent / im.shape
+    gu_rel_cent = da.gufunc(
+        rel_cent,
+        signature='(h,w)->(d)',
+        output_dtypes=float,
+        output_sizes=dict(d=2),
+        vectorize=True
+    )
     cents = (xr.apply_ufunc(
-        rel_cent, A.chunk(dict(height=-1, width=-1)),
+        gu_rel_cent, A.chunk(dict(height=-1, width=-1)),
         input_core_dims=[['height', 'width']],
         output_core_dims=[['dim']],
-        vectorize=True,
-        dask='parallelized',
-        output_dtypes=[np.float],
-        output_sizes=dict(dim=2))
+        dask='allowed')
              .assign_coords(dim=['height', 'width']))
     if verbose:
         print("computing centroids")
