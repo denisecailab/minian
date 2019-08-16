@@ -1174,7 +1174,14 @@ def write_vid_blk(arr, vpath):
     uid = uuid4()
     vname = "{}.mp4".format(uid)
     fpath = os.path.join(vpath, vname)
-    vwrite(fpath, arr)
+    vwrite(
+        fpath,
+        arr,
+        outputdict={
+            '-c:v': 'libx264',
+            '-crf': '17'
+        }
+    )
     return fpath
 
 
@@ -1195,15 +1202,15 @@ def write_video(arr, vname=None, vpath='.'):
 
 
 def generate_videos(
-        minian, vpath='.', vname='minian.mp4', pre_compute=True):
+        minian, varr, vpath='.', vname='minian.mp4',
+        scale='auto'):
     print("generating traces")
     A = (minian['A'].compute()
          .transpose('unit_id', 'height', 'width'))
     C = minian['C'].chunk(dict(unit_id=-1)).transpose('frame', 'unit_id')
     Y = (minian['Y'].chunk(dict(height=-1, width=-1))
          .transpose('frame', 'height', 'width'))
-    org = (minian['org'].chunk(dict(height=-1, width=-1))
-           .transpose('frame', 'height', 'width'))
+    org = varr
     try:
         B = minian['B'].chunk(dict(unit_id=-1))
     except KeyError:
@@ -1217,10 +1224,15 @@ def generate_videos(
         dask='allowed',
         kwargs=dict(axes=(1, 0)),
         output_dtypes=[A.dtype])
-    org_norm = scale_varr(org, (0, 255), pre_compute=pre_compute)
-    Y_norm = Y * 255
-    AC_norm = AC * 255
-    res_norm = org_norm - AC_norm
+    org_norm = org
+    if scale == 'auto':
+        Y_max = Y.max().compute()
+        Y_norm = Y * (255/Y_max)
+        AC_norm = AC * (255/Y_max)
+    else:
+        Y_norm = Y * scale
+        AC_norm = AC * scale
+    res_norm = Y_norm - AC_norm
     print("writing videos")
     path_org = write_video(org_norm, vpath=vpath)
     path_Y = write_video(Y_norm, vpath=vpath)
