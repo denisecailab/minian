@@ -54,8 +54,8 @@ from scipy.spatial import cKDTree
 
 
 class VArrayViewer():
-    def __init__(self, varr, framerate=30, rerange=None, summary=['mean', 'diff'],
-                 meta_dims=None, datashading=True, layout=False, histogram=False):
+    def __init__(self, varr, framerate=30, rerange=None, summary=['mean'],
+                 meta_dims=None, datashading=True, layout=False):
         if isinstance(varr, list):
             for iv, v in enumerate(varr):
                 varr[iv] = v.assign_coords(data_var=v.name)
@@ -78,7 +78,6 @@ class VArrayViewer():
             self.cur_metas = dict()
         self._datashade = datashading
         self._layout = layout
-        self._histogram = histogram
         self.framerate = framerate
         self._f = self.ds.coords['frame'].values
         self._h = self.ds.sizes['height']
@@ -126,13 +125,13 @@ class VArrayViewer():
                 return hv.Image(
                     ds.sel(frame=f).compute(), kdims=['width', 'height'])
             try:
-                curds = self.ds_sub.sel(**meta)
+                curds = (self.ds_sub.sel(**meta)
+                         .rename("_".join(meta.values())))
             except ValueError:
                 curds = self.ds_sub
             fim = fct.partial(img, ds=curds)
             im = (regrid(hv.DynamicMap(fim, streams=[self.strm_f]))
-                  .opts(plot=dict(width=self._w, height=self._h),
-                        style=dict(cmap='Viridis')))
+                  .opts(frame_width=500, aspect=self._w/self._h, cmap='Viridis'))
             if self.rerange:
                 im = im.redim.range(**{vname: self.rerange})
             self.xyrange = RangeXY(source=im).rename(x_range='w', y_range='h')
@@ -143,21 +142,20 @@ class VArrayViewer():
                 im_ovly = im * hv_box
             else:
                 im_ovly = im
-            if self._histogram:
-                def hist(f, w, h, ds):
-                    if w and h:
-                        cur_im = (hv.Image(
-                            ds.sel(frame=f).compute(), kdims=['width', 'height'])
-                                  .select(height=h, width=w))
-                    else:
-                        cur_im = hv.Image(
-                            ds.sel(frame=f).compute(), kdims=['width', 'height'])
-                    return hv.operation.histogram(cur_im, frequency_label='freq', num_bins=50)
-                fhist = fct.partial(hist, ds=curds)
-                his = (hv.DynamicMap(fhist, streams=[self.strm_f, self.xyrange])
-                       .opts(plot=dict(width=int(np.around(self._w * 0.35)), height=self._h),
-                             style=dict(cmap='Viridis')))
-                im_ovly = (im_ovly << his).map(lambda p: p.opts(style=dict(cmap='Viridis')))
+            def hist(f, w, h, ds):
+                if w and h:
+                    cur_im = (hv.Image(
+                        ds.sel(frame=f).compute(), kdims=['width', 'height'])
+                              .select(height=h, width=w))
+                else:
+                    cur_im = hv.Image(
+                        ds.sel(frame=f).compute(), kdims=['width', 'height'])
+                return (hv.operation.histogram(cur_im, num_bins=50)
+                        .opts(xlabel='fluorescence', ylabel='freq'))
+            fhist = fct.partial(hist, ds=curds)
+            his = (hv.DynamicMap(fhist, streams=[self.strm_f, self.xyrange])
+                   .opts(frame_height=int(500*self._h/self._w), width=150, cmap='Viridis'))
+            im_ovly = (im_ovly << his).map(lambda p: p.opts(style=dict(cmap='Viridis')))
             return im_ovly
         if self._layout and self.meta_dicts:
             im_dict = OrderedDict()
@@ -168,19 +166,20 @@ class VArrayViewer():
         else:
             ims = get_im_ovly(self.cur_metas)
         if self.summary is not None:
-            hvsum = datashade_ndcurve(
-                hv.Dataset(self.sum_sub)
-                .to(hv.Curve, kdims=['frame']).overlay('sum_var'),
-                kdim='sum_var')
+            hvsum = (hv.Dataset(self.sum_sub)
+                     .to(hv.Curve, kdims=['frame'])
+                     .overlay('sum_var'))
+            if self._datashade:
+                hvsum = datashade_ndcurve(hvsum, kdim='sum_var')
             try:
                 hvsum = hvsum.layout(list(self.meta_dicts.keys()))
             except:
                 pass
             vl = (hv.DynamicMap(lambda f: hv.VLine(f), streams=[self.strm_f])
                   .opts(style=dict(color='red')))
-            sum_w = int(np.around(1.35 * self._w)) if self._histogram else self._w
             summ = ((hvsum * vl).map(
-                lambda p: p.opts(plot=dict(width=sum_w, height=int(np.around(self._h * 0.6))))))
+                lambda p: p.opts(frame_width=500, aspect=3),
+                [hv.RGB, hv.Curve]))
         else:
             summ = hv.Div('')
         hvobj = (ims + summ).cols(1)
@@ -192,12 +191,16 @@ class VArrayViewer():
     def _widgets(self):
         w_play = pnwgt.Player(
             length=len(self._f), interval=10,
-            value=0, width=500)
+            value=0, width=650, height=90)
         def play(f):
             if not f.old == f.new:
                 self.strm_f.event(f=int(self._f[f.new]))
         w_play.param.watch(play, 'value')
-        w_box = pnwgt.Button(name='Update Mask', button_type='primary')
+        w_box = pnwgt.Button(
+            name='Update Mask',
+            button_type='primary',
+            width=100,
+            height=30)
         w_box.param.watch(self._update_box, 'clicks')
         if not self._layout:
             wgt_meta = {d: pnwgt.Select(
@@ -211,9 +214,11 @@ class VArrayViewer():
             for d, wgt in wgt_meta.items():
                 cur_update = make_update_func(d)
                 wgt.param.watch(cur_update, 'value')
-            wgts = pn.layout.WidgetBox(w_box, w_play, *list(wgt_meta.values()))
+            wgts = pn.layout.WidgetBox(
+                w_box, w_play, *list(wgt_meta.values()))
         else:
-            wgts = pn.layout.WidgetBox(w_box, w_play)
+            wgts = pn.layout.WidgetBox(
+                w_box, w_play)
         return wgts
 
     def _update_subs(self):
@@ -1247,9 +1252,8 @@ def datashade_ndcurve(ovly, kdim=None, spread=False):
         ovly,
         aggregator=count_cat(kdim),
         color_key=dict(color_key),
-        min_alpha=128,
-        normalization='eq_hist',
-        precompute=True)
+        min_alpha=200,
+        normalization='linear')
     if spread:
         ds_ovly = dynspread(ds_ovly)
     return ds_ovly * color_pts
@@ -1317,12 +1321,13 @@ def centroid(A, verbose=False):
 
 def visualize_preprocess(fm, fn=None, include_org=True, **kwargs):
     fh, fw = fm.sizes['height'], fm.sizes['width']
+    asp = fw / fh
     opts_im = {
-        'plot': {'frame_height': fh, 'frame_width': fw,
+        'plot': {'frame_width': 500, 'aspect': asp,
                  'title': 'Image {label} {group} {dimensions}'},
         'style': {'cmap': 'viridis'}}
     opts_cnt = {
-        'plot': {'frame_height': fh, 'frame_width': fw,
+        'plot': {'frame_width': 500, 'aspect': asp,
                  'title': 'Contours {label} {group} {dimensions}'},
         'style': {'cmap': 'viridis'}}
     def _vis(f):
@@ -1362,12 +1367,16 @@ def visualize_preprocess(fm, fn=None, include_org=True, **kwargs):
         return im + cnt
 
 
-def visualize_seeds(max_proj, seeds, mask=None, datashade=True):
+def visualize_seeds(max_proj, seeds, mask=None, datashade=False):
     h, w = max_proj.sizes['height'], max_proj.sizes['width']
+    asp = w/h
     pt_cmap = {True: 'white', False: 'red'}
-    opts_im = dict(plot=dict(height=h, width=w), style=dict(cmap='Viridis'))
+    opts_im = dict(
+        plot=dict(frame_width=600, aspect=asp),
+        style=dict(cmap='Viridis'))
     opts_pts = dict(
-        plot=dict(height=h, width=w, size_index='seeds', color_index=mask, tools=['hover']),
+        plot=dict(frame_width=600, aspect=asp,
+                  size_index='seeds', color_index=mask, tools=['hover']),
         style=dict(fill_alpha=0.8, line_alpha=0, cmap=pt_cmap))
     if mask:
         vdims = ['index', 'seeds', mask]
@@ -1391,10 +1400,12 @@ def visualize_gmm_fit(values, gmm, bins):
         gss_dict[igss] = hv.Curve((hist[1], gss))
     return (hv.Histogram(((hist[0] - hist[0].min()) / np.ptp(hist[0]), hist[1]))
             .opts(style=dict(alpha=0.6, fill_color='gray'))
-            * hv.NdOverlay(gss_dict)).opts(plot=dict(height=400, width=500))
+            * hv.NdOverlay(gss_dict)).opts(plot=dict(height=350, width=500))
 
 
-def visualize_spatial_update(A_dict, C_dict, kdims=None, norm=True):
+def visualize_spatial_update(
+        A_dict, C_dict, kdims=None,
+        norm=True, datashading=True):
     if not kdims:
         A_dict = dict(dummy=A_dict)
         C_dict = dict(dummy=C_dict)
@@ -1426,20 +1437,22 @@ def visualize_spatial_update(A_dict, C_dict, kdims=None, norm=True):
         hv_Ab_dict[key] = hv.Image((A > 0).sum('unit_id').rename('A_bin'),
                                    kdims=['width', 'height'])
         hv_C_dict[key] = hv.Dataset(C.rename('C')).to(hv.Curve, kdims='frame')
-    cropts = {'plot': {
-        'frame_height': int(np.around(0.13 * w)),
-        'frame_width': int(np.around(1.3 * w))}}
     hv_pts = hv.HoloMap(hv_pts_dict, kdims=kdims)
-    hv_A = (regrid(hv.HoloMap(hv_A_dict, kdims=kdims))
-            .opts(plot=dict(frame_height=h, frame_width=w, colorbar=True),
-                  style=dict(cmap='Viridis')))
-    hv_Ab = (regrid(hv.HoloMap(hv_Ab_dict, kdims=kdims))
-            .opts(plot=dict(frame_height=h, frame_width=w, colorbar=True),
-                  style=dict(cmap='Viridis')))
-    hv_C = (datashade(hv.HoloMap(hv_C_dict, kdims=kdims).collate()
-                      .grid('unit_id').add_dimension('time', 0, 0),
-                      min_alpha=128)
-            .map(lambda cr: cr.opts(**cropts), hv.RGB))
+    hv_A = hv.HoloMap(hv_A_dict, kdims=kdims)
+    hv_Ab = hv.HoloMap(hv_Ab_dict, kdims=kdims)
+    hv_C = (hv.HoloMap(hv_C_dict, kdims=kdims).collate()
+            .grid('unit_id').add_dimension('time', 0, 0))
+    if datashading:
+        hv_A = regrid(hv_A)
+        hv_Ab = regrid(hv_Ab)
+        hv_C = datashade(hv_C)
+    hv_A = hv_A.opts(frame_width=400, aspect=w/h,
+                     colorbar=True, cmap='viridis')
+    hv_Ab = hv_Ab.opts(frame_width=400, aspect=w/h,
+                       colorbar=True, cmap='viridis')
+    hv_C = hv_C.map(
+        lambda cr: cr.opts(frame_width=500, frame_height=50),
+        hv.RGB if datashading else hv.Curve)
     return (hv.NdLayout({
         'pseudo-color': (hv_pts * hv_A),
         'binary': (hv_pts * hv_Ab)}, kdims='Spatial Matrix').cols(1)
@@ -1496,19 +1509,20 @@ def visualize_temporal_update(YA_dict, C_dict, S_dict, g_dict, sig_dict, A_dict,
     hv_pul = {'Simulated Calcium': hvobjs[4], 'Simulated Spike': hvobjs[5]}
     hv_unit = hv.HoloMap(hv_unit, kdims='traces').collate().overlay('traces')
     hv_pul = hv.HoloMap(hv_pul, kdims='traces').collate().overlay('traces')
+    hv_A = hvobjs[6]
     if datashading:
         hv_unit = datashade_ndcurve(hv_unit, 'traces')
-        hv_pul = datashade_ndcurve(hv_pul, 'traces', spread=True)
-        hv_A = regrid(hvobjs[6])
-    else:
-        hv_unit = hv.DynamicMap(hv_unit)
-        hv_pul = hv.DynamicMap(hv_pul)
-        hv_A = hv.DynamicMap(hvobjs[6])
-    # hv_unit = hv_unit.opts(plot=dict(height=h, width=2*w))
-    hv_unit = hv_unit.map(lambda p: p.opts(plot=dict(frame_height=h, frame_width=2*w)))
-    hv_pul = (hv_pul.opts(plot=dict(frame_height=h, frame_width=w))
+        hv_A = regrid(hv_A)
+        hv_pul = datashade_ndcurve(hv_pul, 'traces')
+    # else:
+    #     hv_unit = hv.DynamicMap(hv_unit)
+    #     hv_A = hv.DynamicMap(hv_A)
+    #     hv_pul = hv.DynamicMap(hv_pul)
+    hv_unit = hv_unit.map(
+        lambda p: p.opts(plot=dict(frame_height=400, frame_width=1000)))
+    hv_pul = (hv_pul.opts(plot=dict(frame_width=500, aspect=w/h))
               .redim(t=hv.Dimension('t', soft_range=pul_range)))
-    hv_A = hv_A.opts(plot=dict(frame_height=h, frame_width=w), style=dict(cmap='Viridis'))
+    hv_A = hv_A.opts(plot=dict(frame_width=500, aspect=w/h), style=dict(cmap='Viridis'))
     return (hv_unit.relabel("Current Unit: Temporal Traces")
             + hv.NdLayout({
                 'Simulated Pulse Response': hv_pul,
