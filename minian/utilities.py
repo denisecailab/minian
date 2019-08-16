@@ -143,7 +143,7 @@ def load_videos(vpath,
         else:
             warnings.warn(
                 "unrecognized downsampling strategy", RuntimeWarning)
-    varr = varr.rename(ssname)
+    varr = varr.rename('fluorescence')
     if post_process:
         varr = post_process(varr, vpath, ssname, vlist, varr_list)
     return varr
