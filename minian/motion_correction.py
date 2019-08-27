@@ -14,6 +14,7 @@ from scipy.stats import zscore
 from dask import delayed, compute
 from dask.diagnostics import ProgressBar
 from IPython.core.debugger import set_trace
+from .utilities import get_optimal_chk
 
 
 def detect_and_correct_old(mov):
@@ -354,22 +355,12 @@ def apply_translation(img, shift):
     return np.roll(img, shift, axis=(1, 0))
 
 
-def estimate_shift_fft(varr, dim='frame', on='max', max_shift=30):
+def estimate_shift_fft(varr, dim='frame', on='max', max_shift=15):
     varr = varr.chunk(dict(height=-1, width=-1))
     dims = list(varr.dims)
     dims.remove(dim)
     sizes = [varr.sizes[d] for d in ['height', 'width']]
     pad_s = (np.array(sizes) * 2).astype(int)
-    results = []
-    print("computing fft on array")
-    varr_fft = xr.apply_ufunc(
-        darr.fft.fft2,
-        varr,
-        input_core_dims=[[dim, 'height', 'width']],
-        output_core_dims=[[dim, 'height_pad', 'width_pad']],
-        dask='allowed',
-        kwargs=dict(s=pad_s),
-        output_dtypes=[np.complex64])
 
     def truncate(fm, w):
         return np.pad(fm[w:-w, w:-w], w)
@@ -377,45 +368,30 @@ def estimate_shift_fft(varr, dim='frame', on='max', max_shift=30):
     if on == 'mean':
         print("computing mean frame")
         onfm = varr.mean(dim).compute()
-        onfm = xr.apply_ufunc(
-            truncate,
-            onfm,
-            input_core_dims=[['height', 'width']],
-            output_core_dims=[['height', 'width']],
-            kwargs=dict(w=max_shift)).chunk()
-        src_fft = xr.apply_ufunc(
-            darr.fft.fft2,
-            onfm,
-            input_core_dims=[['height', 'width']],
-            output_core_dims=[['height_pad', 'width_pad']],
-            dask='allowed',
-            kwargs=dict(s=pad_s),
-            output_dtypes=[np.complex64])
     elif on == 'max':
         print("computing max frame")
         onfm = varr.max(dim).compute()
-        onfm = xr.apply_ufunc(
-            truncate,
-            onfm,
-            input_core_dims=[['height', 'width']],
-            output_core_dims=[['height', 'width']],
-            kwargs=dict(w=max_shift)).chunk()
-        src_fft = xr.apply_ufunc(
-            darr.fft.fft2,
-            onfm,
-            input_core_dims=[['height', 'width']],
-            output_core_dims=[['height_pad', 'width_pad']],
-            dask='allowed',
-            kwargs=dict(s=pad_s),
-            output_dtypes=[np.complex64])
     else:
         raise ValueError("template {} not understood".format(on))
+    onfm = xr.apply_ufunc(
+        truncate,
+        onfm,
+        input_core_dims=[['height', 'width']],
+        output_core_dims=[['height', 'width']],
+        kwargs=dict(w=max_shift)).chunk()
+    src_fft = xr.apply_ufunc(
+        darr.fft.fft2,
+        onfm,
+        input_core_dims=[['height', 'width']],
+        output_core_dims=[['height_pad', 'width_pad']],
+        dask='allowed',
+        kwargs=dict(s=pad_s)).persist()
     print("estimating shifts")
     res = xr.apply_ufunc(
         shift_fft,
         src_fft,
-        varr_fft,
-        input_core_dims=[['height_pad', 'width_pad'], ['height_pad', 'width_pad']],
+        varr,
+        input_core_dims=[['height_pad', 'width_pad'], ['height', 'width']],
         output_core_dims=[['variable']],
         vectorize=True,
         dask='parallelized',
