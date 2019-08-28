@@ -211,6 +211,8 @@ def update_spatial(Y,
             Y_flt,
             input_core_dims=[['spatial', 'unit_id'], ['spatial']],
             output_core_dims=[['unit_id']])
+        C_mean = C.mean('frame').compute()
+        scale = scale / C_mean
         A_new = A_new * scale
         try:
             A_new = A_new.persist()
