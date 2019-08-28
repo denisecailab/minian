@@ -27,41 +27,36 @@ from timeit import timeit
 import warnings
 from .utilities import get_chk, rechunk_like
 
-
-def get_noise_fft(varr, noise_range=(0.25, 0.5), noise_method='logmexp', compute=True):
-    _T = len(varr.coords['frame'])
-    ns = _T // 2 + 1
-    if _T % 2 == 0:
-        freq_crd = np.linspace(0, 0.5, ns)
-    else:
-        freq_crd = np.linspace(0, 0.5 * (_T - 1) / _T, ns)
-    print("computing fft of input")
-    varr_fft = xr.apply_ufunc(
-        fftw.rfft,
+def get_noise_fft(varr, noise_range=(0.25, 0.5), noise_method='logmexp'):
+    sn = xr.apply_ufunc(
+        _noise_fft,
         varr.chunk(dict(frame=-1)),
         input_core_dims=[['frame']],
-        output_core_dims=[['freq']],
-        dask='allowed',
-        output_sizes=dict(freq=ns),
-        output_dtypes=[np.complex_]).persist()
-    print("computing power of noise")
-    varr_fft = varr_fft.assign_coords(freq=freq_crd)
-    varr_psd = 1 / _T * np.abs(varr_fft)**2
-    varr_psd = varr_psd.compute()
-    varr_band = varr_psd.sel(freq=slice(*noise_range))
-    print("estimating noise using method {}".format(noise_method))
-    if noise_method == 'mean':
-        sn = np.sqrt(varr_band.mean('freq'))
-    elif noise_method == 'median':
-        sn = np.sqrt(varr_band.median('freq'))
-    elif noise_method == 'logmexp':
-        eps = np.finfo(varr_band.dtype).eps
-        sn = np.sqrt(np.exp(np.log(varr_band + eps).mean('freq')))
-    if compute:
-        sn = sn.compute()
+        output_core_dims=[[]],
+        dask='parallelized',
+        vectorize=True,
+        kwargs=dict(
+            noise_range=noise_range,
+            noise_method=noise_method),
+        output_dtypes=[np.float]
+    )
     return sn
 
-def psd_fft(varr): 
+def _noise_fft(px, noise_range=(0.25, 0.5), noise_method='logmexp'):
+    _T = len(px)
+    nr = np.around(np.array(noise_range) * 2 * _T).astype(int)
+    px_fft = np.fft.rfft(px)
+    px_psd = 1 / _T * np.abs(px_fft)**2
+    px_band = px_psd[nr[0]:nr[1]]
+    if noise_method == 'mean':
+        return np.sqrt(px_band.mean())
+    elif noise_method == 'median':
+        return np.sqrt(px_band.median())
+    elif noise_method == 'logmexp':
+        eps = np.finfo(px_band.dtype).eps
+        return np.sqrt(np.exp(np.log(px_band + eps).mean()))
+
+def psd_fft(varr):
     _T = len(varr.coords['frame'])
     ns = _T // 2 + 1
     if _T % 2 == 0:
@@ -398,7 +393,7 @@ def update_temporal(Y,
         YrA = compute_trace(Y, A, b, C, f).persist()
     YrA = YrA.chunk(dict(frame=-1, unit_id=1))
     YrA = YrA.assign_coords(unit_labels=unit_labels)
-    sn_temp = get_noise_fft(YrA, noise_range=(noise_freq, 1))
+    sn_temp = get_noise_fft(YrA, noise_range=(noise_freq, 1)).persist()
     sn_temp = sn_temp.assign_coords(unit_labels=unit_labels)
     if use_spatial:
         print("flattening spatial dimensions")
@@ -419,8 +414,9 @@ def update_temporal(Y,
             output_dtypes=[YrA.dtype])
         if compute:
             YrA_smth = YrA_smth.persist()
-            sn_temp_smth = get_noise_welch(
-                YrA_smth, noise_range=(noise_freq, 1))
+            sn_temp_smth = get_noise_fft(
+                YrA_smth, noise_range=(noise_freq, 1)).persist()
+            sn_temp_smth = sn_temp_smth.assign_coords(unit_labels=unit_labels)
     else:
         YrA_smth = YrA
         sn_temp_smth = sn_temp
