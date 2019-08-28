@@ -221,13 +221,13 @@ def update_spatial(Y,
     if update_background:
         print("updateing background")
         b_new = A_new.sel(unit_id=-1)
-#         b_new = b_new / da.array.linalg.norm(b_new.data)
-#         f_new = xr.apply_ufunc(
-#             da.array.tensordot, Y, b_new,
-#             input_core_dims=[['frame', 'height', 'width'], ['height', 'width']],
-#             output_core_dims=[['frame']],
-#             kwargs=dict(axes=[(1, 2), (0, 1)]),
-#             dask='allowed').persist()
+        b_new = b_new / da.array.linalg.norm(b_new.data)
+        f_new = xr.apply_ufunc(
+            da.array.tensordot, Y, b_new,
+            input_core_dims=[['frame', 'height', 'width'], ['height', 'width']],
+            output_core_dims=[['frame']],
+            kwargs=dict(axes=[(1, 2), (0, 1)]),
+            dask='allowed').persist()
         A_new = A_new.drop(-1, 'unit_id')
         C_new = C.drop(-1, 'unit_id')
     else:
