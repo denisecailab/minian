@@ -5,6 +5,8 @@ import dask as da
 import numba as nb
 import dask.array.fft as dafft
 import dask.array.linalg as dalin
+import dask.array as darr
+import functools as fct
 # import dask_ml.joblib
 from dask import delayed, compute
 from dask.diagnostics import Profiler
@@ -178,21 +180,23 @@ def update_spatial(Y,
         sub = (sub > 0).astype(bool)
     else:
         sub = xr.apply_ufunc(np.ones_like, A.compute())
-    if compute:
-        sub = sub.persist()
+    sub = sub.compute().transpose(*A.dims).chunk(A.chunks)
     print("fitting spatial matrix")
+    gu_update = darr.gufunc(
+        fct.partial(
+            update_spatial_perpx,
+            C=C.transpose('frame', 'unit_id').values),
+        signature="(f),(),(u)->(u)",
+        output_dtypes=A.dtype,
+        vectorize=True)
     A_new = xr.apply_ufunc(
-        update_spatial_perpx,
+        gu_update,
         Y.chunk(dict(frame=-1)),
-        C.chunk(dict(frame=-1, unit_id=-1)),
         alpha,
         sub.chunk(dict(unit_id=-1)),
-        input_core_dims=[['frame'], ['frame', 'unit_id'], [], ['unit_id']],
+        input_core_dims=[['frame'], [], ['unit_id']],
         output_core_dims=[['unit_id']],
-        vectorize=True,
-        dask='parallelized',
-        output_dtypes=[Y.dtype],
-    )
+        dask='allowed')
     A_new = A_new.persist()
     if zero_thres == 'eps':
         zero_thres = np.finfo(A_new.dtype).eps
@@ -242,7 +246,7 @@ def update_spatial(Y,
     return A_new, b_new, C_new, f
 
 
-def update_spatial_perpx(y, C, alpha, sub):
+def update_spatial_perpx(y, alpha, sub, C):
     res = np.zeros_like(sub, dtype=y.dtype)
     if np.sum(sub) > 0:
         C = C[:, sub]
