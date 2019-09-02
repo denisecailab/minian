@@ -359,12 +359,11 @@ def update_temporal(Y,
                     use_smooth=True,
                     compute=True,
                     post_scal=True,
-                    scs_fallback=False,
-                    cvx_sched='processes'):
+                    scs_fallback=False):
     nunits = len(A.coords['unit_id'])
     print("grouping overlaping units")
-    A_pos = (A > 0).astype(np.float32)
-    A_neg = (A == 0).astype(np.float32)
+    A_pos = (A > 0).astype(int)
+    A_neg = (A == 0).astype(int)
     A_inter = xr.apply_ufunc(
         da.array.tensordot,
         A_pos,
@@ -476,23 +475,33 @@ def update_temporal(Y,
             output_sizes=dict(trace=5),
             output_dtypes=[YrA.dtype])
     else:
-        result_iso = xr.apply_ufunc(
+        update_par = fct.partial(
             update_temporal_cvxpy,
-            YrA.where(unit_labels == -1, drop=True),
-            g.where(unit_labels == -1, drop=True).chunk(dict(lag=-1)),
-            sn_temp.where(unit_labels == -1, drop=True),
-            input_core_dims=[['frame'], ['lag'], []],
-            output_core_dims=[['trace', 'frame']],
-            vectorize=True,
-            dask='parallelized',
-            kwargs=dict(
+            sparse_penal=sparse_penal,
+            max_iters=max_iters,
+            scs_fallback=scs_fallback
+        )
+
+        gu_update = darr.gufunc(
+            fct.partial(
+                update_temporal_cvxpy,
                 sparse_penal=sparse_penal,
                 max_iters=max_iters,
                 scs_fallback=scs_fallback),
-            output_sizes=dict(trace=5),
-            output_dtypes=[YrA.dtype])
+            signature="(f),(l),()->(t,f)",
+            vectorize=True,
+            output_dtypes=[YrA.dtype],
+            output_sizes=dict(t=5))
+        result_iso = xr.apply_ufunc(
+            gu_update,
+            YrA.where(unit_labels == -1, drop=True).persist(),
+            g.where(unit_labels == -1, drop=True).chunk(dict(lag=-1)).persist(),
+            sn_temp.where(unit_labels == -1, drop=True).persist(),
+            input_core_dims=[['frame'], ['lag'], []],
+            output_core_dims=[['trace', 'frame']],
+            dask='allowed')
     if compute:
-        with da.config.set(scheduler=cvx_sched):
+        with da.config.set(scheduler='processes'):
             result_iso = result_iso.compute()
     print("updating overlapping temporal components")
     res_list = []
@@ -537,7 +546,7 @@ def update_temporal(Y,
                 output_dtypes=[YrA.dtype])
         res_list.append(cur_res)
     if compute:
-        with da.config.set(scheduler=cvx_sched):
+        with da.config.set(scheduler='processes'):
             result_ovlp, = da.compute(res_list)
     result = (xr.concat(result_ovlp + [result_iso], 'unit_id')
               .sortby('unit_id').drop('unit_labels'))
@@ -697,7 +706,6 @@ def update_temporal_cvxpy(y, g, sn, A=None, **kwargs):
         prob = cvx.Problem(obj, cons + cons_noise)
         if use_cons:
             res = prob.solve(solver='ECOS')
-            # res = prob.solve(solver='SCS', verbose=True)
         if not (prob.status == 'optimal'
                 or prob.status == 'optimal_inaccurate'):
             if use_cons:
