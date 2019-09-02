@@ -20,6 +20,7 @@ import warnings
 import cv2
 import papermill as pm
 import ast
+import psutil
 from pathlib import Path
 from dask.diagnostics import ProgressBar
 from copy import deepcopy
@@ -816,7 +817,12 @@ def rechunk_like(x, y):
         return x.compute()
 
 
-def get_optimal_chk(arr, dim_grp=None):
+def get_optimal_chk(arr, dim_grp=None, ncores='auto', mem_limit='auto'):
+    if ncores=='auto':
+        ncores = psutil.cpu_count()
+    if mem_limit=='auto':
+        mem_limit = (psutil.virtual_memory().available / 1024 ** 2)
+    csize = min(int(np.floor(mem_limit/ncores/3)), 1024)
     dims = arr.dims
     if not dim_grp:
         dim_grp = [(d,) for d in dims]
@@ -826,7 +832,8 @@ def get_optimal_chk(arr, dim_grp=None):
         dg_dict = {d: 'auto' for d in dg}
         dr_dict = {d: -1 for d in d_rest}
         dg_dict.update(dr_dict)
-        arr_chk = arr.chunk(dg_dict)
+        with da.config.set({'array.chunk-size': '{}MiB'.format(csize)}):
+            arr_chk = arr.chunk(dg_dict)
         re_dict = {d: c for d, c in zip(dims, arr_chk.chunks)}
         re_dict = {d: max(re_dict[d]) for d in dg}
         opt_chk.update(re_dict)
