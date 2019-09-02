@@ -371,8 +371,15 @@ def estimate_shift_fft(varr, dim='frame', on='max', max_shift=15):
     elif on == 'max':
         print("computing max frame")
         onfm = varr.max(dim).compute()
+    elif on == 'first':
+        onfm = varr.isel({dim: 0}).compute()
+    elif on == 'last':
+        onfm = varr.isel({dim: -1}).compute()
     else:
-        raise ValueError("template {} not understood".format(on))
+        try:
+            onfm = varr.sel({dim: on}).compute()
+        except KeyError:
+            raise ValueError("template {} not understood".format(on))
     onfm = xr.apply_ufunc(
         truncate,
         onfm,
