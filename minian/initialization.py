@@ -323,7 +323,6 @@ def init_perseed(varr, h, w, wnd, thres_corr):
         input_core_dims=[['height', 'width', 'frame'], ['frame']],
         output_core_dims=[['height', 'width']],
         dask='allowed')
-    A = A / da.linalg.norm(sd.data)
     A = A / da.linalg.norm(A.data)
     C = xr.apply_ufunc(
         da.tensordot, sur, A,
@@ -331,6 +330,7 @@ def init_perseed(varr, h, w, wnd, thres_corr):
         output_core_dims=[['frame']],
         kwargs=dict(axes=[(1, 2), (0, 1)]),
         dask='allowed')
+    C = C / da.linalg.norm(C.data) * da.linalg.norm(sd.data)
     return A, C
 
 
