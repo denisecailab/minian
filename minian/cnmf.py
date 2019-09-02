@@ -277,7 +277,7 @@ def compute_trace(Y, A, b, C, f, noise_freq=None):
         output_core_dims=[['unit_id', 'unit_id_cp']],
         dask='parallelized',
         output_dtypes=[nA.dtype],
-        output_sizes=dict(unit_id_cp = nunits))
+        output_sizes=dict(unit_id_cp = nunits)).compute()
     nA_inv = nA_inv.assign_coords(unit_id_temp=AA.coords['unit_id_cp'])
     b = b.expand_dims('dot').chunk(dict(height=-1, width=-1))
     f = f.expand_dims('dot')
@@ -293,7 +293,7 @@ def compute_trace(Y, A, b, C, f, noise_freq=None):
     YA = (xr.apply_ufunc(
         da.array.tensordot,
         Y,
-        A_rechk.chunk(dict(unit_id=-1)),
+        A_rechk,
         input_core_dims=[['frame', 'height', 'width'], ['height', 'width', 'unit_id']],
         output_core_dims=[['frame', 'unit_id']],
         dask='allowed',
