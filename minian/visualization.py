@@ -1525,11 +1525,10 @@ def visualize_temporal_update(YA_dict, C_dict, S_dict, g_dict, sig_dict, A_dict,
     if datashading:
         hv_unit = datashade_ndcurve(hv_unit, 'traces')
         hv_A = regrid(hv_A)
-        hv_pul = datashade_ndcurve(hv_pul, 'traces')
-    # else:
-    #     hv_unit = hv.DynamicMap(hv_unit)
-    #     hv_A = hv.DynamicMap(hv_A)
-    #     hv_pul = hv.DynamicMap(hv_pul)
+    else:
+        hv_unit = Dynamic(hv_unit)
+        hv_A = Dynamic(hv_A)
+    hv_pul = Dynamic(hv_pul)
     hv_unit = hv_unit.map(
         lambda p: p.opts(plot=dict(frame_height=400, frame_width=1000)))
     hv_pul = (hv_pul.opts(plot=dict(frame_width=500, aspect=w/h))
