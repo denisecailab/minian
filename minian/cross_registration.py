@@ -65,7 +65,7 @@ def get_minian_list(path, pattern=r'^minian.nc$'):
 def estimate_shifts(minian_df, by='session', to='first', temp_var='org', template=None, rm_background=False):
     if template is not None:
         minian_df['template'] = template
-        
+
     def get_temp(row):
         ds, temp = row['minian'], row['template']
         try:
@@ -79,7 +79,7 @@ def estimate_shifts(minian_df, by='session', to='first', temp_var='org', templat
             except KeyError:
                 raise NotImplementedError(
                     "template {} not understood".format(temp))
-    
+
     minian_df['template'] = minian_df.apply(get_temp, axis='columns')
     grp_dims = list(minian_df.index.names)
     grp_dims.remove(by)
@@ -320,8 +320,7 @@ def pd_dist(A, B):
     return np.sqrt(
         ((A[['height', 'width']] - B[['height', 'width']])**2)
         .sum('columns'))
-    
-    
+
 def cartesian(*args):
     n = len(args)
     return np.array(np.meshgrid(*args)).T.reshape((-1, n))
