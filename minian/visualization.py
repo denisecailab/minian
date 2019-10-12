@@ -1255,7 +1255,7 @@ def generate_videos(
     vbot = ffmpeg.filter([str_res, str_AC], 'hstack')
     vid = ffmpeg.filter([vtop, vbot], 'vstack')
     fname = os.path.join(vpath, vname)
-    vid.output(fname).run()
+    vid.output(fname).overwrite_output().run()
     for p in [path_res, path_AC, path_Y, path_org]:
         os.remove(p)
     return fname
