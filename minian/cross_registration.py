@@ -287,7 +287,7 @@ def calculate_centroid_distance(cents, by='session', index_dim=['animal'], tile=
             res_df = da.delayed(pd.concat)([meta_df, dist_df], axis='columns')
             res_list.append(res_df)
     else:
-        res_list = [cent_pair(cents)]
+        res_list = [cent_pair(cents)[0]]
     print("computing distances")
     res_list = da.compute(res_list)[0]
     res_df = pd.concat(res_list, ignore_index=True)
@@ -515,6 +515,7 @@ def fill_mapping(mappings,
                  cents):
 
     def fill(cur_grp, cur_cent):
+        fill_ls = []
         for cur_ss in list(cur_grp['session']):
             cur_ss_grp = cur_grp['session'][cur_ss].dropna()
             cur_ss_all = cur_cent[cur_cent['session'] == cur_ss][
@@ -525,9 +526,8 @@ def fill_mapping(mappings,
                 ('session', cur_ss):
                 list(cur_fill_set),
             })
-            cur_grp = pd.concat(
-                [cur_grp, cur_fill_df], ignore_index=True)
-        return cur_grp
+            fill_ls.append(cur_fill_df)
+        return pd.concat(fill_ls, ignore_index=True)
 
     try:
         for cur_id, cur_grp in mappings.groupby(list(mappings['meta'])):
