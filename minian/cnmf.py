@@ -390,7 +390,6 @@ def update_temporal(Y,
                     normalize=True,
                     post_scal=True,
                     scs_fallback=False):
-    nunits = len(A.coords['unit_id'])
     print("grouping overlaping units")
     A_pos = (A > 0).astype(int)
     A_neg = (A == 0).astype(int)
@@ -512,12 +511,6 @@ def update_temporal(Y,
             output_sizes=dict(trace=5),
             output_dtypes=[YrA.dtype])
     else:
-        update_par = fct.partial(
-            update_temporal_cvxpy,
-            sparse_penal=sparse_penal,
-            max_iters=max_iters,
-            scs_fallback=scs_fallback
-        )
         gu_update = darr.gufunc(
             fct.partial(
                 update_temporal_cvxpy,
@@ -543,7 +536,6 @@ def update_temporal(Y,
     res_list = []
     g_ovlp = g.where(unit_labels >= 0, drop=True)
     if len(g_ovlp) > 0:
-        gg = g_ovlp.groupby('unit_labels')
         for cur_labl, cur_g in g_ovlp.groupby('unit_labels'):
             if use_spatial:
                 cur_A = A_flt_ovlp.where(unit_labels == cur_labl, drop=True)
@@ -744,7 +736,7 @@ def update_temporal_cvxpy(y, g, sn, A=None, **kwargs):
         obj = cvx.Minimize(cvx.sum(cvx.norm(s, 1, axis=1)))
         prob = cvx.Problem(obj, cons + cons_noise)
         if use_cons:
-            res = prob.solve(solver='ECOS')
+            _ = prob.solve(solver='ECOS')
         if not (prob.status == 'optimal'
                 or prob.status == 'optimal_inaccurate'):
             if use_cons:
@@ -755,13 +747,13 @@ def update_temporal_cvxpy(y, g, sn, A=None, **kwargs):
         obj = cvx.Minimize(cvx.sum(cvx.sum(noise, axis=1) + lam * cvx.norm(s, 1, axis=1)))
         prob = cvx.Problem(obj, cons)
         try:
-            res = prob.solve(solver='ECOS', max_iters=max_iters)
+            _ = prob.solve(solver='ECOS', max_iters=max_iters)
             if prob.status in ["infeasible", "unbounded", None]:
                 raise ValueError
         except (cvx.SolverError, ValueError):
             try:
                 if scs:
-                    res = prob.solve(solver='SCS', max_iters=200)
+                    _ = prob.solve(solver='SCS', max_iters=200)
                 if prob.status in ["infeasible", "unbounded", None]:
                     raise ValueError
             except (cvx.SolverError, ValueError):
