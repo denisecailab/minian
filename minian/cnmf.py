@@ -154,8 +154,9 @@ def update_spatial(Y,
                    gs_sigma=6,
                    dl_wnd=5,
                    sparse_penal=0.5,
-                   update_background=False,
-                   post_scal=True,
+                   update_background=True,
+                   post_scal=False,
+                   normalize=True,
                    zero_thres='eps'):
     _T = len(Y.coords['frame'])
     print("estimating penalty parameter")
@@ -163,9 +164,6 @@ def update_spatial(Y,
     alpha = sparse_penal * sn * np.sqrt(np.max(np.diag(cct))) / _T
     alpha = alpha.persist()
     print("computing subsetting matrix")
-    if update_background:
-        A = xr.concat([A, b.assign_coords(unit_id=-1)], 'unit_id')
-        C = xr.concat([C, f.assign_coords(unit_id=-1)], 'unit_id')
     if dl_wnd:
         selem = moph.disk(dl_wnd)
         sub = xr.apply_ufunc(
@@ -177,10 +175,24 @@ def update_spatial(Y,
             kwargs=dict(selem=selem),
             dask='parallelized',
             output_dtypes=[A.dtype])
-        sub = (sub > 0).astype(bool)
+        sub = (sub > 0)
     else:
         sub = xr.apply_ufunc(np.ones_like, A.compute())
-    sub = sub.compute().transpose(*A.dims).chunk(A.chunks)
+    sub = sub.compute().astype(bool).transpose(*A.dims).chunk(A.chunks)
+    if update_background:
+        A = xr.concat([A, b.assign_coords(unit_id=-1)], 'unit_id')
+        b_erd = xr.apply_ufunc(
+            moph.erosion,
+            b.chunk(dict(height=-1, width=-1)),
+            input_core_dims=[['height', 'width']],
+            output_core_dims=[['height', 'width']],
+            kwargs=dict(selem=selem),
+            dask='parallelized',
+            output_dtypes=[b.dtype])
+        sub = xr.concat([
+            sub, (b_erd > 0).astype(bool).assign_coords(unit_id=-1)],
+                        'unit_id')
+        C = xr.concat([C, f.assign_coords(unit_id=-1)], 'unit_id')
     print("fitting spatial matrix")
     gu_update = darr.gufunc(
         fct.partial(
@@ -198,9 +210,15 @@ def update_spatial(Y,
         output_core_dims=[['unit_id']],
         dask='allowed')
     A_new = A_new.persist()
+    print("removing empty units")
     if zero_thres == 'eps':
         zero_thres = np.finfo(A_new.dtype).eps
     A_new = A_new.where(A_new > zero_thres).fillna(0)
+    non_empty = A_new.sum(['width', 'height']) > 0
+    A_new = A_new.where(non_empty, drop=True)
+    C_new = C.where(non_empty, drop=True)
+    A_new = rechunk_like(A_new, A).persist()
+    C_new = rechunk_like(C_new, C).persist()
     if post_scal:
         print("post-hoc scaling")
         A_new_flt = (A_new.stack(spatial=['height', 'width'])
@@ -223,27 +241,36 @@ def update_spatial(Y,
         except np.linalg.LinAlgError:
             warnings.warn("post-hoc scaling failed", RuntimeWarning)
     if update_background:
-        print("updateing background")
-        b_new = A_new.sel(unit_id=-1)
-        b_new = b_new / da.array.linalg.norm(b_new.data)
-        f_new = xr.apply_ufunc(
-            da.array.tensordot, Y, b_new,
-            input_core_dims=[['frame', 'height', 'width'], ['height', 'width']],
-            output_core_dims=[['frame']],
-            kwargs=dict(axes=[(1, 2), (0, 1)]),
-            dask='allowed').persist()
-        A_new = A_new.drop(-1, 'unit_id')
-        C_new = C.drop(-1, 'unit_id')
+        print("updating background")
+        try:
+            b_new = A_new.sel(unit_id=-1)
+            b_new = b_new / da.array.linalg.norm(b_new.data)
+            f_new = xr.apply_ufunc(
+                da.array.tensordot, Y, b_new,
+                input_core_dims=[['frame', 'height', 'width'], ['height', 'width']],
+                output_core_dims=[['frame']],
+                kwargs=dict(axes=[(1, 2), (0, 1)]),
+                dask='allowed').persist()
+            A_new = A_new.drop(-1, 'unit_id')
+            C_new = C_new.drop(-1, 'unit_id')
+        except KeyError:
+            print("background terms are empty")
+            b_new = xr.zeros_like(b)
+            f_new = xr.zeros_like(f)
     else:
         b_new = b
         f_new = f
-    print("removing empty units")
-    non_empty = A_new.sum(['width', 'height']) > 0
-    A_new = A_new.where(non_empty, drop=True)
-    C_new = C.where(non_empty, drop=True)
-    A_new = rechunk_like(A_new.persist(), A)
-    C_new = rechunk_like(C_new.persist(), C)
-    return A_new, b_new, C_new, f
+    if normalize:
+        print("normalizing result")
+        A_norm = xr.apply_ufunc(
+            darr.linalg.norm,
+            A_new.stack(spatial=['height', 'width']),
+            input_core_dims=[['spatial', 'unit_id']],
+            output_core_dims=[['unit_id']],
+            kwargs=dict(axis=0),
+            dask='allowed')
+        A_new = (A_new / A_norm).persist()
+    return A_new, b_new, C_new, f_new
 
 
 def update_spatial_perpx(y, alpha, sub, C):
