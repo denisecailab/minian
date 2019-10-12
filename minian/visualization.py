@@ -12,6 +12,8 @@ import panel as pn
 import os
 import dask
 import ffmpeg
+import cv2
+import av
 from .utilities import scale_varr
 from .motion_correction import shift_fft
 from uuid import uuid4
@@ -1174,14 +1176,20 @@ def write_vid_blk(arr, vpath):
     uid = uuid4()
     vname = "{}.mp4".format(uid)
     fpath = os.path.join(vpath, vname)
-    vwrite(
-        fpath,
-        arr,
-        outputdict={
-            '-c:v': 'libx264',
-            '-crf': '17'
-        }
-    )
+    arr = np.clip(arr, 0, 255).astype(np.uint8)
+    container = av.open(fpath, mode='w')
+    stream = container.add_stream('mpeg4', rate=30)
+    stream.width = arr.shape[2]
+    stream.height = arr.shape[1]
+    stream.pix_fmt = 'yuv420p'
+    for fm in arr:
+        fm = cv2.cvtColor(fm, cv2.COLOR_GRAY2RGB)
+        fmav = av.VideoFrame.from_ndarray(fm, format='rgb24')
+        for p in stream.encode(fmav):
+            container.mux(p)
+    for p in stream.encode():
+        container.mux(p)
+    container.close()
     return fpath
 
 
