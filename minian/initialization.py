@@ -277,11 +277,11 @@ def seeds_merge(varr, seeds, thres_dist=5, thres_corr=0.6, noise_freq='envelope'
     return seeds
 
 
-def initialize(varr, seeds, thres_corr=0.8, wnd=10):
+def initialize(varr, seeds, thres_corr=0.8, wnd=10, noise_freq=None):
     print("creating parallel schedule")
     harr, warr = seeds['height'].values, seeds['width'].values
     varr_rechk = varr.chunk(dict(frame=-1))
-    res_ls = [init_perseed(varr_rechk, h, w, wnd, thres_corr)
+    res_ls = [init_perseed(varr_rechk, h, w, wnd, thres_corr, noise_freq)
               for h, w in zip(harr, warr)]
     print("computing ROIs")
     res_ls = dask.compute(res_ls)[0]
@@ -313,7 +313,7 @@ def initialize(varr, seeds, thres_corr=0.8, wnd=10):
     return A, C, b, f
 
 
-def init_perseed(varr, h, w, wnd, thres_corr):
+def init_perseed(varr, h, w, wnd, thres_corr, noise_freq):
     ih = np.where(varr.coords['height'] == h)[0][0]
     iw = np.where(varr.coords['width'] == w)[0][0]
     h_sur, w_sur = (slice(max(ih - wnd, 0), ih + wnd),
@@ -323,9 +323,13 @@ def init_perseed(varr, h, w, wnd, thres_corr):
     ih = np.where(sur.coords['height'] == h)[0][0]
     iw = np.where(sur.coords['width'] == w)[0][0]
     sp_idxs = sur_flt.coords['spatial'].values
+    if noise_freq:
+        sur_smth = smooth_sig(sur_flt, noise_freq)
+    else:
+        sur_smth = sur_flt
     corr = xr.apply_ufunc(
         da.corrcoef,
-        sur_flt,
+        sur_smth,
         input_core_dims=[['spatial', 'frame']],
         output_core_dims=[['spatial', 'spatial_cp']],
         dask='allowed',
