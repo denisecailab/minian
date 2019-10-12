@@ -57,6 +57,8 @@ def _noise_fft(px, noise_range=(0.25, 0.5), noise_method='logmexp'):
     elif noise_method == 'logmexp':
         eps = np.finfo(px_band.dtype).eps
         return np.sqrt(np.exp(np.log(px_band + eps).mean()))
+    elif noise_method == 'sum':
+        return np.sqrt(px_band.sum())
 
 def psd_fft(varr):
     _T = len(varr.coords['frame'])
@@ -385,6 +387,7 @@ def update_temporal(Y,
                     max_iters=200,
                     use_smooth=True,
                     compute=True,
+                    normalize=True,
                     post_scal=True,
                     scs_fallback=False):
     nunits = len(A.coords['unit_id'])
@@ -425,7 +428,14 @@ def update_temporal(Y,
         YrA = compute_trace(Y, A, b, C, f).persist()
     YrA = YrA.chunk(dict(frame=-1, unit_id=1))
     YrA = YrA.assign_coords(unit_labels=unit_labels)
-    sn_temp = get_noise_fft(YrA, noise_range=(noise_freq, 1)).persist()
+    if normalize:
+        print("normalizing traces")
+        YrA_norm = (YrA / YrA.sum('frame') * YrA.sizes['frame']).persist()
+    else:
+        YrA_norm = YrA
+    sn_temp = get_noise_fft(
+        YrA_norm,noise_range=(noise_freq, 1),
+        noise_method='sum').persist()
     sn_temp = sn_temp.assign_coords(unit_labels=unit_labels)
     if use_spatial:
         print("flattening spatial dimensions")
@@ -438,7 +448,7 @@ def update_temporal(Y,
         but_b, but_a = butter(2, noise_freq, btype='low', analog=False)
         YrA_smth = xr.apply_ufunc(
             lambda x: lfilter(but_b, but_a, x),
-            YrA,
+            YrA_norm,
             input_core_dims=[['frame']],
             output_core_dims=[['frame']],
             vectorize=True,
@@ -450,7 +460,7 @@ def update_temporal(Y,
                 YrA_smth, noise_range=(noise_freq, 1)).persist()
             sn_temp_smth = sn_temp_smth.assign_coords(unit_labels=unit_labels)
     else:
-        YrA_smth = YrA
+        YrA_smth = YrA_norm
         sn_temp_smth = sn_temp
     if p is None:
         print("estimating order p for each neuron")
@@ -508,7 +518,6 @@ def update_temporal(Y,
             max_iters=max_iters,
             scs_fallback=scs_fallback
         )
-
         gu_update = darr.gufunc(
             fct.partial(
                 update_temporal_cvxpy,
@@ -521,7 +530,7 @@ def update_temporal(Y,
             output_sizes=dict(t=5))
         result_iso = xr.apply_ufunc(
             gu_update,
-            YrA.where(unit_labels == -1, drop=True).persist(),
+            YrA_norm.where(unit_labels == -1, drop=True).persist(),
             g.where(unit_labels == -1, drop=True).chunk(dict(lag=-1)).persist(),
             sn_temp.where(unit_labels == -1, drop=True).persist(),
             input_core_dims=[['frame'], ['lag'], []],
@@ -533,51 +542,54 @@ def update_temporal(Y,
     print("updating overlapping temporal components")
     res_list = []
     g_ovlp = g.where(unit_labels >= 0, drop=True)
-    gg = g_ovlp.groupby('unit_labels')
-    for cur_labl, cur_g in g_ovlp.groupby('unit_labels'):
-        if use_spatial:
-            cur_A = A_flt_ovlp.where(unit_labels == cur_labl, drop=True)
-            cur_res = delayed(xr.apply_ufunc)(
-                update_temporal_cvxpy,
-                Y_flt.chunk(dict(spatial=-1, frame=-1)),
-                cur_g.chunk(dict(lag=-1)),
-                sn_spatial.chunk(dict(spatial=-1)),
-                cur_A.chunk(dict(spatial=-1)),
-                input_core_dims=[['spatial', 'frame'], ['unit_id', 'lag'],
-                                 ['spatial'], ['unit_id', 'spatial']],
-                output_core_dims=[['trace', 'unit_id', 'frame']],
-                dask='parallelized',
-                kwargs=dict(
-                    sparse_penal=sparse_penal,
-                    max_iters=max_iters,
-                    scs_fallback=scs_fallback),
-                output_sizes=dict(trace=5),
-                output_dtypes=[YrA.dtype])
-        else:
-            cur_YrA = YrA.where(unit_labels == cur_labl, drop=True)
-            cur_sn_temp = sn_temp.where(unit_labels == cur_labl, drop=True)
-            cur_res = delayed(xr.apply_ufunc)(
-                update_temporal_cvxpy,
-                cur_YrA.compute(),
-                cur_g.compute(),
-                cur_sn_temp.compute(),
-                input_core_dims=[['unit_id', 'frame'], ['unit_id', 'lag'],
-                                 ['unit_id']],
-                output_core_dims=[['trace', 'unit_id', 'frame']],
-                dask='forbidden',
-                kwargs=dict(
-                    sparse_penal=sparse_penal,
-                    max_iters=max_iters,
-                    scs_fallback=scs_fallback),
-                output_sizes=dict(trace=5),
-                output_dtypes=[YrA.dtype])
-        res_list.append(cur_res)
-    if compute:
-        with da.config.set(scheduler='processes'):
-            result_ovlp, = da.compute(res_list)
-    result = (xr.concat(result_ovlp + [result_iso], 'unit_id')
-              .sortby('unit_id').drop('unit_labels'))
-    YrA = YrA.drop('unit_labels')
+    if len(g_ovlp) > 0:
+        gg = g_ovlp.groupby('unit_labels')
+        for cur_labl, cur_g in g_ovlp.groupby('unit_labels'):
+            if use_spatial:
+                cur_A = A_flt_ovlp.where(unit_labels == cur_labl, drop=True)
+                cur_res = delayed(xr.apply_ufunc)(
+                    update_temporal_cvxpy,
+                    Y_flt.chunk(dict(spatial=-1, frame=-1)),
+                    cur_g.chunk(dict(lag=-1)),
+                    sn_spatial.chunk(dict(spatial=-1)),
+                    cur_A.chunk(dict(spatial=-1)),
+                    input_core_dims=[['spatial', 'frame'], ['unit_id', 'lag'],
+                                     ['spatial'], ['unit_id', 'spatial']],
+                    output_core_dims=[['trace', 'unit_id', 'frame']],
+                    dask='parallelized',
+                    kwargs=dict(
+                        sparse_penal=sparse_penal,
+                        max_iters=max_iters,
+                        scs_fallback=scs_fallback),
+                    output_sizes=dict(trace=5),
+                    output_dtypes=[YrA.dtype])
+            else:
+                cur_YrA = YrA_norm.where(unit_labels == cur_labl, drop=True)
+                cur_sn_temp = sn_temp.where(unit_labels == cur_labl, drop=True)
+                cur_res = delayed(xr.apply_ufunc)(
+                    update_temporal_cvxpy,
+                    cur_YrA.compute(),
+                    cur_g.compute(),
+                    cur_sn_temp.compute(),
+                    input_core_dims=[['unit_id', 'frame'], ['unit_id', 'lag'],
+                                     ['unit_id']],
+                    output_core_dims=[['trace', 'unit_id', 'frame']],
+                    dask='forbidden',
+                    kwargs=dict(
+                        sparse_penal=sparse_penal,
+                        max_iters=max_iters,
+                        scs_fallback=scs_fallback),
+                    output_sizes=dict(trace=5),
+                    output_dtypes=[YrA.dtype])
+                res_list.append(cur_res)
+        if compute:
+            with da.config.set(scheduler='processes'):
+                result_ovlp, = da.compute(res_list)
+                result = (xr.concat(result_ovlp + [result_iso], 'unit_id')
+                          .sortby('unit_id').drop('unit_labels'))
+    else:
+        result = result_iso.sortby('unit_id').drop('unit_labels')
+    YrA = YrA_norm.drop('unit_labels')
     C_new = result.isel(trace=0).dropna('unit_id')
     S_new = result.isel(trace=1).dropna('unit_id')
     B_new = result.isel(trace=2, frame=0).dropna('unit_id').squeeze()
