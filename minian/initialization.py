@@ -344,21 +344,15 @@ def init_perseed(varr, h, w, wnd, thres_corr, noise_freq):
     sd_lb = mask_lb.isel(height=ih, width=iw)
     mask = (mask_lb == sd_lb)
     sur = sur.where(mask, 0)
-    sd = sur.isel(height=ih, width=iw)
-    A = xr.apply_ufunc(
-        da.dot, sur, sd,
-        input_core_dims=[['height', 'width', 'frame'], ['frame']],
-        output_core_dims=[['height', 'width']],
-        dask='allowed')
-    A = A / da.linalg.norm(A.data)
+    corr = corr.where(mask, 0)
+    corr_norm = corr / corr.sum()
     C = xr.apply_ufunc(
-        da.tensordot, sur, A,
+        da.tensordot, sur, corr_norm,
         input_core_dims=[['frame', 'height', 'width'], ['height', 'width']],
         output_core_dims=[['frame']],
         kwargs=dict(axes=[(1, 2), (0, 1)]),
         dask='allowed')
-    C = C / da.linalg.norm(C.data) * da.linalg.norm(sd.data)
-    return A, C
+    return corr, C
 
 
 @da.as_gufunc(signature="(h, w)->(h, w)", output_dtypes=int, allow_rechunk=True)
