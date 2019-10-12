@@ -298,17 +298,10 @@ def initialize(varr, seeds, thres_corr=0.8, wnd=10, noise_freq=None):
     uchk = min(uchkA, uchkC)
     A = A.chunk(dict(height=chk['height'], width=chk['width'], unit_id=uchk))
     C = C.chunk(dict(frame=chk['frame'], unit_id=uchk))
-    AC = xr.apply_ufunc(
-        da.dot,
-        A.chunk(dict(unit_id=-1, height=-1, width=-1)),
-        C.chunk(dict(unit_id=-1)),
-        input_core_dims=[['height', 'width', 'unit_id'], ['unit_id', 'frame']],
-        output_core_dims=[['height', 'width', 'frame']],
-        dask='allowed',
-        output_dtypes=[A.dtype])
-    Yr = varr.chunk(dict(height=-1, width=-1)) - AC
-    b = Yr.mean('frame').persist()
-    f = Yr.mean(['height', 'width']).persist()
+    A_mask = A.sum('unit_id') == 0
+    Yb = varr.where(A_mask, 0)
+    b = Yb.mean('frame').persist()
+    f = Yb.mean(['height', 'width']).persist()
     b = rechunk_like(b, varr)
     return A, C, b, f
 
