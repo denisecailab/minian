@@ -743,7 +743,7 @@ def update_temporal_cvxpy(y, g, sn, A=None, **kwargs):
                 warnings.warn("constrained version of problem infeasible")
             raise ValueError
     except (ValueError, cvx.SolverError):
-        lam = sn * sparse_penal
+        lam = sn * sparse_penal / sn.shape[0] # hacky correction for near-linear relationship between sparsity and number of concurrently updated units
         obj = cvx.Minimize(cvx.sum(cvx.sum(noise, axis=1) + lam * cvx.norm(s, 1, axis=1)))
         prob = cvx.Problem(obj, cons)
         try:
