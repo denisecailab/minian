@@ -845,7 +845,6 @@ def label_connected(adj, only_connected=False):
 
 
 def smooth_sig(sig, freq, btype='low'):
-    print("smoothing signals")
     but_b, but_a = butter(2, freq, btype=btype, analog=False)
     sig_smth = xr.apply_ufunc(
             lambda x: lfilter(but_b, but_a, x),
