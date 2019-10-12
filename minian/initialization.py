@@ -6,6 +6,8 @@ import pyfftw.interfaces.numpy_fft as npfft
 import dask.array.fft as dafft
 import dask.array as da
 import warnings
+import cv2
+from skimage.morphology import disk
 from dask import delayed, compute
 from scipy.ndimage.filters import maximum_filter
 from scipy.ndimage.measurements import label
@@ -21,12 +23,12 @@ from .utilities import get_optimal_chk, rechunk_like
 from scipy.ndimage.filters import median_filter
 
 
-def seeds_init(varr, wnd_size=500, method='rolling', stp_size=200, nchunk=100, max_wnd=10):
+def seeds_init(varr, wnd_size=500, method='rolling', stp_size=200, nchunk=100, max_wnd=10, diff_thres=2):
     print("constructing chunks")
     idx_fm = varr.coords['frame']
     nfm = len(idx_fm)
     if method == 'rolling':
-        nstp = np.ceil(nfm / stp_size)
+        nstp = np.ceil(nfm / stp_size) + 1
         centers = np.linspace(0, nfm - 1, nstp)
         hwnd = np.ceil(wnd_size / 2)
         max_idx = list(
@@ -40,18 +42,18 @@ def seeds_init(varr, wnd_size=500, method='rolling', stp_size=200, nchunk=100, m
     print("creating parallel scheme")
     res = [max_proj_frame(varr, cur_idx) for cur_idx in max_idx]
     max_res = xr.concat(res, 'sample').chunk(dict(sample=10))
-    print("computing max projection")
+    print("computing max projections")
     max_res = max_res.persist()
     print("calculating local maximum")
     loc_max = xr.apply_ufunc(
-        local_max,
+        local_max_roll,
         max_res.chunk(dict(height=-1, width=-1)),
         input_core_dims=[['height', 'width']],
         output_core_dims=[['height', 'width']],
         vectorize=True,
         dask='parallelized',
         output_dtypes=[np.uint8],
-        kwargs=dict(wnd=max_wnd)).sum('sample')
+        kwargs=dict(k0=2, k1=max_wnd, diff=diff_thres)).sum('sample')
     loc_max = loc_max.compute()
     loc_max_flt = loc_max.stack(spatial=['height', 'width'])
     seeds = (loc_max_flt.where(loc_max_flt > 0, drop=True)
@@ -62,10 +64,31 @@ def seeds_init(varr, wnd_size=500, method='rolling', stp_size=200, nchunk=100, m
 def max_proj_frame(varr, idx):
     return varr.isel(frame=idx).max('frame')
 
+def local_max_roll(fm, k0, k1, diff):
+    max_ls = []
+    for ksize in range(k0, k1):
+        selem = disk(ksize)
+        fm_max = local_max(fm, selem, diff)
+        max_ls.append(fm_max)
+    lmax = (np.stack(max_ls, axis=0).sum(axis=0) > 0).astype(np.uint8)
+    nlab, max_lab = cv2.connectedComponents(lmax)
+    max_res = np.zeros_like(lmax)
+    for lb in range(1, nlab):
+        area = max_lab == lb
+        if np.sum(area) > 1:
+            crds = tuple(int(np.median(c)) for c in np.where(area))
+            max_res[crds] = 1
+        else:
+            max_res[np.where(area)] = 1
+    return max_res
 
-def local_max(fm, wnd):
-    fm_max = maximum_filter(fm, wnd)
-    return (fm == fm_max).astype(np.uint8)
+
+def local_max(fm, k, diff=0):
+    fm_max = cv2.dilate(fm, k)
+    fm_min = cv2.erode(fm, k)
+    fm_diff = ((fm_max - fm_min) > diff).astype(np.uint8)
+    fm_max = (fm == fm_max).astype(np.uint8)
+    return cv2.bitwise_and(fm_max, fm_diff).astype(np.uint8)
 
 
 def gmm_refine(varr, seeds, q=(0.1, 99.9), n_components=2, valid_components=1, mean_mask=True):
