@@ -126,7 +126,7 @@ def gmm_refine(varr, seeds, q=(0.1, 99.9), n_components=2, valid_components=1, m
 
 
 def pnr_refine(varr, seeds, noise_freq=0.25, thres=1.5, q=(0.1, 99.9), med_wnd=None):
-    print("selecting seeds") 
+    print("selecting seeds")
     varr_sub = varr.sel(
         spatial=[tuple(hw) for hw in seeds[['height', 'width']].values])
     varr_sub = varr_sub.chunk(dict(frame=-1, spatial='auto'))
