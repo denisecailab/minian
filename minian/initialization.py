@@ -9,7 +9,7 @@ import warnings
 import cv2
 from skimage.morphology import disk
 from dask import delayed, compute
-from scipy.ndimage.filters import maximum_filter
+from scipy.ndimage.filters import maximum_filter, median_filter
 from scipy.ndimage.measurements import label
 from scipy.stats import zscore, kstest
 from scipy.spatial.distance import pdist, squareform
