@@ -306,8 +306,8 @@ def compute_trace(Y, A, b, C, f, noise_freq=None):
         output_dtypes=[nA.dtype],
         output_sizes=dict(unit_id_cp = nunits)).compute()
     nA_inv = nA_inv.assign_coords(unit_id_temp=AA.coords['unit_id_cp'])
-    b = b.expand_dims('dot').chunk(dict(height=-1, width=-1))
-    f = f.expand_dims('dot')
+    b = b.fillna(0).expand_dims('dot').chunk(dict(height=-1, width=-1))
+    f = f.fillna(0).expand_dims('dot')
     B = xr.apply_ufunc(
         da.array.dot,
         b,
