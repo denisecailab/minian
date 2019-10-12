@@ -581,7 +581,6 @@ def update_temporal(Y,
                           .sortby('unit_id').drop('unit_labels'))
     else:
         result = result_iso.sortby('unit_id').drop('unit_labels')
-    YrA = YrA_norm.drop('unit_labels')
     C_new = result.isel(trace=0).dropna('unit_id')
     S_new = result.isel(trace=1).dropna('unit_id')
     B_new = result.isel(trace=2, frame=0).dropna('unit_id').squeeze()
@@ -601,7 +600,7 @@ def update_temporal(Y,
         C_new.where(mask, drop=True), S_new.where(mask, drop=True),
         C0_new.where(mask, drop=True), B_new.where(mask, drop=True),
         dc_new.where(mask, drop=True), g_new.where(mask, drop=True))
-    YrA_new = YrA.sel(unit_id=C_new.coords['unit_id'])
+    YrA_new = YrA.drop('unit_labels').sel(unit_id=C_new.coords['unit_id'])
     sig_new = (C0_new * dc_new + B_new + C_new).persist()
     if post_scal:
         print("post-hoc scaling")
@@ -631,7 +630,7 @@ def update_temporal(Y,
     C0_new = rechunk_like(C0_new.persist(), C)
     g_new = rechunk_like(g_new.persist(), C)
     sig_new = rechunk_like(sig_new.persist(), C)
-    return (YrA, C_new, S_new, B_new, C0_new, sig_new, g_new, scal)
+    return (YrA_norm, C_new, S_new, B_new, C0_new, sig_new, g_new, scal)
 
 
 def get_ar_coef(y, sn, p, add_lag, pad=None):
