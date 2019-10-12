@@ -12,6 +12,7 @@ dependencies:
   # - asn1crypto=0.24.0
   # - atk=2.25.90
   # - attrs=18.2.0
+  - av
   # - backcall=0.1.0
   # - blas=1.1
   # - bleach=3.0.2
