@@ -609,27 +609,28 @@ def update_temporal(Y,
         C_new.where(mask, drop=True), S_new.where(mask, drop=True),
         C0_new.where(mask, drop=True), B_new.where(mask, drop=True),
         dc_new.where(mask, drop=True), g_new.where(mask, drop=True))
+    YrA_new = YrA.sel(unit_id=C_new.coords['unit_id'])
+    sig_new = (C0_new * dc_new + B_new + C_new).persist()
     if post_scal:
         print("post-hoc scaling")
-        YrA_new = YrA.sel(unit_id=C_new.coords['unit_id'])
-        b_lstsq = YrA_new - B_new - C0_new * dc_new
         def lstsq(a, b):
             a = np.atleast_2d(a).T
             return np.linalg.lstsq(a, b, rcond=-1)[0]
         scal = xr.apply_ufunc(
             lstsq,
-            C_new.chunk(dict(frame=-1)),
-            b_lstsq.chunk(dict(frame=-1)),
+            sig_new.chunk(dict(frame=-1)),
+            YrA_new.chunk(dict(frame=-1)),
             input_core_dims=[['frame'], ['frame']],
             output_core_dims=[[]],
             vectorize=True,
             dask='parallelized',
             output_dtypes=[C_new.dtype])
-        if compute:
-            with da.config.set(scheduler='threads'):
-                scal = scal.compute()
-        C_new = C_new * scal
-        S_new = S_new * scal
+        scal = scal.persist()
+        C_new = (C_new * scal).persist()
+        S_new = (S_new * scal).persist()
+        B_new = (B_new * scal).persist()
+        C0_new = (C0_new * scal).persist()
+        sig_new = (sig_new * scal).persist()
     else:
         scal=None
     C_new = rechunk_like(C_new.persist(), C)
@@ -637,8 +638,7 @@ def update_temporal(Y,
     B_new = rechunk_like(B_new.persist(), C)
     C0_new = rechunk_like(C0_new.persist(), C)
     g_new = rechunk_like(g_new.persist(), C)
-    scal = rechunk_like(scal, C)
-    sig_new = (C0_new * dc_new + B_new + C_new).persist()
+    sig_new = rechunk_like(sig_new.persist(), C)
     return (YrA, C_new, S_new, B_new, C0_new, sig_new, g_new, scal)
 
 
