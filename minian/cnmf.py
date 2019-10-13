@@ -221,7 +221,7 @@ def update_spatial(Y,
     C_new = C.where(non_empty, drop=True)
     A_new = rechunk_like(A_new, A).persist()
     C_new = rechunk_like(C_new, C).persist()
-    if post_scal:
+    if post_scal and len(A_new) > 0:
         print("post-hoc scaling")
         A_new_flt = (A_new.stack(spatial=['height', 'width'])
                      .compute())
@@ -262,7 +262,7 @@ def update_spatial(Y,
     else:
         b_new = b
         f_new = f
-    if normalize:
+    if normalize and len(A_new) > 0:
         print("normalizing result")
         A_norm = xr.apply_ufunc(
             darr.linalg.norm,
@@ -602,7 +602,7 @@ def update_temporal(Y,
         dc_new.where(mask, drop=True), g_new.where(mask, drop=True))
     YrA_new = YrA.drop('unit_labels').sel(unit_id=C_new.coords['unit_id'])
     sig_new = (C0_new * dc_new + B_new + C_new).persist()
-    if post_scal:
+    if post_scal and len(sig_new) > 0:
         print("post-hoc scaling")
         def lstsq(a, b):
             a = np.atleast_2d(a).T
