@@ -830,6 +830,7 @@ class CNMFViewer():
         wgt_grp = pnwgt.Select(
             name='', options=idxs_dict, width=120, height=30, value=def_idxs)
         def update_usub(usub):
+            self.usub_sel = []
             self.strm_usub.event(usub=usub.new)
         wgt_grp.param.watch(update_usub, 'value')
         wgt_grp.value = def_idxs
