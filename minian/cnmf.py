@@ -624,12 +624,13 @@ def update_temporal(Y,
         sig_new = (sig_new * scal).persist()
     else:
         scal=None
-    C_new = rechunk_like(C_new.persist(), C)
-    S_new = rechunk_like(S_new.persist(), C)
-    B_new = rechunk_like(B_new.persist(), C)
-    C0_new = rechunk_like(C0_new.persist(), C)
-    g_new = rechunk_like(g_new.persist(), C)
-    sig_new = rechunk_like(sig_new.persist(), C)
+    if len(sig_new) > 0:
+        C_new = rechunk_like(C_new.persist(), C)
+        S_new = rechunk_like(S_new.persist(), C)
+        B_new = rechunk_like(B_new.persist(), C)
+        C0_new = rechunk_like(C0_new.persist(), C)
+        g_new = rechunk_like(g_new.persist(), C)
+        sig_new = rechunk_like(sig_new.persist(), C)
     return (YrA_norm, C_new, S_new, B_new, C0_new, sig_new, g_new, scal)
 
 
