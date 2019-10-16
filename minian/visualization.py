@@ -1488,7 +1488,6 @@ def visualize_temporal_update(YA_dict, C_dict, S_dict, g_dict, sig_dict, A_dict,
     input_dict = {k: [i[k] for i in inputs] for k in inputs[0].keys()}
     hv_YA, hv_C, hv_S, hv_sig, hv_C_pul, hv_S_pul, hv_A = [dict() for _ in range(7)]
     for k, ins in input_dict.items():
-        ins[0] = ins[0].sel(unit_id=ins[1].coords['unit_id'])
         if norm:
             ins[:-1] = [xr.apply_ufunc(
                 normalize, i.chunk(dict(frame=-1, unit_id='auto')),
@@ -1517,9 +1516,12 @@ def visualize_temporal_update(YA_dict, C_dict, S_dict, g_dict, sig_dict, A_dict,
         hv_S_pul[k], hv_C_pul[k] = [
             (hv.Dataset(tr.rename('Response (A.U.)'))
              .to(hv.Curve, kdims=['t'])) for tr in [s_pul, c_pul]]
-        hv_YA[k], hv_C[k], hv_S[k], hv_sig[k] = [
-            (hv.Dataset(tr.rename('Intensity (A.U.)'))
-             .to(hv.Curve, kdims=['frame'])) for tr in [ya, c, s, sig]]
+        hv_YA[k] = (hv.Dataset(ya.rename('Intensity (A.U.)'))
+                    .to(hv.Curve, kdims=['frame']))
+        if c.sizes['unit_id'] > 0:
+            hv_C[k], hv_S[k], hv_sig[k] = [
+                (hv.Dataset(tr.rename('Intensity (A.U.)'))
+                 .to(hv.Curve, kdims=['frame'])) for tr in [c, s, sig]]
         hv_A[k] = (hv.Dataset(A_dict[k].rename('A'))
                    .to(hv.Image, kdims=['width', 'height']))
         h, w = A_dict[k].sizes['height'], A_dict[k].sizes['width']
