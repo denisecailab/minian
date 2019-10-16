@@ -596,10 +596,10 @@ def update_temporal(Y,
         mask = xr.DataArray(np.ones(len(mask_coord)),
                             dims=['unit_id'],
                             coords=dict(unit_id=mask_coord))
-    C_new, S_new, C0_new, B_new, dc_new, g_new = (
+    C_new, S_new, C0_new, B_new, dc_new = (
         C_new.where(mask, drop=True), S_new.where(mask, drop=True),
         C0_new.where(mask, drop=True), B_new.where(mask, drop=True),
-        dc_new.where(mask, drop=True), g_new.where(mask, drop=True))
+        dc_new.where(mask, drop=True))
     YrA_new = YrA.drop('unit_labels').sel(unit_id=C_new.coords['unit_id'])
     sig_new = (C0_new * dc_new + B_new + C_new).persist()
     if post_scal and len(sig_new) > 0:
