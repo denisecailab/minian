@@ -1510,6 +1510,14 @@ def visualize_temporal_update(YA_dict, C_dict, S_dict, g_dict, sig_dict, A_dict,
             output_sizes=dict(t=len(pul_crd)))
         s_pul, c_pul = (s_pul.assign_coords(t=pul_crd),
                         c_pul.assign_coords(t=pul_crd))
+        if norm:
+            c_pul = xr.apply_ufunc(
+                normalize, c_pul.chunk(dict(t=-1)),
+                input_core_dims=[['t']],
+                output_core_dims=[['t']],
+                dask='parallelized',
+                output_dtypes=[c_pul.dtype]
+            )
         pul_range = (
             f_crd.min(),
             int(np.around(f_crd.min() + (f_crd.max() - f_crd.min()) / 2)))
