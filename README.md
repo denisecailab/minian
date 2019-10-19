@@ -28,3 +28,7 @@ Note: this approach runs everything in a more isolated docker container, which m
 As a result of isolation, you have to explicitly expose resources from within the container to your machine. In our case we want to expose two things: the network port that jupyter is listening to and a file system shared across your machine and the container. The `-p 8888:8888` argument in the docker command expose port 8888 from within the container to port 8888 on your machine. If you prefer another port, for example in case another jupyter application is already running and occupies port 8888, change the number after the colon. The `-v MY_DATA_PATH:/media` argument creates a bind mount from `MY_DATA_PATH` on your machine to `/media` within the container, so that files under this two paths are synced and act as one, and you can refer to anything under `MY_DATA_PATH` by substituting that with `/media` from the notebook within the container. See [here](https://docs.docker.com/storage/bind-mounts/) for more details and change the path to suit your needs.
 
 As a final note, everything within the container **does not persist** across sessions except those in the bind mount, which means all the modifications you made to the default notebook under `/minian` will be reset to the state in the original image. Thus it is advised to keep a working copy of minian on your local machine and mount them in the container if you are using this in production mode.
+
+# License
+
+This project is licensed under GNU GPLv3.
