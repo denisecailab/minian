@@ -6,8 +6,10 @@ import pyfftw.interfaces.numpy_fft as npfft
 import dask.array.fft as dafft
 import dask.array as da
 import warnings
+import cv2
+from skimage.morphology import disk
 from dask import delayed, compute
-from scipy.ndimage.filters import maximum_filter
+from scipy.ndimage.filters import maximum_filter, median_filter
 from scipy.ndimage.measurements import label
 from scipy.stats import zscore, kstest
 from scipy.spatial.distance import pdist, squareform
@@ -17,15 +19,16 @@ from IPython.core.debugger import set_trace
 from scipy.signal import butter, lfilter
 from tqdm import tqdm_notebook
 from .cnmf import smooth_sig, label_connected
+from .utilities import get_optimal_chk, rechunk_like
 from scipy.ndimage.filters import median_filter
 
 
-def seeds_init(varr, wnd_size=500, method='rolling', stp_size=200, nchunk=100, max_wnd=10):
+def seeds_init(varr, wnd_size=500, method='rolling', stp_size=200, nchunk=100, max_wnd=10, diff_thres=2):
     print("constructing chunks")
     idx_fm = varr.coords['frame']
     nfm = len(idx_fm)
     if method == 'rolling':
-        nstp = np.ceil(nfm / stp_size)
+        nstp = np.ceil(nfm / stp_size) + 1
         centers = np.linspace(0, nfm - 1, nstp)
         hwnd = np.ceil(wnd_size / 2)
         max_idx = list(
@@ -39,18 +42,18 @@ def seeds_init(varr, wnd_size=500, method='rolling', stp_size=200, nchunk=100, m
     print("creating parallel scheme")
     res = [max_proj_frame(varr, cur_idx) for cur_idx in max_idx]
     max_res = xr.concat(res, 'sample').chunk(dict(sample=10))
-    print("computing max projection")
+    print("computing max projections")
     max_res = max_res.persist()
     print("calculating local maximum")
     loc_max = xr.apply_ufunc(
-        local_max,
-        max_res,
+        local_max_roll,
+        max_res.chunk(dict(height=-1, width=-1)),
         input_core_dims=[['height', 'width']],
         output_core_dims=[['height', 'width']],
         vectorize=True,
         dask='parallelized',
         output_dtypes=[np.uint8],
-        kwargs=dict(wnd=max_wnd)).sum('sample')
+        kwargs=dict(k0=2, k1=max_wnd, diff=diff_thres)).sum('sample')
     loc_max = loc_max.compute()
     loc_max_flt = loc_max.stack(spatial=['height', 'width'])
     seeds = (loc_max_flt.where(loc_max_flt > 0, drop=True)
@@ -61,10 +64,31 @@ def seeds_init(varr, wnd_size=500, method='rolling', stp_size=200, nchunk=100, m
 def max_proj_frame(varr, idx):
     return varr.isel(frame=idx).max('frame')
 
+def local_max_roll(fm, k0, k1, diff):
+    max_ls = []
+    for ksize in range(k0, k1):
+        selem = disk(ksize)
+        fm_max = local_max(fm, selem, diff)
+        max_ls.append(fm_max)
+    lmax = (np.stack(max_ls, axis=0).sum(axis=0) > 0).astype(np.uint8)
+    nlab, max_lab = cv2.connectedComponents(lmax)
+    max_res = np.zeros_like(lmax)
+    for lb in range(1, nlab):
+        area = max_lab == lb
+        if np.sum(area) > 1:
+            crds = tuple(int(np.median(c)) for c in np.where(area))
+            max_res[crds] = 1
+        else:
+            max_res[np.where(area)] = 1
+    return max_res
 
-def local_max(fm, wnd):
-    fm_max = maximum_filter(fm, wnd)
-    return (fm == fm_max).astype(np.uint8)
+
+def local_max(fm, k, diff=0):
+    fm_max = cv2.dilate(fm, k)
+    fm_min = cv2.erode(fm, k)
+    fm_diff = ((fm_max - fm_min) > diff).astype(np.uint8)
+    fm_max = (fm == fm_max).astype(np.uint8)
+    return cv2.bitwise_and(fm_max, fm_diff).astype(np.uint8)
 
 
 def gmm_refine(varr, seeds, q=(0.1, 99.9), n_components=2, valid_components=1, mean_mask=True):
@@ -102,7 +126,7 @@ def gmm_refine(varr, seeds, q=(0.1, 99.9), n_components=2, valid_components=1, m
 
 
 def pnr_refine(varr, seeds, noise_freq=0.25, thres=1.5, q=(0.1, 99.9), med_wnd=None):
-    print("selecting seeds") 
+    print("selecting seeds")
     varr_sub = varr.sel(
         spatial=[tuple(hw) for hw in seeds[['height', 'width']].values])
     varr_sub = varr_sub.chunk(dict(frame=-1, spatial='auto'))
@@ -253,77 +277,75 @@ def seeds_merge(varr, seeds, thres_dist=5, thres_corr=0.6, noise_freq='envelope'
     return seeds
 
 
-def initialize(varr, seeds, thres_corr=0.8, wnd=10, chk=None):
+def initialize(varr, seeds, thres_corr=0.8, wnd=10, noise_freq=None):
     print("creating parallel schedule")
     harr, warr = seeds['height'].values, seeds['width'].values
-    res_ls = [init_perseed(varr, h, w, wnd, thres_corr) for h, w in zip(harr, warr)]
-    print("computing rois")
+    varr_rechk = varr.chunk(dict(frame=-1))
+    res_ls = [init_perseed(varr_rechk, h, w, wnd, thres_corr, noise_freq)
+              for h, w in zip(harr, warr)]
+    print("computing ROIs")
     res_ls = dask.compute(res_ls)[0]
     print("concatenating results")
     A = (xr.concat([r[0] for r in res_ls], 'unit_id')
-         .assign_coords(unit_id = np.arange(len(res_ls)))
-         .fillna(0))
+         .assign_coords(unit_id = np.arange(len(res_ls))))
     C = (xr.concat([r[1] for r in res_ls], 'unit_id')
          .assign_coords(unit_id = np.arange(len(res_ls))))
     print("initializing backgrounds")
-    if not chk:
-        chk = dict(height='auto', width='auto', frame='auto', unit_id='auto')
     A = A.reindex_like(varr.isel(frame=0)).fillna(0)
-    A = A.chunk(dict(height=chk['height'], width=chk['width'], unit_id=-1))
-    C = C.chunk(dict(frame=chk['frame'], unit_id=-1))
-    varr = varr.chunk(dict(frame=chk['frame'], height=chk['height'], width=chk['width']))
-    AC = xr.apply_ufunc(
-        da.dot, A, C,
-        input_core_dims=[['height', 'width', 'unit_id'], ['unit_id', 'frame']],
-        output_core_dims=[['height', 'width', 'frame']],
-        dask='allowed',
-        output_dtypes=[A.dtype])
-    Yr = varr - AC
-    b = (Yr.chunk(dict(frame=-1, height=chk['height'], width=chk['width']))
-         .mean('frame').compute())
-    f = (Yr.chunk(dict(frame=chk['frame'], height=-1, width=-1))
-         .mean('height').mean('width').compute())
+    chk = {d: c for d, c in zip(varr.dims, varr.chunks)}
+    uchkA = get_optimal_chk(A)['unit_id']
+    uchkC = get_optimal_chk(C)['unit_id']
+    uchk = min(uchkA, uchkC)
+    A = A.chunk(dict(height=chk['height'], width=chk['width'], unit_id=uchk))
+    C = C.chunk(dict(frame=chk['frame'], unit_id=uchk))
+    A_mask = A.sum('unit_id') == 0
+    Yb = varr.where(A_mask, 0)
+    b = Yb.mean('frame').persist()
+    f = Yb.mean(['height', 'width']).persist()
+    b = rechunk_like(b, varr)
     return A, C, b, f
 
 
-def init_perseed(varr, h, w, wnd, thres_corr):
-    h_sur, w_sur = (slice(h - wnd, h + wnd),
-                    slice(w - wnd, w + wnd))
-    sur = varr.sel(height=h_sur, width=w_sur)
+def init_perseed(varr, h, w, wnd, thres_corr, noise_freq):
+    ih = np.where(varr.coords['height'] == h)[0][0]
+    iw = np.where(varr.coords['width'] == w)[0][0]
+    h_sur, w_sur = (slice(max(ih - wnd, 0), ih + wnd),
+                    slice(max(iw - wnd, 0), iw + wnd))
+    sur = varr.isel(height=h_sur, width=w_sur)
     sur_flt = sur.stack(spatial=['height', 'width'])
+    ih = np.where(sur.coords['height'] == h)[0][0]
+    iw = np.where(sur.coords['width'] == w)[0][0]
     sp_idxs = sur_flt.coords['spatial'].values
+    if noise_freq:
+        sur_smth = smooth_sig(sur_flt, noise_freq)
+    else:
+        sur_smth = sur_flt
     corr = xr.apply_ufunc(
         da.corrcoef,
-        sur_flt,
+        sur_smth,
         input_core_dims=[['spatial', 'frame']],
         output_core_dims=[['spatial', 'spatial_cp']],
         dask='allowed',
         output_sizes=dict(spatial_cp=len(sp_idxs)))
     sd_id = np.ravel_multi_index(
-        (h - sp_idxs[0][0], w - sp_idxs[0][1]),
+        (ih, iw),
         (sur.sizes['height'], sur.sizes['width']))
     corr = (corr.isel(spatial_cp=sd_id)
             .squeeze().unstack('spatial'))
     mask = corr > thres_corr
     mask_lb = xr.apply_ufunc(da_label, mask, dask='allowed')
-    sd_lb = mask_lb.sel(height=h, width=w)
+    sd_lb = mask_lb.isel(height=ih, width=iw)
     mask = (mask_lb == sd_lb)
     sur = sur.where(mask, 0)
-    sd = sur.sel(height=h, width=w)
-    A = xr.apply_ufunc(
-        da.dot, sur, sd,
-        input_core_dims=[['height', 'width', 'frame'], ['frame']],
-        output_core_dims=[['height', 'width']],
-        dask='allowed')
-    A = A / da.linalg.norm(sd.data)
-    A = A / da.linalg.norm(A.data)
+    corr = corr.where(mask, 0)
+    corr_norm = corr / corr.sum()
     C = xr.apply_ufunc(
-        da.tensordot, sur, A,
+        da.tensordot, sur, corr_norm,
         input_core_dims=[['frame', 'height', 'width'], ['height', 'width']],
         output_core_dims=[['frame']],
         kwargs=dict(axes=[(1, 2), (0, 1)]),
         dask='allowed')
-    return A, C
+    return corr, C
 
 
 @da.as_gufunc(signature="(h, w)->(h, w)", output_dtypes=int, allow_rechunk=True)

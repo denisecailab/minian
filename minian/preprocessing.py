@@ -11,7 +11,7 @@ from dask import delayed, compute
 from dask.diagnostics import ProgressBar
 from collections import OrderedDict
 from scipy.ndimage import uniform_filter
-from skimage.morphology import white_tophat, opening, diamond, disk, square
+from skimage.morphology import disk
 from medpy.filter.smoothing import anisotropic_diffusion
 from scipy.stats import zscore
 from warnings import warn
@@ -217,7 +217,7 @@ def remove_background_perframe(fm, method, wnd, selem):
     if method == 'uniform':
         return fm - uniform_filter(fm, wnd)
     elif method == 'tophat':
-        return white_tophat(fm, selem)
+        return cv2.morphologyEx(fm, cv2.MORPH_TOPHAT, selem)
 
 
 def stripe_correction(varr, reduce_dim='height', on='mean'):
