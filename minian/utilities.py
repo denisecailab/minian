@@ -20,6 +20,7 @@ import warnings
 import cv2
 import papermill as pm
 import ast
+import psutil
 from pathlib import Path
 from dask.diagnostics import ProgressBar
 from copy import deepcopy
@@ -29,7 +30,7 @@ from natsort import natsorted
 from matplotlib import pyplot as plt
 from matplotlib import animation as anim
 from collections import Iterable
-from tifffile import imsave, imread
+from tifffile import imsave, imread, TiffFile
 from pandas import Timestamp
 from IPython.core.debugger import set_trace
 from os.path import isdir, abspath
@@ -113,7 +114,16 @@ def load_videos(vpath,
             "No data with pattern {}"
             " found in the specified folder {}".format(pattern, vpath))
     print("loading {} videos in folder {}".format(len(vlist), vpath))
-    varr_list = [load_avi_lazy(v) for v in vlist]
+
+    file_extension = os.path.splitext(vlist[0])[1]
+    if file_extension == '.avi':
+        movie_load_func = load_avi_lazy
+    elif file_extension == '.tif':
+        movie_load_func = load_tif_lazy
+    else:
+        raise ValueError('Extension not supported.')
+
+    varr_list = [movie_load_func(v) for v in vlist]
     varr = darr.concatenate(varr_list, axis=0)
     varr = xr.DataArray(
         varr, dims=['frame', 'height', 'width'],
@@ -124,23 +134,35 @@ def load_videos(vpath,
     if dtype:
         varr = varr.astype(dtype)
     if downsample:
-        for dim, binw in downsample.items():
-            binw = int(binw)
-            crd = varr.coords[dim]
-            bin_eg = np.arange(crd.values[0], crd.values[-1] + binw, binw)
-            if downsample_strategy == 'mean':
-                varr = (varr.groupby_bins(
-                    dim, bin_eg, labels=bin_eg[:-1], include_lowest=True)
-                        .mean(dim).rename({dim + '_bins': dim}))
-            elif downsample_strategy == 'subset':
-                varr = varr.sel(**{dim: bin_eg[:-1]})
-            else:
-                warnings.warn(
-                    "unrecognized downsampling strategy", RuntimeWarning)
-    varr = varr.rename(ssname)
+        bin_eg = {d: np.arange(0, varr.sizes[d], w)
+                  for d, w in downsample.items()}
+        if downsample_strategy == 'mean':
+            varr = (varr.coarsen(**downsample, boundary='trim')
+                    .mean().assign_coords(**bin_eg))
+        elif downsample_strategy == 'subset':
+            varr = varr.sel(**bin_eg)
+        else:
+            warnings.warn(
+                "unrecognized downsampling strategy", RuntimeWarning)
+    varr = varr.rename('fluorescence')
     if post_process:
         varr = post_process(varr, vpath, ssname, vlist, varr_list)
     return varr
+
+def load_tif_lazy(fname):
+    with TiffFile(fname) as tif:
+        data = tif.asarray()
+
+    f = int(data.shape[0])
+    fmread = da.delayed(load_tif_perframe)
+    flist = [fmread(fname, i) for i in range(f)]
+    sample = flist[0].compute()
+    arr = [da.array.from_delayed(
+        fm, dtype=sample.dtype, shape=sample.shape) for fm in flist]
+    return da.array.stack(arr, axis=0)
+
+def load_tif_perframe(fname, fid):
+    return imread(fname, key=fid)
 
 
 def load_avi_lazy(fname):
@@ -156,6 +178,8 @@ def load_avi_lazy(fname):
 
 def load_avi_perframe(fname, fid):
     cap = cv2.VideoCapture(fname)
+    h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     cap.set(cv2.CAP_PROP_POS_FRAMES, fid)
     ret, fm = cap.read()
     if ret:
@@ -163,7 +187,23 @@ def load_avi_perframe(fname, fid):
             cv2.cvtColor(fm, cv2.COLOR_RGB2GRAY), axis=0)
     else:
         print("frame read failed for frame {}".format(fid))
-        return fm
+        return np.zeros((h, w))
+
+
+def load_avi_lazy_pims(fname):
+    vid = pims.open(fname)
+    f = len(vid)
+    def _read_fm(i):
+        fm = vid[i]
+        r, g, b = fm[:, :, 0], fm[:, :, 1], fm[:, :, 2]
+        return np.asarray(0.2125 * r + 0.7154 * g + 0.0721 * b)
+    _read_fm_dl = da.delayed(_read_fm)
+    flist = [_read_fm_dl(i) for i in range(f)]
+    sample = flist[0].compute()
+    arr = [da.array.from_delayed(
+        fm, dtype=sample.dtype, shape=sample.shape) for fm in flist]
+    return da.array.stack(arr, axis=0)
+
 
     
 def handle_crash(varr, vpath, ssname, vlist, varr_list, frame_dict):
@@ -649,11 +689,14 @@ def open_minian(dpath, fname='minian', backend='netcdf', chunks=None, post_proce
         raise NotImplementedError("backend {} not supported".format(backend))
 
 
-def open_minian_mf(dpath, index_dims, result_format='xarray', pattern=r'minian\.[0-9]+$', exclude_dirs=[], **kwargs):
+def open_minian_mf(dpath, index_dims, result_format='xarray', pattern=r'minian\.[0-9]+$', sub_dirs=[], exclude=True, **kwargs):
     minian_dict = dict()
     for nextdir, dirlist, filelist in os.walk(dpath, topdown=False):
+        nextdir = os.path.abspath(nextdir)
         cur_path = Path(nextdir)
-        if any([Path(epath) in cur_path.parents for epath in exclude_dirs]):
+        dir_tag = bool(((any([Path(epath) in cur_path.parents for epath in sub_dirs]))
+                        or nextdir in sub_dirs))
+        if exclude == dir_tag:
             continue
         flist = list(filter(lambda f: re.search(pattern, f), filelist + dirlist))
         if flist:
@@ -709,8 +752,14 @@ def delete_variable(fpath, varlist, del_org=False):
     return "deleted {} in file {}".format(str(varlist), fpath)
 
 
-def xrconcat_recursive(var_dict, dims):
+def xrconcat_recursive(var, dims):
     if len(dims) > 1:
+        if type(var) is dict:
+            var_dict = var
+        elif type(var) is list:
+            var_dict = {tuple([np.asscalar(v[d]) for d in dims]): v for v in var}
+        else:
+            raise NotImplementedError("type {} not supported".format(type(var)))
         try:
             var_dict = {k: v.to_dataset() for k, v in var_dict.items()}
         except AttributeError:
@@ -718,13 +767,15 @@ def xrconcat_recursive(var_dict, dims):
         var_ps = pd.Series(var_dict)
         var_ps.index.set_names(dims, inplace=True)
         xr_ls = []
-        for idx, var in var_ps.groupby(level=dims[0]):
-            var.index = var.index.droplevel(dims[0])
-            xarr = xrconcat_recursive(var.to_dict(), dims[1:])
+        for idx, v in var_ps.groupby(level=dims[0]):
+            v.index = v.index.droplevel(dims[0])
+            xarr = xrconcat_recursive(v.to_dict(), dims[1:])
             xr_ls.append(xarr)
         return xr.concat(xr_ls, dim=dims[0])
     else:
-        return xr.concat(var_dict.values(), dim=dims[0])
+        if type(var) is dict:
+            var = var.values()
+        return xr.concat(var, dim=dims[0])
 
 
 def update_meta(dpath, pattern=r'^minian\.nc$', meta_dict=None, backend='netcdf'):
@@ -751,6 +802,42 @@ def update_meta(dpath, pattern=r'^minian\.nc$', meta_dict=None, backend='netcdf'
                 new_ds.to_zarr(f_path, mode='w')
             print("updated: {}".format(f_path))
 
+
+def get_chk(arr):
+    return {d: c for d, c in zip(arr.dims, arr.chunks)}
+
+
+def rechunk_like(x, y):
+    try:
+        dst_chk = get_chk(y)
+        comm_dim = set(x.dims).intersection(set(dst_chk.keys()))
+        dst_chk = {d: max(dst_chk[d]) for d in comm_dim}
+        return x.chunk(dst_chk)
+    except TypeError:
+        return x.compute()
+
+
+def get_optimal_chk(arr, dim_grp=None, ncores='auto', mem_limit='auto'):
+    if ncores=='auto':
+        ncores = psutil.cpu_count()
+    if mem_limit=='auto':
+        mem_limit = (psutil.virtual_memory().available / 1024 ** 2)
+    csize = min(int(np.floor(mem_limit/ncores/3)), 1024)
+    dims = arr.dims
+    if not dim_grp:
+        dim_grp = [(d,) for d in dims]
+    opt_chk = dict()
+    for dg in dim_grp:
+        d_rest = set(dims) - set(dg)
+        dg_dict = {d: 'auto' for d in dg}
+        dr_dict = {d: -1 for d in d_rest}
+        dg_dict.update(dr_dict)
+        with da.config.set({'array.chunk-size': '{}MiB'.format(csize)}):
+            arr_chk = arr.chunk(dg_dict)
+        re_dict = {d: c for d, c in zip(dims, arr_chk.chunks)}
+        re_dict = {d: max(re_dict[d]) for d in dg}
+        opt_chk.update(re_dict)
+    return opt_chk
 
 # def resave_varr_again(dpath, pattern=r'^varr_mc_int.nc$'):
 #     for dirpath, dirnames, fnames in os.walk(dpath):
@@ -945,205 +1032,3 @@ def save_cnmf_from_mat(matpath,
     })
     ds.to_netcdf(dpath + os.sep + "cnm_from_mat.nc")
     return ds
-
-
-# def process_data(dpath, movpath, pltpath, roi):
-#     params_movie = {
-#         'niter_rig': 1,
-#         'max_shifts': (20, 20),
-#         'splits_rig': 28,
-#         'num_splits_to_process_rig': None,
-#         'strides': (48, 48),
-#         'overlaps': (24, 24),
-#         'splits_els': 28,
-#         'num_splits_to_process_els': [14, None],
-#         'upsample_factor_grid': 4,
-#         'max_deviation_rigid': 3,
-#         'p': 1,
-#         'merge_thresh': 0.9,
-#         'rf': 40,
-#         'stride_cnmf': 20,
-#         'K': 4,
-#         'is_dendrites': False,
-#         'init_method': 'greedy_roi',
-#         'gSig': [10, 10],
-#         'alpha_snmf': None,
-#         'final_frate': 30
-#     }
-#     if not dpath.endswith(os.sep):
-#         dpath = dpath + os.sep
-#     if not os.path.isfile(dpath + 'mc.npz'):
-#         # start parallel
-#         c, dview, n_processes = cm.cluster.setup_cluster(
-#             backend='local', n_processes=None, single_thread=False)
-#         dpattern = 'msCam*.avi'
-#         dlist = sorted(glob.glob(dpath + dpattern),
-#                        key=lambda var: [int(x) if x.isdigit() else x for x in re.findall(r'[^0-9]|[0-9]+', var)])
-#         if not dlist:
-#             print("No data found in the specified folder: " + dpath)
-#             return
-#         else:
-#             vdlist = list()
-#             for vname in dlist:
-#                 vdlist.append(sio.vread(vname, as_grey=True))
-#             mov_orig = cm.movie(
-#                 np.squeeze(np.concatenate(vdlist, axis=0))).astype(np.float32)
-#             # column correction
-#             meanrow = np.mean(np.mean(mov_orig, 0), 0)
-#             addframe = np.tile(meanrow, (mov_orig.shape[1], 1))
-#             mov_cc = mov_orig - np.tile(addframe, (mov_orig.shape[0], 1, 1))
-#             mov_cc = mov_cc - np.min(mov_cc)
-#             # filter
-#             mov_ft = mov_cc.copy()
-#             for fid, fm in enumerate(mov_cc):
-#                 mov_ft[fid] = ndi.uniform_filter(fm, 2) - ndi.uniform_filter(
-#                     fm, 40)
-#             mov_orig = (mov_orig - np.min(mov_orig)) / (
-#                 np.max(mov_orig) - np.min(mov_orig))
-#             mov_ft = (mov_ft - np.min(mov_ft)) / (
-#                 np.max(mov_ft) - np.min(mov_ft))
-#             np.save(dpath + 'mov_orig', mov_orig)
-#             np.save(dpath + 'mov_ft', mov_ft)
-#             del mov_orig, dlist, vdlist, mov_ft
-#             mc_data = motion_correction.MotionCorrect(
-#                 dpath + 'mov_ft.npy',
-#                 0,
-#                 dview=dview,
-#                 max_shifts=params_movie['max_shifts'],
-#                 niter_rig=params_movie['niter_rig'],
-#                 splits_rig=params_movie['splits_rig'],
-#                 num_splits_to_process_rig=params_movie[
-#                     'num_splits_to_process_rig'],
-#                 strides=params_movie['strides'],
-#                 overlaps=params_movie['overlaps'],
-#                 splits_els=params_movie['splits_els'],
-#                 num_splits_to_process_els=params_movie[
-#                     'num_splits_to_process_els'],
-#                 upsample_factor_grid=params_movie['upsample_factor_grid'],
-#                 max_deviation_rigid=params_movie['max_deviation_rigid'],
-#                 shifts_opencv=True,
-#                 nonneg_movie=False,
-#                 roi=roi)
-#             mc_data.motion_correct_rigid(save_movie=True)
-#             mov_rig = cm.load(mc_data.fname_tot_rig)
-#             np.save(dpath + 'mov_rig', mov_rig)
-#             np.savez(
-#                 dpath + 'mc',
-#                 fname_tot_rig=mc_data.fname_tot_rig,
-#                 templates_rig=mc_data.templates_rig,
-#                 shifts_rig=mc_data.shifts_rig,
-#                 total_templates_rig=mc_data.total_template_rig,
-#                 max_shifts=mc_data.max_shifts,
-#                 roi=mc_data.roi)
-#             del mov_rig
-#     else:
-#         print("motion correction data already exist. proceed")
-#     if not os.path.isfile(dpath + "cnm.npz"):
-#         # start parallel
-#         c, dview, n_processes = cm.cluster.setup_cluster(
-#             backend='local', n_processes=None, single_thread=False)
-#         fname_tot_rig = np.array_str(
-#             np.load(dpath + 'mc.npz')['fname_tot_rig'])
-#         mov, dims, T = cm.load_memmap(fname_tot_rig)
-#         mov = np.reshape(mov.T, [T] + list(dims), order='F')
-#         cnm = cnmf.CNMF(
-#             n_processes,
-#             k=params_movie['K'],
-#             gSig=params_movie['gSig'],
-#             merge_thresh=params_movie['merge_thresh'],
-#             p=params_movie['p'],
-#             dview=dview,
-#             Ain=None,
-#             rf=params_movie['rf'],
-#             stride=params_movie['stride_cnmf'],
-#             memory_fact=1,
-#             method_init=params_movie['init_method'],
-#             alpha_snmf=params_movie['alpha_snmf'],
-#             only_init_patch=True,
-#             gnb=1,
-#             method_deconvolution='oasis')
-#         cnm = cnm.fit(mov)
-#         idx_comp, idx_comp_bad = estimate_components_quality(
-#             cnm.C + cnm.YrA,
-#             np.reshape(mov, dims + (T, ), order='F'),
-#             cnm.A,
-#             cnm.C,
-#             cnm.b,
-#             cnm.f,
-#             params_movie['final_frate'],
-#             Npeaks=10,
-#             r_values_min=.7,
-#             fitness_min=-40,
-#             fitness_delta_min=-40)
-#         A2 = cnm.A.tocsc()[:, idx_comp]
-#         C2 = cnm.C[idx_comp]
-#         cnm = cnmf.CNMF(
-#             n_processes,
-#             k=A2.shape,
-#             gSig=params_movie['gSig'],
-#             merge_thresh=params_movie['merge_thresh'],
-#             p=params_movie['p'],
-#             dview=dview,
-#             Ain=A2,
-#             Cin=C2,
-#             f_in=cnm.f,
-#             rf=None,
-#             stride=None,
-#             method_deconvolution='oasis')
-#         cnm = cnm.fit(mov)
-#         idx_comp, idx_comp_bad = estimate_components_quality(
-#             cnm.C + cnm.YrA,
-#             np.reshape(mov, dims + (T, ), order='F'),
-#             cnm.A,
-#             cnm.C,
-#             cnm.b,
-#             cnm.f,
-#             params_movie['final_frate'],
-#             Npeaks=10,
-#             r_values_min=.75,
-#             fitness_min=-50,
-#             fitness_delta_min=-50)
-#         cnm.A = cnm.A.tocsc()[:, idx_comp]
-#         cnm.C = cnm.C[idx_comp]
-#         cm.cluster.stop_server()
-#         cnm.A = (cnm.A - np.min(cnm.A)) / (np.max(cnm.A) - np.min(cnm.A))
-#         cnm.C = (cnm.C - np.min(cnm.C)) / (np.max(cnm.C) - np.min(cnm.C))
-#         cnm.b = (cnm.b - np.min(cnm.b)) / (np.max(cnm.b) - np.min(cnm.b))
-#         cnm.f = (cnm.f - np.min(cnm.f)) / (np.max(cnm.f) - np.min(cnm.f))
-#         np.savez(
-#             dpath + 'cnm',
-#             A=cnm.A.todense(),
-#             C=cnm.C,
-#             b=cnm.b,
-#             f=cnm.f,
-#             YrA=cnm.YrA,
-#             sn=cnm.sn,
-#             dims=dims)
-#     else:
-#         print("cnm data already exist. proceed")
-#     try:
-#         A = cnm.A
-#         C = cnm.C
-#         dims = dims
-#     except NameError:
-#         A = np.load(dpath + 'cnm.npz')['A']
-#         C = np.load(dpath + 'cnm.npz')['C']
-#         dims = np.load(dpath + 'cnm.npz')['dims']
-#     plot_components(A, C, dims, pltpath)
-
-# def batch_process_data(animal_path, movroot, pltroot, roi):
-#     for dirname, subdirs, files in os.walk(animal_path):
-#         if files:
-#             dirnamelist = dirname.split(os.sep)
-#             dname = dirnamelist[-3] + '_' + dirnamelist[-2]
-#             movpath = movroot + os.sep + dname
-#             pltpath = pltroot + os.sep + dname
-#             if not os.path.exists(movpath):
-#                 os.mkdir(movpath)
-#             if not os.path.exists(pltpath):
-#                 os.mkdir(pltpath)
-#             movpath = movpath + os.sep
-#             pltpath = pltpath + os.sep
-#             process_data(dirname, movpath, pltpath, roi)
-#         else:
-#             print("empty folder: " + dirname + " proceed")

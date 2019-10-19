@@ -9,8 +9,14 @@ import colorsys
 import param
 import dask.array as da
 import panel as pn
+import os
+import dask
+import ffmpeg
+import cv2
+import av
 from .utilities import scale_varr
 from .motion_correction import shift_fft
+from uuid import uuid4
 from collections import OrderedDict
 from holoviews.streams import Stream, Pipe, RangeXY, DoubleTap, Tap, Selection1D, BoxEdit
 from holoviews.operation import contours, threshold
@@ -50,8 +56,8 @@ from scipy.spatial import cKDTree
 
 
 class VArrayViewer():
-    def __init__(self, varr, framerate=30, rerange=None, summary=['mean', 'diff'],
-                 meta_dims=None, datashading=True, layout=False, histogram=False):
+    def __init__(self, varr, framerate=30, rerange=None, summary=['mean'],
+                 meta_dims=None, datashading=True, layout=False):
         if isinstance(varr, list):
             for iv, v in enumerate(varr):
                 varr[iv] = v.assign_coords(data_var=v.name)
@@ -74,7 +80,6 @@ class VArrayViewer():
             self.cur_metas = dict()
         self._datashade = datashading
         self._layout = layout
-        self._histogram = histogram
         self.framerate = framerate
         self._f = self.ds.coords['frame'].values
         self._h = self.ds.sizes['height']
@@ -122,13 +127,13 @@ class VArrayViewer():
                 return hv.Image(
                     ds.sel(frame=f).compute(), kdims=['width', 'height'])
             try:
-                curds = self.ds_sub.sel(**meta)
+                curds = (self.ds_sub.sel(**meta)
+                         .rename("_".join(meta.values())))
             except ValueError:
                 curds = self.ds_sub
             fim = fct.partial(img, ds=curds)
             im = (regrid(hv.DynamicMap(fim, streams=[self.strm_f]))
-                  .opts(plot=dict(width=self._w, height=self._h),
-                        style=dict(cmap='Viridis')))
+                  .opts(frame_width=500, aspect=self._w/self._h, cmap='Viridis'))
             if self.rerange:
                 im = im.redim.range(**{vname: self.rerange})
             self.xyrange = RangeXY(source=im).rename(x_range='w', y_range='h')
@@ -139,21 +144,20 @@ class VArrayViewer():
                 im_ovly = im * hv_box
             else:
                 im_ovly = im
-            if self._histogram:
-                def hist(f, w, h, ds):
-                    if w and h:
-                        cur_im = (hv.Image(
-                            ds.sel(frame=f).compute(), kdims=['width', 'height'])
-                                  .select(height=h, width=w))
-                    else:
-                        cur_im = hv.Image(
-                            ds.sel(frame=f).compute(), kdims=['width', 'height'])
-                    return hv.operation.histogram(cur_im, frequency_label='freq', num_bins=50)
-                fhist = fct.partial(hist, ds=curds)
-                his = (hv.DynamicMap(fhist, streams=[self.strm_f, self.xyrange])
-                       .opts(plot=dict(width=int(np.around(self._w * 0.35)), height=self._h),
-                             style=dict(cmap='Viridis')))
-                im_ovly = (im_ovly << his).map(lambda p: p.opts(style=dict(cmap='Viridis')))
+            def hist(f, w, h, ds):
+                if w and h:
+                    cur_im = (hv.Image(
+                        ds.sel(frame=f).compute(), kdims=['width', 'height'])
+                              .select(height=h, width=w))
+                else:
+                    cur_im = hv.Image(
+                        ds.sel(frame=f).compute(), kdims=['width', 'height'])
+                return (hv.operation.histogram(cur_im, num_bins=50)
+                        .opts(xlabel='fluorescence', ylabel='freq'))
+            fhist = fct.partial(hist, ds=curds)
+            his = (hv.DynamicMap(fhist, streams=[self.strm_f, self.xyrange])
+                   .opts(frame_height=int(500*self._h/self._w), width=150, cmap='Viridis'))
+            im_ovly = (im_ovly << his).map(lambda p: p.opts(style=dict(cmap='Viridis')))
             return im_ovly
         if self._layout and self.meta_dicts:
             im_dict = OrderedDict()
@@ -164,19 +168,20 @@ class VArrayViewer():
         else:
             ims = get_im_ovly(self.cur_metas)
         if self.summary is not None:
-            hvsum = datashade_ndcurve(
-                hv.Dataset(self.sum_sub)
-                .to(hv.Curve, kdims=['frame']).overlay('sum_var'),
-                kdim='sum_var')
+            hvsum = (hv.Dataset(self.sum_sub)
+                     .to(hv.Curve, kdims=['frame'])
+                     .overlay('sum_var'))
+            if self._datashade:
+                hvsum = datashade_ndcurve(hvsum, kdim='sum_var')
             try:
                 hvsum = hvsum.layout(list(self.meta_dicts.keys()))
             except:
                 pass
             vl = (hv.DynamicMap(lambda f: hv.VLine(f), streams=[self.strm_f])
                   .opts(style=dict(color='red')))
-            sum_w = int(np.around(1.35 * self._w)) if self._histogram else self._w
             summ = ((hvsum * vl).map(
-                lambda p: p.opts(plot=dict(width=sum_w, height=int(np.around(self._h * 0.6))))))
+                lambda p: p.opts(frame_width=500, aspect=3),
+                [hv.RGB, hv.Curve]))
         else:
             summ = hv.Div('')
         hvobj = (ims + summ).cols(1)
@@ -188,12 +193,16 @@ class VArrayViewer():
     def _widgets(self):
         w_play = pnwgt.Player(
             length=len(self._f), interval=10,
-            value=0, width=500)
+            value=0, width=650, height=90)
         def play(f):
             if not f.old == f.new:
                 self.strm_f.event(f=int(self._f[f.new]))
         w_play.param.watch(play, 'value')
-        w_box = pnwgt.Button(name='Update Mask', button_type='primary')
+        w_box = pnwgt.Button(
+            name='Update Mask',
+            button_type='primary',
+            width=100,
+            height=30)
         w_box.param.watch(self._update_box, 'clicks')
         if not self._layout:
             wgt_meta = {d: pnwgt.Select(
@@ -207,9 +216,11 @@ class VArrayViewer():
             for d, wgt in wgt_meta.items():
                 cur_update = make_update_func(d)
                 wgt.param.watch(cur_update, 'value')
-            wgts = pn.widgets.WidgetBox(w_box, w_play, *list(wgt_meta.values()))
+            wgts = pn.layout.WidgetBox(
+                w_box, w_play, *list(wgt_meta.values()))
         else:
-            wgts = pn.widgets.WidgetBox(w_box, w_play)
+            wgts = pn.layout.WidgetBox(
+                w_box, w_play)
         return wgts
 
     def _update_subs(self):
@@ -790,8 +801,8 @@ class CNMFViewer():
                                          'trace')                     
                      .opts(plot=dict(shared_xaxis=True))
                      .map(lambda p: p.opts(
-                         plot=dict(height=h_cv,
-                                   width=w_cv)),
+                         plot=dict(frame_height=h_cv,
+                                   frame_width=w_cv)),
                           hv.RGB)
                      * cur_vl)
         temp_comp[temp_comp.keys()[0]] = (temp_comp[temp_comp.keys()[0]]
@@ -799,7 +810,7 @@ class CNMFViewer():
         return pn.panel(temp_comp)
     
     def update_temp_comp_sub(self, usub=None):
-        self.temp_comp_sub.objects = self._temp_comp_sub(usub).objects
+        self.temp_comp_sub.object = self._temp_comp_sub(usub).object
         self.wgt_man.objects = self._man_wgt().objects
         
     def update_norm(self, norm):
@@ -819,6 +830,7 @@ class CNMFViewer():
         wgt_grp = pnwgt.Select(
             name='', options=idxs_dict, width=120, height=30, value=def_idxs)
         def update_usub(usub):
+            self.usub_sel = []
             self.strm_usub.event(usub=usub.new)
         wgt_grp.param.watch(update_usub, 'value')
         wgt_grp.value = def_idxs
@@ -878,8 +890,8 @@ class CNMFViewer():
         usub.reverse()
         ulabs = self.unit_labels.sel(unit_id=usub).values
         wgt_sel = {uid: pnwgt.Select(
-            name='Unit Label', options=usub+[-1], value=ulb,
-            height=50, width=100) for uid, ulb in zip(usub, ulabs)}
+            name='Unit Label', options=usub+[-1]+ulabs.tolist(),
+            value=ulb, height=50, width=100) for uid, ulb in zip(usub, ulabs)}
         def callback_ulab(value, uid):
             self.unit_labels.loc[uid] = value.new
         for uid, sel in wgt_sel.items():
@@ -978,7 +990,9 @@ class CNMFViewer():
         metas = self.metas
         Asum = (regrid(hv.Image(
             self.Asum.sel(**metas), ['width', 'height']), precompute=True)
-                .opts(plot=dict(height=len(self._h), width=len(self._w)),
+                .opts(plot=dict(
+                    frame_height=len(self._h),
+                    frame_width=len(self._w)),
                       style=dict(cmap='Viridis')))
         cents = (hv.Dataset(
             self.cents_sub.drop(list(self.meta_dicts.keys()), axis='columns'),
@@ -996,11 +1010,15 @@ class CNMFViewer():
         fim = fct.partial(hv.Image, kdims=['width', 'height'])
         AC = (regrid(hv.DynamicMap(fim, streams=[self.pipAC]),
                      precompute=True)
-              .opts(plot=dict(height=len(self._h), width=len(self._w)),
+              .opts(plot=dict(
+                  frame_height=len(self._h),
+                  frame_width=len(self._w)),
                     style=dict(cmap='Viridis')))
         mov = (regrid(hv.DynamicMap(fim, streams=[self.pipmov]),
                       precompute=True)
-               .opts(plot=dict(height=len(self._h), width=len(self._w)),
+               .opts(plot=dict(
+                   frame_height=len(self._h),
+                   frame_width=len(self._w)),
                      style=dict(cmap='Viridis')))
         lab = fct.partial(hv.Labels, kdims=['width', 'height'], vdims=['unit_id'])
         ulab = (hv.DynamicMap(lab, streams=[self.pipusub])
@@ -1154,48 +1172,94 @@ class AlignViewer():
         self.shiftds['corrs'].loc[dict(
             animal=cur_anm, session=cur_ss)] = cur_cor
 
-        
-def generate_videos(minian, vpath, chk=None, pre_compute=False):
+
+def write_vid_blk(arr, vpath):
+    uid = uuid4()
+    vname = "{}.mp4".format(uid)
+    fpath = os.path.join(vpath, vname)
+    arr = np.clip(arr, 0, 255).astype(np.uint8)
+    container = av.open(fpath, mode='w')
+    stream = container.add_stream('mpeg4', rate=30)
+    stream.width = arr.shape[2]
+    stream.height = arr.shape[1]
+    stream.pix_fmt = 'yuv420p'
+    for fm in arr:
+        fm = cv2.cvtColor(fm, cv2.COLOR_GRAY2RGB)
+        fmav = av.VideoFrame.from_ndarray(fm, format='rgb24')
+        for p in stream.encode(fmav):
+            container.mux(p)
+    for p in stream.encode():
+        container.mux(p)
+    container.close()
+    return fpath
+
+
+def write_video(arr, vname=None, vpath='.'):
+    if not vname:
+        vname = "{}.mp4".format(uuid4())
+    fname = os.path.join(vpath, vname)
+    paths = [dask.delayed(write_vid_blk)(np.asscalar(a), vpath)
+             for a in arr.data.to_delayed()]
+    paths = dask.compute(paths)[0]
+    streams = [ffmpeg.input(p) for p in paths]
+    (ffmpeg.concat(*streams)
+     .output(fname)
+     .run())
+    for vp in paths:
+        os.remove(vp)
+    return fname
+
+
+def generate_videos(
+        minian, varr, vpath='.', vname='minian.mp4',
+        scale='auto'):
     print("generating traces")
-    if not chk:
-        chk = dict(height='auto', width='auto', frame='auto')
-    A = minian['A'].chunk(dict(height=chk['height'], width=chk['width'], unit_id=-1))
-    C = minian['C'].chunk(dict(frame=chk['frame'], unit_id=-1))
-    Y = minian['Y'].chunk(dict(frame=chk['frame'], height=chk['height'], width=chk['width']))
+    A = (minian['A'].compute()
+         .transpose('unit_id', 'height', 'width'))
+    C = minian['C'].chunk(dict(unit_id=-1)).transpose('frame', 'unit_id')
+    Y = (minian['Y'].chunk(dict(height=-1, width=-1))
+         .transpose('frame', 'height', 'width'))
+    org = varr
     try:
         B = minian['B'].chunk(dict(unit_id=-1))
     except KeyError:
         print("cannot find background term")
         B = 0
-    org = minian['org'].chunk(dict(frame=chk['frame'], height=chk['height'], width=chk['width']))
     C = C + B
     AC = xr.apply_ufunc(
-        da.dot, A, C,
-        input_core_dims=[['height', 'width', 'unit_id'], ['unit_id', 'frame']],
-        output_core_dims=[['height', 'width', 'frame']],
+        da.tensordot, C, A,
+        input_core_dims=[['frame', 'unit_id'], ['unit_id', 'height', 'width']],
+        output_core_dims=[['frame', 'height', 'width']],
         dask='allowed',
-        output_dtypes=[Y.dtype])
-    res = scale_varr(org, pre_compute=pre_compute) - scale_varr(AC, pre_compute=pre_compute)
-    org_norm = scale_varr(org, (0, 255), pre_compute=pre_compute).astype(np.uint8)
-    Y_norm = scale_varr(Y, (0, 255), pre_compute=pre_compute).astype(np.uint8)
-    AC_norm = scale_varr(AC, (0, 255), pre_compute=pre_compute).astype(np.uint8)
-    res_norm = scale_varr(res, (0, 255), pre_compute=pre_compute).astype(np.uint8)
-#     with ProgressBar():
-#         Y_norm = Y_norm.compute()
-#         AC_norm = AC_norm.compute()
-#         res_norm = res_norm.compute()
-    vid = xr.concat([
-        xr.concat([res_norm, AC_norm], 'width'),
-        xr.concat([org_norm, Y_norm], 'width')],
-        dim='height')
+        kwargs=dict(axes=(1, 0)),
+        output_dtypes=[A.dtype])
+    org_norm = org
+    if scale == 'auto':
+        Y_max = Y.max().compute()
+        Y_norm = Y * (255/Y_max)
+        AC_norm = AC * (255/Y_max)
+    else:
+        Y_norm = Y * scale
+        AC_norm = AC * scale
+    res_norm = Y_norm - AC_norm
     print("writing videos")
-    with ProgressBar():
-        vwrite(vpath, np.flip(vid.transpose('frame', 'height', 'width').values, axis=1))
-#     vwrt = FFmpegWriter(vpath)
-#     for fid, fm in vid.rolling(frame=1):
-#         print("writing frame {}".format(fid.values), end='\r')
-#         vwrite(vpath, fm.values)
-#     vwrt.close()
+    path_org = write_video(org_norm, vpath=vpath)
+    path_Y = write_video(Y_norm, vpath=vpath)
+    path_AC = write_video(AC_norm, vpath=vpath)
+    path_res = write_video(res_norm, vpath=vpath)
+    print("concatenating results")
+    str_org = ffmpeg.input(path_org)
+    str_Y = ffmpeg.input(path_Y)
+    str_AC = ffmpeg.input(path_AC)
+    str_res = ffmpeg.input(path_res)
+    vtop = ffmpeg.filter([str_org, str_Y], 'hstack')
+    vbot = ffmpeg.filter([str_res, str_AC], 'hstack')
+    vid = ffmpeg.filter([vtop, vbot], 'vstack')
+    fname = os.path.join(vpath, vname)
+    vid.output(fname).overwrite_output().run()
+    for p in [path_res, path_AC, path_Y, path_org]:
+        os.remove(p)
+    return fname
 
 
 def datashade_ndcurve(ovly, kdim=None, spread=False):
@@ -1209,9 +1273,8 @@ def datashade_ndcurve(ovly, kdim=None, spread=False):
         ovly,
         aggregator=count_cat(kdim),
         color_key=dict(color_key),
-        min_alpha=128,
-        normalization='eq_hist',
-        precompute=True)
+        min_alpha=200,
+        normalization='linear')
     if spread:
         ds_ovly = dynspread(ds_ovly)
     return ds_ovly * color_pts
@@ -1250,14 +1313,18 @@ def centroid(A, verbose=False):
             im = np.nan_to_num(im)
         cent = np.array(center_of_mass(im))
         return cent / im.shape
+    gu_rel_cent = da.gufunc(
+        rel_cent,
+        signature='(h,w)->(d)',
+        output_dtypes=float,
+        output_sizes=dict(d=2),
+        vectorize=True
+    )
     cents = (xr.apply_ufunc(
-        rel_cent, A.chunk(dict(height=-1, width=-1)),
+        gu_rel_cent, A.chunk(dict(height=-1, width=-1)),
         input_core_dims=[['height', 'width']],
         output_core_dims=[['dim']],
-        vectorize=True,
-        dask='parallelized',
-        output_dtypes=[np.float],
-        output_sizes=dict(dim=2))
+        dask='allowed')
              .assign_coords(dim=['height', 'width']))
     if verbose:
         print("computing centroids")
@@ -1273,12 +1340,64 @@ def centroid(A, verbose=False):
     return cents_df
 
 
-def visualize_seeds(max_proj, seeds, mask=None, datashade=True):
+def visualize_preprocess(fm, fn=None, include_org=True, **kwargs):
+    fh, fw = fm.sizes['height'], fm.sizes['width']
+    asp = fw / fh
+    opts_im = {
+        'plot': {'frame_width': 500, 'aspect': asp,
+                 'title': 'Image {label} {group} {dimensions}'},
+        'style': {'cmap': 'viridis'}}
+    opts_cnt = {
+        'plot': {'frame_width': 500, 'aspect': asp,
+                 'title': 'Contours {label} {group} {dimensions}'},
+        'style': {'cmap': 'viridis'}}
+    def _vis(f):
+        im = (hv.Image(f, kdims=['width', 'height'])
+                  .opts(**opts_im))
+        cnt = (hv.operation.contours(im)
+                   .opts(**opts_cnt))
+        return im, cnt
+    if fn is not None:
+        pkey = kwargs.keys()
+        pval = kwargs.values()
+        im_dict = dict()
+        cnt_dict = dict()
+        for params in itt.product(*pval):
+            fm_res = fn(fm, **dict(zip(pkey, params)))
+            cur_im, cur_cnt = _vis(fm_res)
+            cur_im = cur_im.relabel('After')
+            cur_cnt = cur_cnt.relabel('After')
+            p_str = tuple([str(p) if not isinstance(p, (int, float)) else p for p in params])
+            im_dict[p_str] = cur_im
+            cnt_dict[p_str] = cur_cnt
+        hv_im = (regrid(hv.HoloMap(im_dict, kdims=list(pkey)), precompute=True)
+                 .opts(**opts_im))
+        hv_cnt = (datashade(
+            hv.HoloMap(cnt_dict, kdims=list(pkey)), precompute=True, cmap=Viridis256)
+                  .opts(**opts_cnt))
+        if include_org:
+            im, cnt = _vis(fm)
+            im = regrid(im, precompute=True).relabel('Before').opts(**opts_im)
+            cnt = (datashade(cnt, precompute=True, cmap=Viridis256)
+                   .relabel('Before').opts(**opts_cnt))
+        return (im + cnt + hv_im + hv_cnt).cols(2)
+    else:
+        im, cnt = _vis(fm)
+        im = im.relabel('Before')
+        cnt = cnt.relabel('Before')
+        return im + cnt
+
+
+def visualize_seeds(max_proj, seeds, mask=None, datashade=False):
     h, w = max_proj.sizes['height'], max_proj.sizes['width']
+    asp = w/h
     pt_cmap = {True: 'white', False: 'red'}
-    opts_im = dict(plot=dict(height=h, width=w), style=dict(cmap='Viridis'))
+    opts_im = dict(
+        plot=dict(frame_width=600, aspect=asp),
+        style=dict(cmap='Viridis'))
     opts_pts = dict(
-        plot=dict(height=h, width=w, size_index='seeds', color_index=mask, tools=['hover']),
+        plot=dict(frame_width=600, aspect=asp,
+                  size_index='seeds', color_index=mask, tools=['hover']),
         style=dict(fill_alpha=0.8, line_alpha=0, cmap=pt_cmap))
     if mask:
         vdims = ['index', 'seeds', mask]
@@ -1302,10 +1421,12 @@ def visualize_gmm_fit(values, gmm, bins):
         gss_dict[igss] = hv.Curve((hist[1], gss))
     return (hv.Histogram(((hist[0] - hist[0].min()) / np.ptp(hist[0]), hist[1]))
             .opts(style=dict(alpha=0.6, fill_color='gray'))
-            * hv.NdOverlay(gss_dict)).opts(plot=dict(height=400, width=500))
+            * hv.NdOverlay(gss_dict)).opts(plot=dict(height=350, width=500))
 
 
-def visualize_spatial_update(A_dict, C_dict, kdims=None, norm=True):
+def visualize_spatial_update(
+        A_dict, C_dict, kdims=None,
+        norm=True, datashading=True):
     if not kdims:
         A_dict = dict(dummy=A_dict)
         C_dict = dict(dummy=C_dict)
@@ -1337,24 +1458,26 @@ def visualize_spatial_update(A_dict, C_dict, kdims=None, norm=True):
         hv_Ab_dict[key] = hv.Image((A > 0).sum('unit_id').rename('A_bin'),
                                    kdims=['width', 'height'])
         hv_C_dict[key] = hv.Dataset(C.rename('C')).to(hv.Curve, kdims='frame')
-    cropts = {'plot': {
-        'height': int(np.around(0.13 * w)),
-        'width': int(np.around(1.8 * w))}}
     hv_pts = hv.HoloMap(hv_pts_dict, kdims=kdims)
-    hv_A = (regrid(hv.HoloMap(hv_A_dict, kdims=kdims))
-            .opts(plot=dict(height=h, width=w, colorbar=True),
-                  style=dict(cmap='Viridis')))
-    hv_Ab = (regrid(hv.HoloMap(hv_Ab_dict, kdims=kdims))
-            .opts(plot=dict(height=h, width=w, colorbar=True),
-                  style=dict(cmap='Viridis')))
-    hv_C = (datashade(hv.HoloMap(hv_C_dict, kdims=kdims).collate()
-                      .grid('unit_id').add_dimension('time', 0, 0),
-                      min_alpha=128)
-            .map(lambda cr: cr.opts(**cropts), hv.RGB))
-    return ((hv_pts * hv_A).relabel('Spatial Matrix')
-            + (hv_pts * hv_Ab).relabel('Binary Spatial Matrix')
-            + hv_C.relabel('Temporal Components')
-            + hv.Div('')).cols(2)
+    hv_A = hv.HoloMap(hv_A_dict, kdims=kdims)
+    hv_Ab = hv.HoloMap(hv_Ab_dict, kdims=kdims)
+    hv_C = (hv.HoloMap(hv_C_dict, kdims=kdims).collate()
+            .grid('unit_id').add_dimension('time', 0, 0))
+    if datashading:
+        hv_A = regrid(hv_A)
+        hv_Ab = regrid(hv_Ab)
+        hv_C = datashade(hv_C)
+    hv_A = hv_A.opts(frame_width=400, aspect=w/h,
+                     colorbar=True, cmap='viridis')
+    hv_Ab = hv_Ab.opts(frame_width=400, aspect=w/h,
+                       colorbar=True, cmap='viridis')
+    hv_C = hv_C.map(
+        lambda cr: cr.opts(frame_width=500, frame_height=50),
+        hv.RGB if datashading else hv.Curve)
+    return (hv.NdLayout({
+        'pseudo-color': (hv_pts * hv_A),
+        'binary': (hv_pts * hv_Ab)}, kdims='Spatial Matrix').cols(1)
+            + hv_C.relabel('Temporal Components'))
 
 
 def visualize_temporal_update(YA_dict, C_dict, S_dict, g_dict, sig_dict, A_dict, kdims=None, norm=True, datashading=True):
@@ -1365,7 +1488,6 @@ def visualize_temporal_update(YA_dict, C_dict, S_dict, g_dict, sig_dict, A_dict,
     input_dict = {k: [i[k] for i in inputs] for k in inputs[0].keys()}
     hv_YA, hv_C, hv_S, hv_sig, hv_C_pul, hv_S_pul, hv_A = [dict() for _ in range(7)]
     for k, ins in input_dict.items():
-        ins[0] = ins[0].sel(unit_id=ins[1].coords['unit_id'])
         if norm:
             ins[:-1] = [xr.apply_ufunc(
                 normalize, i.chunk(dict(frame=-1, unit_id='auto')),
@@ -1378,24 +1500,36 @@ def visualize_temporal_update(YA_dict, C_dict, S_dict, g_dict, sig_dict, A_dict,
         ins[:] = [i.compute() for i in ins]
         ya, c, s, sig, g = ins
         f_crd = ya.coords['frame']
+        pul_crd = f_crd.values[:500]
         s_pul, c_pul = xr.apply_ufunc(
             construct_pulse_response, g,
             input_core_dims=[['lag']],
             output_core_dims=[['t'], ['t']],
             vectorize=True,
-            # kwargs=dict(length=len(f_crd)),
-            output_sizes=dict(t=500))
-        s_pul, c_pul = (s_pul.assign_coords(t=f_crd.values[:500]),
-                        c_pul.assign_coords(t=f_crd.values[:500]))
+            kwargs=dict(length=len(pul_crd)),
+            output_sizes=dict(t=len(pul_crd)))
+        s_pul, c_pul = (s_pul.assign_coords(t=pul_crd),
+                        c_pul.assign_coords(t=pul_crd))
+        if norm:
+            c_pul = xr.apply_ufunc(
+                normalize, c_pul.chunk(dict(t=-1)),
+                input_core_dims=[['t']],
+                output_core_dims=[['t']],
+                dask='parallelized',
+                output_dtypes=[c_pul.dtype]
+            )
         pul_range = (
             f_crd.min(),
             int(np.around(f_crd.min() + (f_crd.max() - f_crd.min()) / 2)))
         hv_S_pul[k], hv_C_pul[k] = [
             (hv.Dataset(tr.rename('Response (A.U.)'))
              .to(hv.Curve, kdims=['t'])) for tr in [s_pul, c_pul]]
-        hv_YA[k], hv_C[k], hv_S[k], hv_sig[k] = [
-            (hv.Dataset(tr.rename('Intensity (A.U.)'))
-             .to(hv.Curve, kdims=['frame'])) for tr in [ya, c, s, sig]]
+        hv_YA[k] = (hv.Dataset(ya.rename('Intensity (A.U.)'))
+                    .to(hv.Curve, kdims=['frame']))
+        if c.sizes['unit_id'] > 0:
+            hv_C[k], hv_S[k], hv_sig[k] = [
+                (hv.Dataset(tr.rename('Intensity (A.U.)'))
+                 .to(hv.Curve, kdims=['frame'])) for tr in [c, s, sig]]
         hv_A[k] = (hv.Dataset(A_dict[k].rename('A'))
                    .to(hv.Image, kdims=['width', 'height']))
         h, w = A_dict[k].sizes['height'], A_dict[k].sizes['width']
@@ -1406,24 +1540,23 @@ def visualize_temporal_update(YA_dict, C_dict, S_dict, g_dict, sig_dict, A_dict,
     hv_pul = {'Simulated Calcium': hvobjs[4], 'Simulated Spike': hvobjs[5]}
     hv_unit = hv.HoloMap(hv_unit, kdims='traces').collate().overlay('traces')
     hv_pul = hv.HoloMap(hv_pul, kdims='traces').collate().overlay('traces')
+    hv_A = hvobjs[6]
     if datashading:
         hv_unit = datashade_ndcurve(hv_unit, 'traces')
-        hv_pul = datashade_ndcurve(hv_pul, 'traces', spread=True)
-        hv_A = regrid(hvobjs[6])
+        hv_A = regrid(hv_A)
     else:
-        hv_unit = hv.DynamicMap(hv_unit)
-        hv_pul = hv.DynamicMap(hv_pul)
-        hv_A = hv.DynamicMap(hvobjs[6])
-    # hv_unit = hv_unit.opts(plot=dict(height=h, width=2*w))
-    hv_unit = hv_unit.map(lambda p: p.opts(plot=dict(height=h, width=2*w)))
-    hv_pul = (hv_pul.opts(plot=dict(height=h, width=w))
+        hv_unit = Dynamic(hv_unit)
+        hv_A = Dynamic(hv_A)
+    hv_pul = Dynamic(hv_pul)
+    hv_unit = hv_unit.map(
+        lambda p: p.opts(plot=dict(frame_height=400, frame_width=1000)))
+    hv_pul = (hv_pul.opts(plot=dict(frame_width=500, aspect=w/h))
               .redim(t=hv.Dimension('t', soft_range=pul_range)))
-    hv_pul = hv_pul.map(lambda p: p.opts(plot=dict(height=h, width=w)))
-    hv_A = hv_A.opts(plot=dict(height=h, width=w), style=dict(cmap='Viridis'))
-    return (hv_unit.relabel("Temporal Traces")
-            + hv.Div('')
-            + hv_pul.relabel("Simulated Pulse Response")
-            + hv_A.relabel("Spatial Footprint")).cols(2)
+    hv_A = hv_A.opts(plot=dict(frame_width=500, aspect=w/h), style=dict(cmap='Viridis'))
+    return (hv_unit.relabel("Current Unit: Temporal Traces")
+            + hv.NdLayout({
+                'Simulated Pulse Response': hv_pul,
+                'Spatial Footprint': hv_A}, kdims='Current Unit')).cols(1)
 
 
 def roi_draw(im):

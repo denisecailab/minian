@@ -62,10 +62,10 @@ def get_minian_list(path, pattern=r'^minian.nc$'):
         mnlist += mn_paths
     return mnlist
 
-def estimate_shifts(minian_df, by='session', to='first', temp_var='org', template=None, rm_background=False, pct_thres=99.9):
+def estimate_shifts(minian_df, by='session', to='first', temp_var='org', template=None, rm_background=False):
     if template is not None:
         minian_df['template'] = template
-        
+
     def get_temp(row):
         ds, temp = row['minian'], row['template']
         try:
@@ -79,7 +79,7 @@ def estimate_shifts(minian_df, by='session', to='first', temp_var='org', templat
             except KeyError:
                 raise NotImplementedError(
                     "template {} not understood".format(temp))
-    
+
     minian_df['template'] = minian_df.apply(get_temp, axis='columns')
     grp_dims = list(minian_df.index.names)
     grp_dims.remove(by)
@@ -92,7 +92,7 @@ def estimate_shifts(minian_df, by='session', to='first', temp_var='org', templat
                 "variable {} not found in dataset".format(temp_var))
         temps = (xr.concat(temp_ls, dim=by).expand_dims(grp_dims)
                  .reset_coords(drop=True))
-        res = estimate_shift_fft(temps, dim=by, pct_thres=pct_thres, on=to)
+        res = estimate_shift_fft(temps, dim=by, on=to)
         shifts = res.sel(variable=['height', 'width'])
         corrs = res.sel(variable='corr')
         temps_sh = apply_shifts(temps, shifts)
@@ -253,13 +253,12 @@ def centroids(A, window=None):
 
 def calculate_centroid_distance(cents, by='session', index_dim=['animal'], tile=(50, 50)):
     res_list = []
-    print("creating parallel schedule")
-    for idxs, grp in cents.groupby(index_dim):
-        if type(idxs) is not tuple:
-            idxs = (idxs,)
+
+    def cent_pair(grp):
         for (byA, grpA), (byB, grpB) in itt.combinations(list(grp.groupby(by)), 2):
             cur_pairs = subset_pairs(grpA, grpB, tile)
             pairs_ls = list(cur_pairs)
+            len_df = len(pairs_ls)
             subA = (grpA.set_index('unit_id')
                     .loc[[p[0] for p in pairs_ls]]
                     .reset_index())
@@ -267,25 +266,35 @@ def calculate_centroid_distance(cents, by='session', index_dim=['animal'], tile=
                     .loc[[p[1] for p in pairs_ls]]
                     .reset_index())
             dist = da.delayed(pd_dist)(subA, subB).rename('distance')
-            meta_df = pd.concat(
-                [pd.Series([idx] * len(pairs_ls), name=('meta', dim))
-                 for idx, dim in zip(idxs, index_dim)],
-                axis='columns')
             dist_df = da.delayed(pd.concat)(
                 [subA['unit_id'].rename(byA), subB['unit_id'].rename(byB), dist], axis='columns')
             dist_df = dist_df.rename(columns={
                 'distance': ('variable', 'distance'),
                 byA: (by, byA),
                 byB: (by, byB)})
+            return dist_df, len_df
+
+    print("creating parallel schedule")
+    if index_dim:
+        for idxs, grp in cents.groupby(index_dim):
+            dist_df, len_df = cent_pair(grp)
+            if type(idxs) is not tuple:
+                idxs = (idxs,)
+            meta_df = pd.concat(
+                [pd.Series([idx] * len_df, name=('meta', dim))
+                 for idx, dim in zip(idxs, index_dim)],
+                axis='columns')
             res_df = da.delayed(pd.concat)([meta_df, dist_df], axis='columns')
             res_list.append(res_df)
+    else:
+        res_list = [cent_pair(cents)[0]]
     print("computing distances")
-    with ProgressBar():
-        res_list = da.compute(res_list)[0]
-    return pd.concat(res_list, ignore_index=True)
-            
+    res_list = da.compute(res_list)[0]
+    res_df = pd.concat(res_list, ignore_index=True)
+    res_df.columns = pd.MultiIndex.from_tuples(res_df.columns)
+    return res_df
 
-            
+
 def subset_pairs(A, B, tile):
     Ah, Aw, Bh, Bw = A['height'], A['width'], B['height'], B['width']
     hh = (min(Ah.min(), Bh.min()), max(Ah.max(), Bh.max()))
@@ -311,8 +320,7 @@ def pd_dist(A, B):
     return np.sqrt(
         ((A[['height', 'width']] - B[['height', 'width']])**2)
         .sum('columns'))
-    
-    
+
 def cartesian(*args):
     n = len(args)
     return np.array(np.meshgrid(*args)).T.reshape((-1, n))
@@ -438,20 +446,23 @@ def _calc_cent_dist_old(ssA, ssB, cents, A, window, tile, dim_h, dim_w, shift,
 def group_by_session(df):
     ss = df['session'].notnull()
     grp = ss.apply(lambda r: tuple(r.index[r].tolist()), axis=1)
-    df['meta', 'group'] = grp
+    df['group', 'group'] = grp
     return df
 
 
 def calculate_mapping(dist):
     map_idxs = set()
-    for anm, grp in dist.groupby(dist['meta', 'animal']):
-        map_idxs.update(mapping(grp))
+    try:
+        for anm, grp in dist.groupby(dist['meta', 'animal']):
+            map_idxs.update(mapping(grp))
+    except KeyError:
+        map_idxs = mapping(dist)
     return dist.loc[list(map_idxs)]
 
 
 def mapping(dist):
     map_list = set()
-    for sess, grp in dist.groupby(dist['meta', 'group']):
+    for sess, grp in dist.groupby(dist['group', 'group']):
         minidx_list = []
         for ss in sess:
             minidx = set()
@@ -465,8 +476,11 @@ def mapping(dist):
 
 def resolve_mapping(mapping):
     map_list = []
-    for anm, grp in mapping.groupby(mapping['meta', 'animal']):
-        map_list.append(resolve(grp))
+    try:
+        for anm, grp in mapping.groupby(mapping['meta', 'animal']):
+            map_list.append(resolve(grp))
+    except KeyError:
+        map_list = [resolve(mapping)]
     return pd.concat(map_list, ignore_index=True)
 
 
@@ -497,29 +511,30 @@ def resolve(mapping):
 
 
 def fill_mapping(mappings,
-                 cents,
-                 id_dims=[('meta', 'animal')],
-                 fill_dim=('session', )):
-    for cur_id, cur_grp in mappings.groupby([mappings[i] for i in id_dims]):
-        for cur_ss in cur_grp[fill_dim]:
-            cur_ss_grp = cur_grp[fill_dim][cur_ss].dropna()
-            if cur_ss_grp.duplicated().sum() > 0:
-                print(
-                    "WARNING: duplicated values with group {} and column {}. skipping".
-                    format(cur_id, cur_ss))
-                continue
-            else:
-                cur_ss_all = cents[(cents['animal'] == cur_id)
-                                   & (cents['session'] == cur_ss)][
-                                       'unit_id'].dropna()
-                cur_fill_set = set(cur_ss_all.unique()) - set(
-                    cur_ss_grp.unique())
-                cur_fill_df = pd.DataFrame({
-                    ('session', cur_ss):
-                    list(cur_fill_set),
-                    ('meta', 'animal'):
-                    cur_id
-                })
-                mappings = pd.concat(
-                    [mappings, cur_fill_df], ignore_index=True)
+                 cents):
+
+    def fill(cur_grp, cur_cent):
+        fill_ls = []
+        for cur_ss in list(cur_grp['session']):
+            cur_ss_grp = cur_grp['session'][cur_ss].dropna()
+            cur_ss_all = cur_cent[cur_cent['session'] == cur_ss][
+                'unit_id'].dropna()
+            cur_fill_set = set(cur_ss_all.unique()) - set(
+                cur_ss_grp.unique())
+            cur_fill_df = pd.DataFrame({
+                ('session', cur_ss):
+                list(cur_fill_set),
+            })
+            fill_ls.append(cur_fill_df)
+        return pd.concat(fill_ls, ignore_index=True)
+
+    try:
+        for cur_id, cur_grp in mappings.groupby(list(mappings['meta'])):
+            cur_cent = (cents.set_index(list(mappings['meta']))
+                        .loc[cur_id].reset_index())
+            cur_grp_fill = fill(cur_grp, cur_cent)
+            mappings = pd.concat([mappings, cur_grp_fill], ignore_index=True)
+    except KeyError:
+        map_fill = fill(mappings, cents)
+        mappings = pd.concat([mappings, map_fill], ignore_index=True)
     return mappings

@@ -105,3 +105,13 @@ venv.bak/
 
 # mypy
 .mypy_cache/
+
+# minian results
+demo_movies/minian
+*.mp4
+
+# vscode
+.vscode
+
+# dask worker space
+dask-worker-space
