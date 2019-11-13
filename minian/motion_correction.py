@@ -7,9 +7,10 @@ import pyfftw.interfaces.numpy_fft as npfft
 import numba as nb
 import dask.array as darr
 from scipy.stats import zscore
-from scipy.ndimage import center_of_mass
+from scipy.ndimage import center_of_mass, label
 from collections import OrderedDict
 from skimage import transform as tf
+from skimage.morphology import disk
 from scipy.stats import zscore
 from dask import delayed, compute
 from dask.diagnostics import ProgressBar
@@ -355,7 +356,7 @@ def apply_translation(img, shift):
     return np.roll(img, shift, axis=(1, 0))
 
 
-def estimate_shift_fft(varr, dim='frame', on='max', max_shift=15):
+def estimate_shift_fft(varr, dim='frame', on='max', max_shift=15, mode='local_max', max_wnd=5):
     varr = varr.chunk(dict(height=-1, width=-1))
     dims = list(varr.dims)
     dims.remove(dim)
@@ -412,6 +413,7 @@ def estimate_shift_fft(varr, dim='frame', on='max', max_shift=15):
         output_core_dims=[['variable']],
         vectorize=True,
         dask='parallelized',
+        kwargs=dict(max_sh=max_shift, mode=mode, max_wnd=max_wnd),
         output_dtypes=[float],
         output_sizes=dict(variable=3))
     res = res.assign_coords(variable=['height', 'width', 'corr'])
@@ -447,21 +449,40 @@ def mask_shifts(varr_fft, corr, shifts, z_thres, perframe=True, pad_f=1):
     return shifts, mask
 
 
-def shift_fft(fft_src, fft_dst):
+def shift_fft(fft_src, fft_dst, max_sh, mode='local_max', qthres=None, max_wnd=5):
     if not np.iscomplexobj(fft_src):
         fft_src = np.fft.fft2(fft_src, np.array(fft_src.shape) * 2)
     if not np.iscomplexobj(fft_dst):
         fft_dst = np.fft.fft2(fft_dst, np.array(fft_dst.shape) * 2)
     if np.isnan(fft_src).any() or np.isnan(fft_dst).any():
         return np.array([0, 0, np.nan])
-    dims = fft_dst.shape
     prod = fft_src * np.conj(fft_dst)
     iprod = np.fft.ifft2(prod)
+    iprod[max_sh + 1:-max_sh, :] = np.nan
+    iprod[:, max_sh + 1:-max_sh] = np.nan
     iprod_sh = np.fft.fftshift(iprod)
     cor = iprod_sh.real
-    max_sh = np.unravel_index(np.argmax(cor), cor.shape)
-    sh = max_sh - np.ceil(np.array(dims) / 2.0)
-    corr = np.max(cor)
+    if qthres:
+        cor_bl = cor > np.nanquantile(cor, qthres)
+        lab = label(cor_bl)
+        if lab[1] > 1:
+            com = center_of_mass(cor_bl, lab[0], np.arange(lab[1])+1)
+            shs = np.abs(com - np.ceil(np.array(cor.shape) / 2.0).reshape((-1, 2))).sum(axis=1)
+            cor = np.where(lab[0] == (np.argmin(shs) + 1), cor, 0)
+    if mode == 'global_max':
+        max_sh = np.unravel_index(np.nanargmax(cor), cor.shape)
+    elif mode == 'com':
+        max_sh = center_of_mass(np.nan_to_num(cor))
+    elif mode == 'local_max':
+        kmax = disk(max_wnd)
+        cor_max = cv2.dilate(np.nan_to_num(cor), kmax)
+        maxs = np.array(np.nonzero(cor == cor_max)).T
+        shs = np.abs(maxs - np.ceil(np.array(cor.shape) / 2.0).reshape((-1, 2))).sum(axis=1)
+        max_sh = maxs[np.argmin(shs)]
+    else:
+        raise NotImplementedError(mode)
+    sh = max_sh - np.ceil(np.array(cor.shape) / 2.0)
+    corr = np.nanmax(cor)
     return np.concatenate([sh, corr], axis=None)
 
 
