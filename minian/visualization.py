@@ -88,7 +88,7 @@ class VArrayViewer():
         self.rerange = rerange
         CStream = Stream.define(
             'CStream',
-            f=param.Integer(default=0, bounds=(self._f.min(), self._f.max())))
+            f=param.Integer(default=int(self._f.min()), bounds=(self._f.min(), self._f.max())))
         self.strm_f = CStream()
         self.str_box = BoxEdit()
         self.widgets = self._widgets()
