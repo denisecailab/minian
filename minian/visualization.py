@@ -1204,7 +1204,7 @@ def write_video(arr, vname=None, vpath='.'):
     streams = [ffmpeg.input(p) for p in paths]
     (ffmpeg.concat(*streams)
      .output(fname)
-     .run())
+     .run(overwrite_output=True))
     for vp in paths:
         os.remove(vp)
     return fname
