@@ -375,6 +375,8 @@ def estimate_shift_fft(varr, dim='frame', on='max', max_shift=15):
         onfm = varr.isel({dim: 0}).compute()
     elif on == 'last':
         onfm = varr.isel({dim: -1}).compute()
+    elif on == 'perframe':
+        onfm = varr.shift({dim: -1})
     else:
         try:
             onfm = varr.sel({dim: on}).compute()
@@ -385,14 +387,22 @@ def estimate_shift_fft(varr, dim='frame', on='max', max_shift=15):
         onfm,
         input_core_dims=[['height', 'width']],
         output_core_dims=[['height', 'width']],
-        kwargs=dict(w=max_shift)).chunk()
-    src_fft = xr.apply_ufunc(
-        darr.fft.fft2,
-        onfm,
-        input_core_dims=[['height', 'width']],
-        output_core_dims=[['height_pad', 'width_pad']],
-        dask='allowed',
-        kwargs=dict(s=pad_s)).persist()
+        dask='parallelized',
+        vectorize=True,
+        kwargs=dict(w=max_shift),
+        output_dtypes=[onfm.dtype])
+    if on == 'perframe':
+        src_fft = onfm.rename(
+            {'height': 'height_pad', 'width': 'width_pad'})
+    else:
+        onfm = onfm.chunk()
+        src_fft = xr.apply_ufunc(
+            darr.fft.fft2,
+            onfm,
+            input_core_dims=[['height', 'width']],
+            output_core_dims=[['height_pad', 'width_pad']],
+            dask='allowed',
+            kwargs=dict(s=pad_s)).persist()
     print("estimating shifts")
     res = xr.apply_ufunc(
         shift_fft,
