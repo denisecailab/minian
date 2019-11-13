@@ -448,6 +448,28 @@ def mask_shifts(varr_fft, corr, shifts, z_thres, perframe=True, pad_f=1):
                 print("unable to correct for bad frame: {}".format(int(cur_bad)))
     return shifts, mask
 
+# @delayed
+def shift_bisect(varr, max_sh, mode, qthres):
+    nf = varr.shape[0]
+    if nf > 2:
+        fm0 = varr[:int(np.ceil(nf/2)), :, :]
+        fm1 = varr[int(np.ceil(nf/2)):, :, :]
+        sh0 = shift_bisect(fm0, max_sh, mode, qthres)
+        sh1 = shift_bisect(fm1, max_sh, mode, qthres)
+        for ifm, (curfm, cursh) in enumerate(zip(fm0, sh0)):
+            fm0[ifm, :, :] = shift_perframe(curfm, cursh)
+        for ifm, (curfm, cursh) in enumerate(zip(fm1, sh1)):
+            fm1[ifm, :, :] = shift_perframe(curfm, cursh)
+        temp0 = np.max(fm0, axis=0)
+        temp1 = np.max(fm1, axis=0)
+        res = shift_fft(temp0, temp1, max_sh, mode, qthres)
+        return np.concatenate([sh0, sh1 + np.reshape(res[:2], (-1, 2))], axis=0)
+    elif nf == 2:
+        res = shift_fft(varr[0], varr[1], max_sh, mode, qthres)
+        return np.stack([(0, 0), res[:2]])
+    else:
+        return np.reshape(np.array((0, 0)), (1, 2))
+
 
 def shift_fft(fft_src, fft_dst, max_sh, mode='local_max', qthres=None, max_wnd=5):
     if not np.iscomplexobj(fft_src):
