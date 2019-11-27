@@ -150,12 +150,12 @@ def load_videos(vpath,
     return varr
 
 def load_tif_lazy(fname):
-    with TiffFile(fname) as tif:
-        data = tif.asarray()
+    data = TiffFile(fname)
+    f = len(data.pages)
 
-    f = int(data.shape[0])
     fmread = da.delayed(load_tif_perframe)
     flist = [fmread(fname, i) for i in range(f)]
+
     sample = flist[0].compute()
     arr = [da.array.from_delayed(
         fm, dtype=sample.dtype, shape=sample.shape) for fm in flist]
