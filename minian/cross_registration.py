@@ -255,10 +255,12 @@ def calculate_centroid_distance(cents, by='session', index_dim=['animal'], tile=
     res_list = []
 
     def cent_pair(grp):
+        dist_df_ls = []
+        len_df = 0
         for (byA, grpA), (byB, grpB) in itt.combinations(list(grp.groupby(by)), 2):
             cur_pairs = subset_pairs(grpA, grpB, tile)
             pairs_ls = list(cur_pairs)
-            len_df = len(pairs_ls)
+            len_df = len_df + len(pairs_ls)
             subA = (grpA.set_index('unit_id')
                     .loc[[p[0] for p in pairs_ls]]
                     .reset_index())
@@ -272,7 +274,9 @@ def calculate_centroid_distance(cents, by='session', index_dim=['animal'], tile=
                 'distance': ('variable', 'distance'),
                 byA: (by, byA),
                 byB: (by, byB)})
-            return dist_df, len_df
+            dist_df_ls.append(dist_df)
+        dist_df = da.delayed(pd.concat)(dist_df_ls, ignore_index=True, sort=True)
+        return dist_df, len_df
 
     print("creating parallel schedule")
     if index_dim:
