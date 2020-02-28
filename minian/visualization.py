@@ -1292,7 +1292,7 @@ def normalize(a): return np.interp(a, (np.nanmin(a), np.nanmax(a)), (0, +1))
 def convolve_G(s, g):
     G = construct_G(g, len(s))
     try:
-        c = linalg.inv(G).dot(s)
+        c = np.linalg.inv(G).dot(s)
     except np.linalg.LinAlgError:
         c = s.copy()
     return c
@@ -1490,7 +1490,7 @@ def visualize_temporal_update(YA_dict, C_dict, S_dict, g_dict, sig_dict, A_dict,
     for k, ins in input_dict.items():
         if norm:
             ins[:-1] = [xr.apply_ufunc(
-                normalize, i.chunk(dict(frame=-1, unit_id='auto')),
+                normalize, i.chunk(dict(frame=-1)),
                 input_core_dims=[['frame']],
                 output_core_dims=[['frame']],
                 vectorize=True,
@@ -1517,7 +1517,7 @@ def visualize_temporal_update(YA_dict, C_dict, S_dict, g_dict, sig_dict, A_dict,
                 output_core_dims=[['t']],
                 dask='parallelized',
                 output_dtypes=[c_pul.dtype]
-            )
+            ).compute()
         pul_range = (
             f_crd.min(),
             int(np.around(f_crd.min() + (f_crd.max() - f_crd.min()) / 2)))
