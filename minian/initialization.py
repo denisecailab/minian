@@ -29,7 +29,7 @@ def seeds_init(varr, wnd_size=500, method='rolling', stp_size=200, nchunk=100, m
     nfm = len(idx_fm)
     if method == 'rolling':
         nstp = np.ceil(nfm / stp_size) + 1
-        centers = np.linspace(0, nfm - 1, nstp)
+        centers = np.linspace(0, nfm - 1, int(nstp))
         hwnd = np.ceil(wnd_size / 2)
         max_idx = list(
             map(lambda c: slice(int(np.floor(c - hwnd).clip(0)), int(np.ceil(c + hwnd))),
