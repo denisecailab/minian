@@ -115,3 +115,6 @@ demo_movies/minian
 
 # dask worker space
 dask-worker-space
+
+# history
+.history
