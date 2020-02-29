@@ -7,6 +7,7 @@ import dask.array.fft as dafft
 import dask.array.linalg as dalin
 import dask.array as darr
 import functools as fct
+import cv2
 # import dask_ml.joblib
 from dask import delayed, compute
 from dask.diagnostics import Profiler
@@ -169,12 +170,12 @@ def update_spatial(Y,
     if dl_wnd:
         selem = moph.disk(dl_wnd)
         sub = xr.apply_ufunc(
-            moph.dilation,
-            A.fillna(0).chunk(dict(height=-1, width=-1)),
+            cv2.dilate,
+            A.chunk(dict(height=-1, width=-1)),
             input_core_dims=[['height', 'width']],
             output_core_dims=[['height', 'width']],
             vectorize=True,
-            kwargs=dict(selem=selem),
+            kwargs=dict(kernel=selem),
             dask='parallelized',
             output_dtypes=[A.dtype])
         sub = (sub > 0)
@@ -184,11 +185,11 @@ def update_spatial(Y,
     if update_background:
         A = xr.concat([A, b.assign_coords(unit_id=-1)], 'unit_id')
         b_erd = xr.apply_ufunc(
-            moph.erosion,
+            cv2.erode,
             b.chunk(dict(height=-1, width=-1)),
             input_core_dims=[['height', 'width']],
             output_core_dims=[['height', 'width']],
-            kwargs=dict(selem=selem),
+            kwargs=dict(kernel=selem),
             dask='parallelized',
             output_dtypes=[b.dtype])
         sub = xr.concat([
