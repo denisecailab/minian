@@ -116,7 +116,7 @@ def load_videos(vpath,
     print("loading {} videos in folder {}".format(len(vlist), vpath))
 
     file_extension = os.path.splitext(vlist[0])[1]
-    if file_extension == '.avi':
+    if file_extension in ('.avi', '.mkv'):
         movie_load_func = load_avi_lazy
     elif file_extension == '.tif':
         movie_load_func = load_tif_lazy
