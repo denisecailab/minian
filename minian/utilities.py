@@ -736,8 +736,9 @@ def save_minian(var, dpath, fname='minian', backend='netcdf', meta_dict=None, ov
         return ds
     elif backend is 'zarr':
         md = {True: 'w', False: 'w-'}[overwrite]
-        ds.to_zarr(os.path.join(dpath, fname, var.name + '.zarr'), mode=md)
-        return ds
+        fp = os.path.join(dpath, fname, var.name + '.zarr')
+        ds.to_zarr(fp, mode=md)
+        return xr.open_zarr(fp)[var.name]
     else:
         raise NotImplementedError("backend {} not supported".format(backend))
 
