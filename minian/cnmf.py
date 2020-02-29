@@ -19,7 +19,7 @@ from scipy.sparse import diags, dia_matrix
 from scipy.linalg import toeplitz, lstsq
 from scipy.spatial.distance import pdist, squareform
 from sklearn.linear_model import LassoLars
-from sklearn.externals.joblib import parallel_backend
+from sklearn.utils import parallel_backend
 from numba import jit, guvectorize
 from skimage import morphology as moph
 from statsmodels.tsa.stattools import acovf
@@ -212,7 +212,11 @@ def update_spatial(Y,
         input_core_dims=[['frame'], [], ['unit_id']],
         output_core_dims=[['unit_id']],
         dask='allowed')
-    A_new = A_new.persist()
+    try:
+        with parallel_backend('dask'):
+            A_new = A_new.persist()
+    except ValueError:
+        A_new = A_new.persist()
     print("removing empty units")
     if zero_thres == 'eps':
         zero_thres = np.finfo(A_new.dtype).eps
