@@ -497,7 +497,7 @@ def update_temporal(Y,
     if compute:
         g = g.persist()
     print("updating isolated temporal components")
-    if use_spatial is 'full':
+    if use_spatial == 'full':
         result_iso = xr.apply_ufunc(
             update_temporal_cvxpy,
             Y_flt.chunk(dict(spatial=-1, frame=-1)),
@@ -640,7 +640,7 @@ def update_temporal(Y,
 
 
 def get_ar_coef(y, sn, p, add_lag, pad=None):
-    if add_lag is 'p':
+    if add_lag == 'p':
         max_lag = p * 2
     else:
         max_lag = p + add_lag
@@ -766,7 +766,7 @@ def update_temporal_cvxpy(y, g, sn, A=None, **kwargs):
                     "problem status is {}, returning null".format(prob.status),
                     RuntimeWarning)
                 return np.full((5, c.shape[0], c.shape[1]), np.nan).squeeze()
-    if not prob.status is 'optimal':
+    if not (prob.status == 'optimal'):
         warnings.warn("problem solved sub-optimally", RuntimeWarning)
     try:
         return np.stack(
