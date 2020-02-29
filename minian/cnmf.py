@@ -221,7 +221,7 @@ def update_spatial(Y,
     if zero_thres == 'eps':
         zero_thres = np.finfo(A_new.dtype).eps
     A_new = A_new.where(A_new > zero_thres).fillna(0)
-    non_empty = A_new.sum(['width', 'height']) > 0
+    non_empty = (A_new.sum(['width', 'height']) > 0).compute()
     A_new = A_new.where(non_empty, drop=True)
     C_new = C.where(non_empty, drop=True)
     A_new = rechunk_like(A_new, A).persist()
