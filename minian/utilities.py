@@ -817,12 +817,21 @@ def rechunk_like(x, y):
         return x.compute()
 
 
-def get_optimal_chk(arr, dim_grp=None, ncores='auto', mem_limit='auto'):
+def get_optimal_chk(ref, arr=None, dim_grp=None, ncores='auto', mem_limit='auto'):
+    if arr is None:
+        arr = ref
+    szs = ref.sizes
     if ncores=='auto':
         ncores = psutil.cpu_count()
     if mem_limit=='auto':
-        mem_limit = (psutil.virtual_memory().available / 1024 ** 2)
-    csize = min(int(np.floor(mem_limit/ncores/3)), 1024)
+        mem_limit = (psutil.virtual_memory().available / (1024 ** 2))
+    tempsz = 1000*(3*szs['height'] * szs['width'] + 7 * szs['frame']) * ref.dtype.itemsize / (1024 ** 2)
+    csize = min(int(np.floor((mem_limit - tempsz) / ncores / 4)), 1024)
+    if csize <= 0:
+        warnings.warn(
+            "estimated memory limit is smaller than 0. Using 64MiB chunksize instead. "
+            "Make sure you have enough memory or manually set mem_limit")
+        csize = 64
     dims = arr.dims
     if not dim_grp:
         dim_grp = [(d,) for d in dims]
