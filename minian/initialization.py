@@ -293,8 +293,8 @@ def initialize(varr, seeds, thres_corr=0.8, wnd=10, noise_freq=None):
     print("initializing backgrounds")
     A = A.reindex_like(varr.isel(frame=0)).fillna(0)
     chk = {d: c for d, c in zip(varr.dims, varr.chunks)}
-    uchkA = get_optimal_chk(A)['unit_id']
-    uchkC = get_optimal_chk(C)['unit_id']
+    uchkA = get_optimal_chk(varr, A)['unit_id']
+    uchkC = get_optimal_chk(varr, C)['unit_id']
     uchk = min(uchkA, uchkC)
     A = A.chunk(dict(height=chk['height'], width=chk['width'], unit_id=uchk))
     C = C.chunk(dict(frame=chk['frame'], unit_id=uchk))
