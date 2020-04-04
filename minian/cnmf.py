@@ -181,7 +181,6 @@ def update_spatial(Y,
         sub = (sub > 0)
     else:
         sub = xr.apply_ufunc(np.ones_like, A.compute())
-    sub = sub.compute().astype(bool).transpose(*A.dims).chunk(A.chunks)
     if update_background:
         A = xr.concat([A, b.assign_coords(unit_id=-1)], 'unit_id')
         b_erd = xr.apply_ufunc(
@@ -196,22 +195,19 @@ def update_spatial(Y,
             sub, (b_erd > 0).astype(bool).assign_coords(unit_id=-1)],
                         'unit_id')
         C = xr.concat([C, f.assign_coords(unit_id=-1)], 'unit_id')
+    sub = sub.persist()
     print("fitting spatial matrix")
-    gu_update = darr.gufunc(
-        fct.partial(
-            update_spatial_perpx,
-            C=C.transpose('frame', 'unit_id').values),
-        signature="(f),(),(u)->(u)",
-        output_dtypes=A.dtype,
-        vectorize=True)
     A_new = xr.apply_ufunc(
-        gu_update,
+        update_spatial_perpx,
         Y.chunk(dict(frame=-1)),
         alpha,
         sub.chunk(dict(unit_id=-1)),
-        input_core_dims=[['frame'], [], ['unit_id']],
+        C.chunk(dict(frame=-1, unit_id=-1)),
+        input_core_dims=[['frame'], [], ['unit_id'], ['frame', 'unit_id']],
         output_core_dims=[['unit_id']],
-        dask='allowed')
+        vectorize=True,
+        dask='parallelized',
+        output_dtypes=[Y.dtype])
     try:
         with parallel_backend('dask'):
             A_new = A_new.persist()
