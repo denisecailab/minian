@@ -161,7 +161,7 @@ def update_spatial(Y,
                    post_scal=False,
                    normalize=True,
                    zero_thres='eps',
-                   sched='threads'):
+                   sched='single-threaded'):
     _T = len(Y.coords['frame'])
     print("estimating penalty parameter")
     cct = C.dot(C, 'frame')
