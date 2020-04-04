@@ -395,8 +395,8 @@ def update_temporal(Y,
                     scs_fallback=False,
                     sched='processes'):
     print("grouping overlaping units")
-    A_pos = (A > 0).astype(int)
-    A_neg = (A == 0).astype(int)
+    A_pos = (A > 0).astype(float)
+    A_neg = (A == 0).astype(float)
     A_inter = xr.apply_ufunc(
         da.array.tensordot,
         A_pos,
