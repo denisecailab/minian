@@ -160,7 +160,8 @@ def update_spatial(Y,
                    update_background=True,
                    post_scal=False,
                    normalize=True,
-                   zero_thres='eps'):
+                   zero_thres='eps',
+                   sched='threads'):
     _T = len(Y.coords['frame'])
     print("estimating penalty parameter")
     cct = C.dot(C, 'frame')
@@ -212,7 +213,8 @@ def update_spatial(Y,
         with parallel_backend('dask'):
             A_new = A_new.persist()
     except ValueError:
-        A_new = A_new.persist()
+        with da.config.set(scheduler=sched):
+            A_new = A_new.persist()
     print("removing empty units")
     if zero_thres == 'eps':
         zero_thres = np.finfo(A_new.dtype).eps
@@ -390,7 +392,8 @@ def update_temporal(Y,
                     compute=True,
                     normalize=True,
                     post_scal=True,
-                    scs_fallback=False):
+                    scs_fallback=False,
+                    sched='processes'):
     print("grouping overlaping units")
     A_pos = (A > 0).astype(int)
     A_neg = (A == 0).astype(int)
@@ -531,7 +534,7 @@ def update_temporal(Y,
             output_core_dims=[['trace', 'frame']],
             dask='allowed')
     if compute:
-        with da.config.set(scheduler='processes'):
+        with da.config.set(scheduler=sched):
             result_iso = result_iso.compute()
     print("updating overlapping temporal components")
     res_list = []
@@ -576,7 +579,7 @@ def update_temporal(Y,
                     output_dtypes=[YrA.dtype])
                 res_list.append(cur_res)
         if compute:
-            with da.config.set(scheduler='processes'):
+            with da.config.set(scheduler=sched):
                 result_ovlp, = da.compute(res_list)
                 result = (xr.concat(result_ovlp + [result_iso], 'unit_id')
                           .sortby('unit_id').drop('unit_labels'))
