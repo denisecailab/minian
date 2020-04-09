@@ -356,70 +356,6 @@ def apply_translation(img, shift):
     return np.roll(img, shift, axis=(1, 0))
 
 
-def estimate_shift_fft(varr, dim='frame', on='max', max_shift=15, mode='local_max', max_wnd=5):
-    varr = varr.chunk(dict(height=-1, width=-1))
-    dims = list(varr.dims)
-    dims.remove(dim)
-    sizes = [varr.sizes[d] for d in ['height', 'width']]
-    pad_s = (np.array(sizes) * 2).astype(int)
-
-    def truncate(fm, w):
-        return np.pad(fm[w:-w, w:-w], w)
-
-    if on == 'mean':
-        print("computing mean frame")
-        onfm = varr.mean(dim).compute()
-    elif on == 'max':
-        print("computing max frame")
-        onfm = varr.max(dim).compute()
-    elif on == 'first':
-        onfm = varr.isel({dim: 0}).compute()
-    elif on == 'last':
-        onfm = varr.isel({dim: -1}).compute()
-    elif on == 'perframe':
-        onfm = varr.shift({dim: -1})
-    else:
-        try:
-            onfm = varr.sel({dim: on}).compute()
-        except KeyError:
-            raise ValueError("template {} not understood".format(on))
-    onfm = xr.apply_ufunc(
-        truncate,
-        onfm,
-        input_core_dims=[['height', 'width']],
-        output_core_dims=[['height', 'width']],
-        dask='parallelized',
-        vectorize=True,
-        kwargs=dict(w=max_shift),
-        output_dtypes=[onfm.dtype])
-    if on == 'perframe':
-        src_fft = onfm.rename(
-            {'height': 'height_pad', 'width': 'width_pad'})
-    else:
-        onfm = onfm.chunk()
-        src_fft = xr.apply_ufunc(
-            darr.fft.fft2,
-            onfm,
-            input_core_dims=[['height', 'width']],
-            output_core_dims=[['height_pad', 'width_pad']],
-            dask='allowed',
-            kwargs=dict(s=pad_s)).persist()
-    print("estimating shifts")
-    res = xr.apply_ufunc(
-        shift_fft,
-        src_fft,
-        varr,
-        input_core_dims=[['height_pad', 'width_pad'], ['height', 'width']],
-        output_core_dims=[['variable']],
-        vectorize=True,
-        dask='parallelized',
-        kwargs=dict(max_sh=max_shift, mode=mode, max_wnd=max_wnd),
-        output_dtypes=[float],
-        output_sizes=dict(variable=3))
-    res = res.assign_coords(variable=['height', 'width', 'corr'])
-    return res
-
-
 def mask_shifts(varr_fft, corr, shifts, z_thres, perframe=True, pad_f=1):
     dims = list(varr_fft.dims)
     dims.remove('frame')
@@ -442,70 +378,96 @@ def mask_shifts(varr_fft, corr, shifts, z_thres, perframe=True, pad_f=1):
                 last_good = gb_diff[gb_diff < 0].max() + cur_bad
                 cur_src = varr_fft.sel(frame=last_good)
                 cur_dst = varr_fft.sel(frame=next_good)
-                res = shift_fft(cur_src, cur_dst, pad_s, pad_f)
-                shifts.loc[dict(frame=next_good.values)] = res[0:2]
+                res = match_temp(cur_src, cur_dst, pad_s, pad_f)
+                shifts.loc[dict(frame=next_good.values)] = res
             except (KeyError, ValueError):
                 print("unable to correct for bad frame: {}".format(int(cur_bad)))
     return shifts, mask
 
-# @delayed
-def shift_bisect(varr, max_sh, mode, qthres):
-    nf = varr.shape[0]
-    if nf > 2:
-        fm0 = varr[:int(np.ceil(nf/2)), :, :]
-        fm1 = varr[int(np.ceil(nf/2)):, :, :]
-        sh0 = shift_bisect(fm0, max_sh, mode, qthres)
-        sh1 = shift_bisect(fm1, max_sh, mode, qthres)
-        for ifm, (curfm, cursh) in enumerate(zip(fm0, sh0)):
-            fm0[ifm, :, :] = shift_perframe(curfm, cursh)
-        for ifm, (curfm, cursh) in enumerate(zip(fm1, sh1)):
-            fm1[ifm, :, :] = shift_perframe(curfm, cursh)
-        temp0 = np.max(fm0, axis=0)
-        temp1 = np.max(fm1, axis=0)
-        res = shift_fft(temp0, temp1, max_sh, mode, qthres)
-        return np.concatenate([sh0, sh1 + np.reshape(res[:2], (-1, 2))], axis=0)
-    elif nf == 2:
-        res = shift_fft(varr[0], varr[1], max_sh, mode, qthres)
-        return np.stack([(0, 0), res[:2]])
-    else:
-        return np.reshape(np.array((0, 0)), (1, 2))
+
+def estimate_shifts(varr, max_sh, dim='frame'):
+    varr = varr.chunk({'height': -1, 'width': -1})
+    vmax, sh = xr.apply_ufunc(
+        est_sh_part,
+        varr,
+        input_core_dims=[[dim, 'height', 'width']],
+        output_core_dims=[['height', 'width'], [dim, 'variable']],
+        dask='allowed',
+        kwargs={'max_sh': max_sh}
+    )
+    return sh.assign_coords(variable=['height', 'width'])
 
 
-def shift_fft(fft_src, fft_dst, max_sh, mode='local_max', qthres=None, max_wnd=5):
-    if not np.iscomplexobj(fft_src):
-        fft_src = np.fft.fft2(fft_src, np.array(fft_src.shape) * 2)
-    if not np.iscomplexobj(fft_dst):
-        fft_dst = np.fft.fft2(fft_dst, np.array(fft_dst.shape) * 2)
-    if np.isnan(fft_src).any() or np.isnan(fft_dst).any():
-        return np.array([0, 0, np.nan])
-    prod = fft_src * np.conj(fft_dst)
-    iprod = np.fft.ifft2(prod)
-    iprod[max_sh + 1:-max_sh, :] = np.nan
-    iprod[:, max_sh + 1:-max_sh] = np.nan
-    iprod_sh = np.fft.fftshift(iprod)
-    cor = iprod_sh.real
-    if qthres:
-        cor_bl = cor > np.nanquantile(cor, qthres)
-        lab = label(cor_bl)
-        if lab[1] > 1:
-            com = center_of_mass(cor_bl, lab[0], np.arange(lab[1])+1)
-            shs = np.abs(com - np.ceil(np.array(cor.shape) / 2.0).reshape((-1, 2))).sum(axis=1)
-            cor = np.where(lab[0] == (np.argmin(shs) + 1), cor, 0)
-    if mode == 'global_max':
-        max_sh = np.unravel_index(np.nanargmax(cor), cor.shape)
-    elif mode == 'com':
-        max_sh = center_of_mass(np.nan_to_num(cor))
-    elif mode == 'local_max':
-        kmax = disk(max_wnd)
-        cor_max = cv2.dilate(np.nan_to_num(cor), kmax)
-        maxs = np.array(np.nonzero(cor == cor_max)).T
-        shs = np.abs(maxs - np.ceil(np.array(cor.shape) / 2.0).reshape((-1, 2))).sum(axis=1)
-        max_sh = maxs[np.argmin(shs)]
-    else:
-        raise NotImplementedError(mode)
-    sh = max_sh - np.ceil(np.array(cor.shape) / 2.0)
-    corr = np.nanmax(cor)
-    return np.concatenate([sh, corr], axis=None)
+def est_sh_part(varr, max_sh):
+    part = varr.shape[0] / 3
+    if part > 1:
+        part = int(part)
+        fm0 = varr[0:part, :, :]
+        fm1 = varr[part:part*2, :, :]
+        fm2 = varr[part*2:, :, :]
+        fm0, sh0 = est_sh_part(fm0, max_sh)
+        fm1, sh1 = est_sh_part(fm1, max_sh)
+        fm2, sh2 = est_sh_part(fm2, max_sh)
+    elif part == 1:
+        fm0 = varr[0, :, :]
+        fm1 = varr[1, :, :]
+        fm2 = varr[2, :, :]
+        sh0 = np.array([[0, 0]])
+        sh1 = np.array([[0, 0]])
+        sh2 = np.array([[0, 0]])
+    elif part > 1/3:
+        fm0 = varr[0, :, :]
+        fm1 = varr[1, :, :]
+        fm2 = None
+        sh0 = np.array([[0, 0]])
+        sh1 = np.array([[0, 0]])
+        sh2 = None
+    elif part <= 1/3:
+        return varr.squeeze(), np.array([[0, 0]])
+    sh01 = darr.from_delayed(delayed(match_temp)(
+        fm0, fm1, max_sh), (2,), float)
+    fm0 = darr.from_delayed(delayed(
+        shift_perframe)(fm0, sh01), fm0.shape, fm0.dtype)
+    fm0 = darr.nan_to_num(fm0)
+    sh0 = sh0 + sh01.reshape((1, -1))
+    fm_ret = darr.stack([fm0, fm1])
+    sh_ret = darr.concatenate([sh0, sh1])
+    if fm2 is not None:
+        sh21 = darr.from_delayed(delayed(match_temp)(
+            fm2, fm1, max_sh), (2,), float)
+        fm2 = darr.from_delayed(delayed(
+            shift_perframe)(fm2, sh21), fm2.shape, fm2.dtype)
+        sh2 = sh2 + sh21.reshape((1, -1))
+        fm_ret = darr.concatenate([fm_ret, fm2[np.newaxis, :, :]])
+        sh_ret = darr.concatenate([sh_ret, sh2])
+    return fm_ret.max(axis=0), sh_ret
+
+
+def match_temp(src, dst, max_sh, subpixel=False):
+    src = np.pad(src, max_sh)
+    cor = cv2.matchTemplate(
+        src.astype(np.float32), dst.astype(np.float32), cv2.TM_CCOEFF_NORMED)
+    if not len(np.unique(cor)) > 1:
+        return np.array([0, 0])
+    imax = np.unravel_index(np.argmax(cor), cor.shape)
+    if subpixel:
+        x0 = np.arange(max(imax[0] - 5, 0), min(imax[0] + 6, cor.shape[0]))
+        x1 = np.arange(max(imax[1] - 5, 0), min(imax[1] + 6, cor.shape[1]))
+        y0 = cor[x0, imax[1]]
+        y1 = cor[imax[0], x1]
+        p0 = np.polyfit(x0, y0, 2)
+        p1 = np.polyfit(x1, y1, 2)
+        imax = np.array([
+            -0.5 * p0[1] / p0[0],
+            -0.5 * p1[1] / p1[0]
+        ])
+        # m0 = np.roots(np.polyder(p0))
+        # m1 = np.roots(np.polyder(p1))
+        # m0 = m0[np.argmin(np.abs(m0 - imax[0]))]
+        # m1 = m1[np.argmin(np.abs(m1 - imax[1]))]
+        # imax = np.array([m0, m1])
+    sh = np.floor(np.array(cor.shape) / 2) - imax
+    return sh
 
 
 def apply_shifts(varr, shifts):

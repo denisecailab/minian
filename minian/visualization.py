@@ -15,7 +15,7 @@ import ffmpeg
 import cv2
 import av
 from .utilities import scale_varr
-from .motion_correction import shift_fft
+from .motion_correction import match_temp
 from uuid import uuid4
 from collections import OrderedDict
 from holoviews.streams import (
@@ -1270,9 +1270,7 @@ class AlignViewer:
         print("done selection")
         temp_src_fft = np.fft.fft2(temp_src)
         temp_dst_fft = np.fft.fft2(temp_dst)
-        cur_res = shift_fft(temp_src_fft, temp_dst_fft, pct_thres=self.pct_thres)
-        cur_sh = cur_res[0:2]
-        cur_cor = cur_res[2]
+        cur_sh = match_temp(temp_src_fft, temp_dst_fft, pct_thres=self.pct_thres)
         cur_sh = xr.DataArray(
             np.round(cur_sh),
             coords=dict(shift_dim=list(temp_dst.dims)),
@@ -1285,7 +1283,6 @@ class AlignViewer:
             dict(animal=cur_anm, session=cur_ss)
         ] = self.temps.sel(animal=cur_anm, session=cur_ss).shift(**sh_dict)
         self.shiftds["shifts"].loc[dict(animal=cur_anm, session=cur_ss)] = cur_sh
-        self.shiftds["corrs"].loc[dict(animal=cur_anm, session=cur_ss)] = cur_cor
 
 
 def write_vid_blk(arr, vpath, options):
