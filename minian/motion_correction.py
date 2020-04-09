@@ -443,13 +443,20 @@ def est_sh_part(varr, max_sh):
     return fm_ret.max(axis=0), sh_ret
 
 
-def match_temp(src, dst, max_sh, subpixel=False):
+def match_temp(src, dst, max_sh, subpixel=False, local=True):
     src = np.pad(src, max_sh)
     cor = cv2.matchTemplate(
         src.astype(np.float32), dst.astype(np.float32), cv2.TM_CCOEFF_NORMED)
     if not len(np.unique(cor)) > 1:
         return np.array([0, 0])
-    imax = np.unravel_index(np.argmax(cor), cor.shape)
+    cent = np.floor(np.array(cor.shape) / 2)
+    if local:
+        cor_ma = cv2.dilate(cor, np.ones((5, 5)))
+        maxs = np.array(np.nonzero(cor_ma == cor))
+        dev = np.abs(maxs - cent[:, np.newaxis]).sum(axis=0)
+        imax = maxs[:, np.argmin(dev)]
+    else:
+        imax = np.unravel_index(np.argmax(cor), cor.shape)
     if subpixel:
         x0 = np.arange(max(imax[0] - 5, 0), min(imax[0] + 6, cor.shape[0]))
         x1 = np.arange(max(imax[1] - 5, 0), min(imax[1] + 6, cor.shape[1]))
@@ -466,7 +473,7 @@ def match_temp(src, dst, max_sh, subpixel=False):
         # m0 = m0[np.argmin(np.abs(m0 - imax[0]))]
         # m1 = m1[np.argmin(np.abs(m1 - imax[1]))]
         # imax = np.array([m0, m1])
-    sh = np.floor(np.array(cor.shape) / 2) - imax
+    sh = cent - imax
     return sh
 
 
