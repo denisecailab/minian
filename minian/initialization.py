@@ -248,7 +248,7 @@ def seeds_merge(varr, seeds, thres_dist=5, thres_corr=0.6, noise_freq='envelope'
             varr_sub = smooth_sig(varr_sub, noise_freq)
     corr = (xr.apply_ufunc(
         da.corrcoef,
-        varr_sub.chunk(dict(spatial=50, frame=-1)),
+        varr_sub.chunk(dict(spatial='auto', frame=-1)),
         input_core_dims=[['spatial', 'frame']],
         output_core_dims=[['sampleA', 'sampleB']],
         dask='allowed',
