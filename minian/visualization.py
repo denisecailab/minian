@@ -1288,16 +1288,17 @@ class AlignViewer:
         self.shiftds["corrs"].loc[dict(animal=cur_anm, session=cur_ss)] = cur_cor
 
 
-def write_vid_blk(arr, vpath):
+def write_vid_blk(arr, vpath, options):
     uid = uuid4()
     vname = "{}.mp4".format(uid)
     fpath = os.path.join(vpath, vname)
     arr = np.clip(arr, 0, 255).astype(np.uint8)
     container = av.open(fpath, mode="w")
-    stream = container.add_stream("mpeg4", rate=30)
+    stream = container.add_stream("libx264", rate=30)
     stream.width = arr.shape[2]
     stream.height = arr.shape[1]
     stream.pix_fmt = "yuv420p"
+    stream.options = options
     for fm in arr:
         fm = cv2.cvtColor(fm, cv2.COLOR_GRAY2RGB)
         fmav = av.VideoFrame.from_ndarray(fm, format="rgb24")
@@ -1309,15 +1310,16 @@ def write_vid_blk(arr, vpath):
     return fpath
 
 
-def write_video(arr, vname=None, vpath="."):
+def write_video(arr, vname=None, vpath=".", options={'crf': '18', 'preset': 'ultrafast'}):
     if not vname:
         vname = "{}.mp4".format(uuid4())
     fname = os.path.join(vpath, vname)
     paths = [
-        dask.delayed(write_vid_blk)(np.asscalar(a), vpath)
+        dask.delayed(write_vid_blk)(np.asscalar(a), vpath, options)
         for a in arr.data.to_delayed()
     ]
-    paths = dask.compute(paths)[0]
+    with dask.config.set(scheduler='processes'):
+        paths = dask.compute(paths)[0]
     streams = [ffmpeg.input(p) for p in paths]
     (ffmpeg.concat(*streams).output(fname).run(overwrite_output=True))
     for vp in paths:
@@ -1325,7 +1327,7 @@ def write_video(arr, vname=None, vpath="."):
     return fname
 
 
-def generate_videos(minian, varr, vpath=".", vname="minian.mp4", scale="auto"):
+def generate_videos(minian, varr, vpath=".", vname="minian.mp4", scale="auto", options={'crf': '18', 'preset': 'ultrafast'}):
     print("generating traces")
     A = minian["A"].compute().transpose("unit_id", "height", "width")
     C = minian["C"].chunk(dict(unit_id=-1)).transpose("frame", "unit_id")
@@ -1361,10 +1363,10 @@ def generate_videos(minian, varr, vpath=".", vname="minian.mp4", scale="auto"):
         AC_norm = AC * scale
     res_norm = Y_norm - AC_norm
     print("writing videos")
-    path_org = write_video(org_norm, vpath=vpath)
-    path_Y = write_video(Y_norm, vpath=vpath)
-    path_AC = write_video(AC_norm, vpath=vpath)
-    path_res = write_video(res_norm, vpath=vpath)
+    path_org = write_video(org_norm, vpath=vpath, options=options)
+    path_Y = write_video(Y_norm, vpath=vpath, options=options)
+    path_AC = write_video(AC_norm, vpath=vpath, options=options)
+    path_res = write_video(res_norm, vpath=vpath, options=options)
     print("concatenating results")
     str_org = ffmpeg.input(path_org)
     str_Y = ffmpeg.input(path_Y)
