@@ -210,6 +210,7 @@ def remove_background(varr, method, wnd):
         dask='parallelized',
         output_dtypes=[varr.dtype],
         kwargs=dict(method=method, wnd=wnd, selem=selem))
+    res = res.astype(varr.dtype)
     return res.rename(varr.name + "_subtracted")
 
 
@@ -260,6 +261,7 @@ def denoise(varr, method, **kwargs):
         dask='parallelized',
         output_dtypes=[varr.dtype],
         kwargs=kwargs)
+    res = res.astype(varr.dtype)
     return res.rename(varr.name + "_denoised")
 
 
