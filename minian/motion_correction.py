@@ -484,6 +484,17 @@ def apply_shifts(varr, shifts):
     return varr_sh
 
 
+def mser_thres(fm):
+    mser = cv2.MSER_create(_min_area=100, _delta=1, _max_variation=2)
+    reg, _ = mser.detectRegions(fm.T)
+    reg_set = [set(tuple(crd) for crd in r) for r in reg]
+    fm_thres = np.zeros_like(fm)
+    if reg_set:
+        reg = np.array(list(set.union(*reg_set)))
+        fm_thres[reg[:, 0], reg[:, 1]] = fm[reg[:, 0], reg[:, 1]]
+    return fm_thres
+
+
 def shift_perframe(fm, sh):
     sh = np.around(sh).astype(int)
     fm = np.roll(fm, sh, axis=np.arange(fm.ndim))
