@@ -453,7 +453,7 @@ def match_temp(src, dst, max_sh, subpixel=False, local=True):
     if local:
         cor_ma = cv2.dilate(cor, np.ones((3, 3)))
         maxs = np.array(np.nonzero(cor_ma == cor))
-        dev = np.abs(maxs - cent[:, np.newaxis]).sum(axis=0)
+        dev = ((maxs - cent[:, np.newaxis]) ** 2).sum(axis=0)
         imax = maxs[:, np.argmin(dev)]
     else:
         imax = np.unravel_index(np.argmax(cor), cor.shape)
