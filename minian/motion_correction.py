@@ -385,65 +385,56 @@ def mask_shifts(varr_fft, corr, shifts, z_thres, perframe=True, pad_f=1):
     return shifts, mask
 
 
-def estimate_shifts(varr, max_sh, dim='frame'):
-    varr = varr.chunk({'height': -1, 'width': -1})
+def estimate_shifts(varr, max_sh, dim="frame", npart=3, local=False):
+    varr = varr.chunk({"height": -1, "width": -1})
     vmax, sh = xr.apply_ufunc(
         est_sh_part,
         varr,
-        input_core_dims=[[dim, 'height', 'width']],
-        output_core_dims=[['height', 'width'], [dim, 'variable']],
-        dask='allowed',
-        kwargs={'max_sh': max_sh}
+        input_core_dims=[[dim, "height", "width"]],
+        output_core_dims=[["height", "width"], [dim, "variable"]],
+        dask="allowed",
+        kwargs={"max_sh": max_sh, "npart": npart, "local": local},
     )
-    return sh.assign_coords(variable=['height', 'width'])
+    return sh.assign_coords(variable=["height", "width"])
 
 
-def est_sh_part(varr, max_sh):
-    part = varr.shape[0] / 3
-    if part > 1:
-        part = int(part)
-        fm0 = varr[0:part, :, :]
-        fm1 = varr[part:part*2, :, :]
-        fm2 = varr[part*2:, :, :]
-        fm0, sh0 = est_sh_part(fm0, max_sh)
-        fm1, sh1 = est_sh_part(fm1, max_sh)
-        fm2, sh2 = est_sh_part(fm2, max_sh)
-    elif part == 1:
-        fm0 = varr[0, :, :]
-        fm1 = varr[1, :, :]
-        fm2 = varr[2, :, :]
-        sh0 = np.array([[0, 0]])
-        sh1 = np.array([[0, 0]])
-        sh2 = np.array([[0, 0]])
-    elif part > 1/3:
-        fm0 = varr[0, :, :]
-        fm1 = varr[1, :, :]
-        fm2 = None
-        sh0 = np.array([[0, 0]])
-        sh1 = np.array([[0, 0]])
-        sh2 = None
-    elif part <= 1/3:
+def est_sh_part(varr, max_sh, npart, local):
+    if varr.shape[0] <= 1:
         return varr.squeeze(), np.array([[0, 0]])
-    sh01 = darr.from_delayed(delayed(match_temp)(
-        fm0, fm1, max_sh), (2,), float)
-    fm0 = darr.from_delayed(delayed(
-        shift_perframe)(fm0, sh01), fm0.shape, fm0.dtype)
-    fm0 = darr.nan_to_num(fm0)
-    sh0 = sh0 + sh01.reshape((1, -1))
-    fm_ret = darr.stack([fm0, fm1])
-    sh_ret = darr.concatenate([sh0, sh1])
-    if fm2 is not None:
-        sh21 = darr.from_delayed(delayed(match_temp)(
-            fm2, fm1, max_sh), (2,), float)
-        fm2 = darr.from_delayed(delayed(
-            shift_perframe)(fm2, sh21), fm2.shape, fm2.dtype)
-        sh2 = sh2 + sh21.reshape((1, -1))
-        fm_ret = darr.concatenate([fm_ret, fm2[np.newaxis, :, :]])
-        sh_ret = darr.concatenate([sh_ret, sh2])
+    idx_spt = np.array_split(np.arange(varr.shape[0]), npart)
+    fm_ls, sh_ls = [], []
+    for idx in idx_spt:
+        if len(idx) > 0:
+            fm, sh = est_sh_part(varr[idx, :, :], max_sh, npart, local)
+            fm_ls.append(fm)
+            sh_ls.append(sh)
+    mid = int(len(sh_ls) / 2)
+    sh_add_ls = [np.array([0, 0])] * len(sh_ls)
+    for i, fm in enumerate(fm_ls):
+        if i < mid:
+            temp = fm_ls[i + 1]
+            sh_idx = np.arange(i + 1)
+        elif i > mid:
+            temp = fm_ls[i - 1]
+            sh_idx = np.arange(i, len(sh_ls))
+        else:
+            continue
+        sh_add = darr.from_delayed(
+            delayed(match_temp)(fm, temp, max_sh, local), (2,), float
+        )
+        for j in sh_idx:
+            sh_ls[j] = sh_ls[j] + sh_add.reshape((1, -1))
+            sh_add_ls[j] = sh_add_ls[j] + sh_add
+    for i, (fm, sh) in enumerate(zip(fm_ls, sh_add_ls)):
+        fm_ls[i] = darr.nan_to_num(
+            darr.from_delayed(delayed(shift_perframe)(fm, sh), fm.shape, fm.dtype)
+        )
+    sh_ret = darr.concatenate(sh_ls)
+    fm_ret = darr.stack(fm_ls)
     return fm_ret.max(axis=0), sh_ret
 
 
-def match_temp(src, dst, max_sh, subpixel=False, local=True):
+def match_temp(src, dst, max_sh, local, subpixel=False):
     src = np.pad(src, max_sh)
     cor = cv2.matchTemplate(
         src.astype(np.float32), dst.astype(np.float32), cv2.TM_CCOEFF_NORMED)
