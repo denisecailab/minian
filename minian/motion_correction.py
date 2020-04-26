@@ -451,7 +451,7 @@ def match_temp(src, dst, max_sh, subpixel=False, local=True):
         return np.array([0, 0])
     cent = np.floor(np.array(cor.shape) / 2)
     if local:
-        cor_ma = cv2.dilate(cor, np.ones((5, 5)))
+        cor_ma = cv2.dilate(cor, np.ones((3, 3)))
         maxs = np.array(np.nonzero(cor_ma == cor))
         dev = np.abs(maxs - cent[:, np.newaxis]).sum(axis=0)
         imax = maxs[:, np.argmin(dev)]
