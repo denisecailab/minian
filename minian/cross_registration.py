@@ -10,7 +10,6 @@ from scipy.ndimage.measurements import center_of_mass
 from scipy.stats import pearsonr
 from scipy.spatial.distance import cdist
 from .preprocessing import remove_background
-from .motion_correction import estimate_shift_fft, apply_shifts
 from .utilities import xrconcat_recursive
 from .visualization import centroid
 from IPython.core.debugger import set_trace
@@ -61,55 +60,6 @@ def get_minian_list(path, pattern=r'^minian.nc$'):
         mn_paths = [os.path.join(dirpath, mn) for mn in mnames]
         mnlist += mn_paths
     return mnlist
-
-def estimate_shifts(minian_df, by='session', to='first', temp_var='org', template=None, rm_background=False):
-    if template is not None:
-        minian_df['template'] = template
-
-    def get_temp(row):
-        ds, temp = row['minian'], row['template']
-        try:
-            return ds.isel(frame=temp).drop('frame')
-        except TypeError:
-            func_dict = {
-                'mean': lambda v: v.mean('frame'),
-                'max': lambda v: v.max('frame')}
-            try:
-                return func_dict[temp](ds)
-            except KeyError:
-                raise NotImplementedError(
-                    "template {} not understood".format(temp))
-
-    minian_df['template'] = minian_df.apply(get_temp, axis='columns')
-    grp_dims = list(minian_df.index.names)
-    grp_dims.remove(by)
-    temp_dict, shift_dict, corr_dict, tempsh_dict = [dict() for _ in range(4)]
-    for idxs, df in minian_df.groupby(level=grp_dims):
-        try:
-            temp_ls = [t[temp_var] for t in df['template']]
-        except KeyError:
-            raise KeyError(
-                "variable {} not found in dataset".format(temp_var))
-        temps = (xr.concat(temp_ls, dim=by).expand_dims(grp_dims)
-                 .reset_coords(drop=True))
-        res = estimate_shift_fft(temps, dim=by, on=to)
-        shifts = res.sel(variable=['height', 'width'])
-        corrs = res.sel(variable='corr')
-        temps_sh = apply_shifts(temps, shifts)
-        temp_dict[idxs] = temps
-        shift_dict[idxs] = shifts
-        corr_dict[idxs] = corrs
-        tempsh_dict[idxs] = temps_sh
-    temps = xrconcat_recursive(temp_dict, grp_dims).rename('temps')
-    shifts = xrconcat_recursive(shift_dict, grp_dims).rename('shifts')
-    corrs = xrconcat_recursive(corr_dict, grp_dims).rename('corrs')
-    temps_sh = xrconcat_recursive(tempsh_dict, grp_dims).rename('temps_shifted')
-    with ProgressBar():
-        temps = temps.compute()
-        shifts = shifts.compute()
-        corrs = corrs.compute()
-        temps_sh = temps_sh.compute()
-    return xr.merge([temps, shifts, corrs, temps_sh])
 
 
 def estimate_shifts_old(mn_list,
