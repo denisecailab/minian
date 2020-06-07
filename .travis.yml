@@ -43,12 +43,12 @@ script:
   - travis_fold end "Black-check code quality"
 
   - travis_fold start "pytest"
-  - echo pytest -v --color=yes --cov=cpr tests
+  - pytest -v --color=yes --cov=minian --pyargs minian
   - travis_fold end "pytest"
 
-  - travis_fold start "Jupyter notebook pipeline"
-  - papermill pipeline.ipynb pipeline_output.ipynb
-  - travis_fold end "Jupyter notebook pipeline"
+  # - travis_fold start "Jupyter notebook pipeline"
+  # - papermill pipeline.ipynb pipeline_output.ipynb
+  # - travis_fold end "Jupyter notebook pipeline"
 
 after_success:
   - echo conda install codecov
