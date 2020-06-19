@@ -825,7 +825,7 @@ def get_optimal_chk(ref, arr=None, dim_grp=None, ncores='auto', mem_limit='auto'
     if ncores=='auto':
         ncores = psutil.cpu_count()
     if mem_limit=='auto':
-        mem_limit = (psutil.virtual_memory().available / (1024 ** 2))
+        memlimit = (psutil.virtual_memory().available + psutil.swap_memory().free) / (1024 ** 2)
     tempsz = 1000*(3*szs['height'] * szs['width'] + 7 * szs['frame']) * ref.dtype.itemsize / (1024 ** 2)
     csize = min(int(np.floor((mem_limit - tempsz) / ncores / 4)), 1024)
     if csize <= 0:
