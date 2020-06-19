@@ -1,5 +1,5 @@
-[![Build Status](https://img.shields.io/travis/MetaCell/minian/master.svg?style=flat&label=master)](https://travis-ci.org/MetaCell/minian)
-[![Build Status](https://img.shields.io/travis/MetaCell/minian/dev.svg?style=flat&label=dev)](https://travis-ci.org/MetaCell/minian)
+[![Build Status](https://img.shields.io/travis/DeniseCaiLab/minian/master.svg?style=flat&label=master)](https://travis-ci.org/DeniseCaiLab/minian)
+[![Build Status](https://img.shields.io/travis/DeniseCaiLab/minian/dev.svg?style=flat&label=dev)](https://travis-ci.org/DeniseCaiLab/minian)
 
 
 # About MiniAn
