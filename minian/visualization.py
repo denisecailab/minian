@@ -1307,7 +1307,9 @@ def write_vid_blk(arr, vpath, options):
     return fpath
 
 
-def write_video(arr, vname=None, vpath=".", options={'crf': '18', 'preset': 'ultrafast'}):
+def write_video(
+    arr, vname=None, vpath=".", options={"crf": "18", "preset": "ultrafast"}
+):
     if not vname:
         vname = "{}.mp4".format(uuid4())
     fname = os.path.join(vpath, vname)
@@ -1315,7 +1317,7 @@ def write_video(arr, vname=None, vpath=".", options={'crf': '18', 'preset': 'ult
         dask.delayed(write_vid_blk)(np.asscalar(a), vpath, options)
         for a in arr.data.to_delayed()
     ]
-    with dask.config.set(scheduler='processes'):
+    with dask.config.set(scheduler="processes"):
         paths = dask.compute(paths)[0]
     streams = [ffmpeg.input(p) for p in paths]
     (ffmpeg.concat(*streams).output(fname).run(overwrite_output=True))
@@ -1324,7 +1326,14 @@ def write_video(arr, vname=None, vpath=".", options={'crf': '18', 'preset': 'ult
     return fname
 
 
-def generate_videos(minian, varr, vpath=".", vname="minian.mp4", scale="auto", options={'crf': '18', 'preset': 'ultrafast'}):
+def generate_videos(
+    minian,
+    varr,
+    vpath=".",
+    vname="minian.mp4",
+    scale="auto",
+    options={"crf": "18", "preset": "ultrafast"},
+):
     print("generating traces")
     A = minian["A"].compute().transpose("unit_id", "height", "width")
     C = minian["C"].chunk(dict(unit_id=-1)).transpose("frame", "unit_id")
