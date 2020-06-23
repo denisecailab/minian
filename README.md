@@ -33,6 +33,18 @@ As a result of isolation, you have to explicitly expose resources from within th
 
 As a final note, everything within the container **does not persist** across sessions except those in the bind mount, which means all the modifications you made to the default notebook under `/minian` will be reset to the state in the original image. Thus it is advised to keep a working copy of minian on your local machine and mount them in the container if you are using this in production mode.
 
+# Generate documentation
+
+To generate documentation MiniAn uses Sphinx with the Read The Docs theme. All docstrings are in the Google docstring format see [docstring format](https://sphinxcontrib-napoleon.readthedocs.io/en/latest/example_google.html)
+
+To generate the documentation please execute these commands:
+```
+cd docs
+make html
+```
+
+After the process finishes the documentation files are in the build folder
+
 # License
 
 This project is licensed under GNU GPLv3.
