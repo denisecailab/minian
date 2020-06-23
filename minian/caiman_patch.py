@@ -4,10 +4,7 @@ from scipy.ndimage.filters import convolve
 from caiman.source_extraction.cnmf.pre_processing import get_noise_fft
 
 
-def local_correlations_fft(Y,
-                           eight_neighbours=True,
-                           swap_dim=True,
-                           opencv=True):
+def local_correlations_fft(Y, eight_neighbours=True, swap_dim=True, opencv=True):
     """Computes the correlation image for the input dataset Y using a faster FFT based method
 
     Parameters:
@@ -36,10 +33,9 @@ def local_correlations_fft(Y,
 
     print("using minian monkey patch: local_correlations_fft")
     if swap_dim:
-        Y = np.transpose(
-            Y, tuple(np.hstack((Y.ndim - 1, list(range(Y.ndim))[:-1]))))
+        Y = np.transpose(Y, tuple(np.hstack((Y.ndim - 1, list(range(Y.ndim))[:-1]))))
 
-    Y = Y.astype('float32')
+    Y = Y.astype("float32")
     Y -= np.mean(Y, axis=0)
     Ystd = np.std(Y, axis=0)
     Ystd[Ystd == 0] = np.inf
@@ -47,31 +43,32 @@ def local_correlations_fft(Y,
 
     if Y.ndim == 4:
         if eight_neighbours:
-            sz = np.ones((3, 3, 3), dtype='float32')
+            sz = np.ones((3, 3, 3), dtype="float32")
             sz[1, 1, 1] = 0
         else:
             sz = np.array(
-                [[[0, 0, 0], [0, 1, 0], [0, 0, 0]],
-                 [[0, 1, 0], [1, 0, 1], [0, 1, 0]], [[0, 0, 0], [0, 1, 0],
-                                                     [0, 0, 0]]],
-                dtype='float32')
+                [
+                    [[0, 0, 0], [0, 1, 0], [0, 0, 0]],
+                    [[0, 1, 0], [1, 0, 1], [0, 1, 0]],
+                    [[0, 0, 0], [0, 1, 0], [0, 0, 0]],
+                ],
+                dtype="float32",
+            )
     else:
         if eight_neighbours:
-            sz = np.ones((3, 3), dtype='float32')
+            sz = np.ones((3, 3), dtype="float32")
             sz[1, 1] = 0
         else:
-            sz = np.array([[0, 1, 0], [1, 0, 1], [0, 1, 0]], dtype='float32')
+            sz = np.array([[0, 1, 0], [1, 0, 1], [0, 1, 0]], dtype="float32")
 
     if opencv and Y.ndim == 3:
         Yconv = Y.copy()
         for idx, img in enumerate(Yconv):
             Yconv[idx] = cv2.filter2D(img, -1, sz, borderType=0)
-        MASK = cv2.filter2D(
-            np.ones(Y.shape[1:], dtype='float32'), -1, sz, borderType=0)
+        MASK = cv2.filter2D(np.ones(Y.shape[1:], dtype="float32"), -1, sz, borderType=0)
     else:
-        Yconv = convolve(Y, sz[np.newaxis, :], mode='constant')
-        MASK = convolve(
-            np.ones(Y.shape[1:], dtype='float32'), sz, mode='constant')
+        Yconv = convolve(Y, sz[np.newaxis, :], mode="constant")
+        MASK = convolve(np.ones(Y.shape[1:], dtype="float32"), sz, mode="constant")
     Y *= Yconv
     Cn = np.mean(Y, axis=0) / MASK
     return Cn
@@ -103,12 +100,11 @@ def correlation_pnr(Y, gSig=None, center_psf=True, swap_dim=True):
     """
     print("using minian monkey patch: correlation_pnr")
     if swap_dim:
-        Y = np.transpose(
-            Y, tuple(np.hstack((Y.ndim - 1, list(range(Y.ndim))[:-1]))))
+        Y = np.transpose(Y, tuple(np.hstack((Y.ndim - 1, list(range(Y.ndim))[:-1]))))
 
     # parameters
     _, d1, d2 = Y.shape
-    data_raw = Y.reshape(-1, d1, d2).astype('float32')
+    data_raw = Y.reshape(-1, d1, d2).astype("float32")
 
     # filter data
     data_filtered = data_raw.copy()
@@ -122,17 +118,15 @@ def correlation_pnr(Y, gSig=None, center_psf=True, swap_dim=True):
 
         if center_psf:
             for idx, img in enumerate(data_filtered):
-                data_filtered[idx, ] = cv2.GaussianBlur(img, ksize=ksize, sigmaX=gSig[0], sigmaY=gSig[1], borderType=1) \
-                    - cv2.boxFilter(img, ddepth=-1, ksize=ksize, borderType=1)
+                data_filtered[idx,] = cv2.GaussianBlur(
+                    img, ksize=ksize, sigmaX=gSig[0], sigmaY=gSig[1], borderType=1
+                ) - cv2.boxFilter(img, ddepth=-1, ksize=ksize, borderType=1)
             # data_filtered[idx, ] = cv2.filter2D(img, -1, psf, borderType=1)
         else:
             for idx, img in enumerate(data_filtered):
-                data_filtered[idx, ] = cv2.GaussianBlur(
-                    img,
-                    ksize=ksize,
-                    sigmaX=gSig[0],
-                    sigmaY=gSig[1],
-                    borderType=1)
+                data_filtered[idx,] = cv2.GaussianBlur(
+                    img, ksize=ksize, sigmaX=gSig[0], sigmaY=gSig[1], borderType=1
+                )
 
     # compute peak-to-noise ratio
     data_filtered -= np.mean(data_filtered, axis=0)

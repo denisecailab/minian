@@ -64,6 +64,9 @@ from scipy.spatial import cKDTree
 
 
 class VArrayViewer:
+    """[summary]
+    """
+
     def __init__(
         self,
         varr,
@@ -74,6 +77,20 @@ class VArrayViewer:
         datashading=True,
         layout=False,
     ):
+        """[summary]
+
+        Args:
+            varr ([type]): [description]
+            framerate (int, optional): [description]. Defaults to 30.
+            rerange ([type], optional): [description]. Defaults to None.
+            summary (list, optional): [description]. Defaults to ["mean"].
+            meta_dims ([type], optional): [description]. Defaults to None.
+            datashading (bool, optional): [description]. Defaults to True.
+            layout (bool, optional): [description]. Defaults to False.
+
+        Raises:
+            NotImplementedError: [description]
+        """
         if isinstance(varr, list):
             for iv, v in enumerate(varr):
                 varr[iv] = v.assign_coords(data_var=v.name)
@@ -144,8 +161,26 @@ class VArrayViewer:
         self.pnplot = pn.panel(self.get_hvobj())
 
     def get_hvobj(self):
+        """[summary]
+        """
+
         def get_im_ovly(meta):
+            """[summary]
+
+            Args:
+                meta ([type]): [description]
+            """
+
             def img(f, ds):
+                """[summary]
+
+                Args:
+                    f ([type]): [description]
+                    ds ([type]): [description]
+
+                Returns:
+                    [type]: [description]
+                """
                 return hv.Image(ds.sel(frame=f).compute(), kdims=["width", "height"])
 
             try:
@@ -220,9 +255,19 @@ class VArrayViewer:
         return hvobj
 
     def show(self):
+        """[summary]
+
+        Returns:
+            [type]: [description]
+        """
         return pn.layout.Column(self.widgets, self.pnplot)
 
     def _widgets(self):
+        """[summary]
+
+        Returns:
+            [type]: [description]
+        """
         w_play = pnwgt.Player(
             length=len(self._f), interval=10, value=0, width=650, height=90
         )
@@ -258,12 +303,19 @@ class VArrayViewer:
         return wgts
 
     def _update_subs(self):
+        """[summary]
+        """
         self.ds_sub = self.ds.sel(**self.cur_metas)
         if self.sum_sub is not None:
             self.sum_sub = self.summary.sel(**self.cur_metas)
         self.pnplot.objects[0].object = self.get_hvobj()
 
     def _update_box(self, click):
+        """[summary]
+
+        Args:
+            click ([type]): [description]
+        """
         box = self.str_box.data
         self.mask.update(
             {
@@ -276,7 +328,17 @@ class VArrayViewer:
 
 
 class MCViewer:
+    """[summary]
+    """
+
     def __init__(self, varr, marr=None, framerate=30):
+        """[summary]
+
+        Args:
+            varr ([type]): [description]
+            marr ([type], optional): [description]. Defaults to None.
+            framerate (int, optional): [description]. Defaults to 30.
+        """
         if isinstance(varr, list):
             varr = xr.merge(varr)
         self.varr = hv.Dataset(varr)
@@ -292,6 +354,14 @@ class MCViewer:
         self.widgets = self._widgets()
 
     def show(self, use_datashade=False):
+        """[summary]
+
+        Args:
+            use_datashade (bool, optional): [description]. Defaults to False.
+
+        Returns:
+            [type]: [description]
+        """
         vh = self.varr.range("height")
         vw = self.varr.range("width")
         him = int(vh[1] - vh[0] + 1)
@@ -321,6 +391,11 @@ class MCViewer:
         return hv.Layout(ma + hv.NdLayout(varrdict, kdims=["name"])).cols(1)
 
     def _widgets(self):
+        """[summary]
+
+        Returns:
+            [type]: [description]
+        """
         dfrange = self.varr.range("frame")
         w_frame = iwgt.IntSlider(
             value=0,
@@ -337,14 +412,42 @@ class MCViewer:
         return iwgt.HBox([w_paly, w_frame])
 
     def _img(self, dat, f):
+        """[summary]
+
+        Args:
+            dat ([type]): [description]
+            f ([type]): [description]
+
+        Returns:
+            [type]: [description]
+        """
         return hv.Image(dat.select(frame=f), kdims=["width", "height"])
 
     def _rgb(self, dat, f):
+        """[summary]
+
+        Args:
+            dat ([type]): [description]
+            f ([type]): [description]
+
+        Returns:
+            [type]: [description]
+        """
         return hv.RGB(dat.select(frame=f), kdims=["width", "height"])
 
 
 class CNMFViewer_old:
+    """[summary]
+    """
+
     def __init__(self, cnmf, Y, framerate=30):
+        """[summary]
+
+        Args:
+            cnmf ([type]): [description]
+            Y ([type]): [description]
+            framerate (int, optional): [description]. Defaults to 30.
+        """
         self.cnmf = cnmf
         # self.cnmf_vld = cnmf.sel(unit_id=cnmf.attrs['unit_mask'])
         self.cnmf_vld = cnmf
@@ -374,6 +477,11 @@ class CNMFViewer_old:
         self.hvobjs = self.get_plot()
 
     def get_plot(self):
+        """[summary]
+
+        Returns:
+            [type]: [description]
+        """
         cur_sel = (self._cur_sel[0], self._cur_sel[1])
         cur_units = self.cnmf_vld.isel(unit_id=slice(*cur_sel)).coords["unit_id"].values
         cont_dict = OrderedDict()
@@ -502,26 +610,53 @@ class CNMFViewer_old:
         return hvobjs
 
     def show(self):
+        """[summary]
+        """
         display(self.widgets)
         display(self.hvobjs)
 
     def _set_sel(self, change):
+        """[summary]
+
+        Args:
+            change ([type]): [description]
+        """
         self._cur_sel = change["new"]
 
     def _set_update(self, change):
+        """[summary]
+
+        Args:
+            change ([type]): [description]
+        """
         self._update_mov = change["new"]
         if change["new"]:
             self._update_f(f=self.strm_f.contents["f"])
 
     def _set_overlay(self, change):
+        """[summary]
+
+        Args:
+            change ([type]): [description]
+        """
         self._overlay = change["new"]
 
     def _update_plot(self, b):
+        """[summary]
+
+        Args:
+            b ([type]): [description]
+        """
         clear_output()
         self.get_plot()
         self.show()
 
     def _update_f(self, f):
+        """[summary]
+
+        Args:
+            f ([type]): [description]
+        """
         if f is not None:
             f = int(f)
             if self._update_mov:
@@ -539,6 +674,14 @@ class CNMFViewer_old:
                 self.pipYr.send(cur_Yr)
 
     def _f_vl(self, f):
+        """[summary]
+
+        Args:
+            f ([type]): [description]
+
+        Returns:
+            [type]: [description]
+        """
         if f is not None:
             self._update_f(f)
             return hv.VLine(f)
@@ -546,6 +689,18 @@ class CNMFViewer_old:
             return hv.VLine(0)
 
     def _im_overlay(self, f, A, C, im_hsv, contour=None):
+        """[summary]
+
+        Args:
+            f ([type]): [description]
+            A ([type]): [description]
+            C ([type]): [description]
+            im_hsv ([type]): [description]
+            contour ([type], optional): [description]. Defaults to None.
+
+        Returns:
+            [type]: [description]
+        """
         f = int(f)
         AdC = A.dot(C.sel(frame=f))
         im_hue = im_hsv.sel(cspace="H").rename("H").drop("cspace")
@@ -560,6 +715,12 @@ class CNMFViewer_old:
         return im
 
     def _twinx(self, plot, element):
+        """[summary]
+
+        Args:
+            plot ([type]): [description]
+            element ([type]): [description]
+        """
         # Setting the second y axis range name and range
         start, end = element.range(1)
         label = element.dimensions()[1].pprint_label
@@ -569,6 +730,11 @@ class CNMFViewer_old:
         plot.state.add_layout(linaxis, "right")
 
     def _widgets(self):
+        """[summary]
+
+        Returns:
+            [type]: [description]
+        """
         dfrange = [0, self._f]
         w_frame = iwgt.IntSlider(
             value=0,
@@ -610,7 +776,20 @@ class CNMFViewer_old:
 
 
 class CNMFViewer:
+    """[summary]
+    """
+
     def __init__(self, minian=None, A=None, C=None, S=None, org=None, sortNN=True):
+        """[summary]
+
+        Args:
+            minian ([type], optional): [description]. Defaults to None.
+            A ([type], optional): [description]. Defaults to None.
+            C ([type], optional): [description]. Defaults to None.
+            S ([type], optional): [description]. Defaults to None.
+            org ([type], optional): [description]. Defaults to None.
+            sortNN (bool, optional): [description]. Defaults to True.
+        """
         self._A = A if A is not None else minian["A"]
         self._C = C if C is not None else minian["C"]
         self._S = S if S is not None else minian["S"]
@@ -690,6 +869,8 @@ class CNMFViewer:
         self.wgt_temp_comp = self._temp_comp_wgt()
 
     def update_subs(self):
+        """[summary]
+        """
         self.A_sub = self._A.sel(**self.metas)
         self.C_sub = self._C.sel(**self.metas)
         self.S_sub = self._S.sel(**self.metas)
@@ -722,6 +903,11 @@ class CNMFViewer:
             self.cents_sub = self.cents
 
     def compute_subs(self, clicks=None):
+        """[summary]
+
+        Args:
+            clicks ([type], optional): [description]. Defaults to None.
+        """
         self.A_sub = self.A_sub.compute()
         self.C_sub = self.C_sub.compute()
         self.S_sub = self.S_sub.compute()
@@ -730,17 +916,33 @@ class CNMFViewer:
         self.S_norm_sub = self.S_norm_sub.compute()
 
     def update_all(self, clicks=None):
+        """[summary]
+
+        Args:
+            clicks ([type], optional): [description]. Defaults to None.
+        """
         self.update_subs()
         self.strm_uid.event(index=[])
         self.strm_f.event(x=0)
         self.update_spatial_all()
 
     def callback_uid(self, index=None):
+        """[summary]
+
+        Args:
+            index ([type], optional): [description]. Defaults to None.
+        """
         self.update_temp()
         self.update_AC()
         self.update_usub_lab()
 
     def callback_f(self, f, y):
+        """[summary]
+
+        Args:
+            f ([type]): [description]
+            y ([type]): [description]
+        """
         if len(self._AC) > 0 and len(self._mov) > 0:
             fidx = np.abs(self._f - f).argmin()
             f = self._f[fidx]
@@ -760,11 +962,21 @@ class CNMFViewer:
             self.pipmov.send([])
 
     def callback_usub(self, usub=None):
+        """[summary]
+
+        Args:
+            usub ([type], optional): [description]. Defaults to None.
+        """
         self.update_temp_comp_sub(usub)
         self.update_AC(usub)
         self.update_usub_lab(usub)
 
     def _meta_wgt(self):
+        """[summary]
+
+        Returns:
+            [type]: [description]
+        """
         wgt_meta = {
             d: pnwgt.Select(name=d, options=v, height=45, width=120)
             for d, v in self.meta_dicts.items()
@@ -793,6 +1005,11 @@ class CNMFViewer:
         )
 
     def show(self):
+        """[summary]
+
+        Returns:
+            [type]: [description]
+        """
         return pn.layout.Column(
             self.spatial_all,
             pn.layout.Row(
@@ -806,6 +1023,14 @@ class CNMFViewer:
         )
 
     def _temp_comp_sub(self, usub=None):
+        """[summary]
+
+        Args:
+            usub ([type], optional): [description]. Defaults to None.
+
+        Returns:
+            [type]: [description]
+        """
         if usub is None:
             usub = self.strm_usub.usub
         if self._normalize:
@@ -856,14 +1081,29 @@ class CNMFViewer:
         return pn.panel(temp_comp)
 
     def update_temp_comp_sub(self, usub=None):
+        """[summary]
+
+        Args:
+            usub ([type], optional): [description]. Defaults to None.
+        """
         self.temp_comp_sub.object = self._temp_comp_sub(usub).object
         self.wgt_man.objects = self._man_wgt().objects
 
     def update_norm(self, norm):
+        """[summary]
+
+        Args:
+            norm ([type]): [description]
+        """
         self._normalize = norm.new
         self.update_temp_comp_sub()
 
     def _temp_comp_wgt(self):
+        """[summary]
+
+        Returns:
+            [type]: [description]
+        """
         if self.strm_uid.index:
             cur_idxs = self.strm_uid.index
         else:
@@ -949,6 +1189,11 @@ class CNMFViewer:
         return pn.layout.Column(wgt_groups, wgt_play)
 
     def _man_wgt(self):
+        """[summary]
+
+        Returns:
+            [type]: [description]
+        """
         usub = self.strm_usub.usub
         usub.sort()
         usub.reverse()
@@ -1014,12 +1259,21 @@ class CNMFViewer:
         )
 
     def update_temp_comp_wgt(self):
+        """[summary]
+        """
         self.wgt_temp_comp.objects = self._temp_comp_wgt().objects
 
     def update_temp(self):
+        """[summary]
+        """
         self.update_temp_comp_wgt()
 
     def update_AC(self, usub=None):
+        """[summary]
+
+        Args:
+            usub ([type], optional): [description]. Defaults to None.
+        """
         if usub is None:
             usub = self.strm_usub.usub
         if usub:
@@ -1056,6 +1310,11 @@ class CNMFViewer:
             self.strm_f.event(x=0)
 
     def update_usub_lab(self, usub=None):
+        """[summary]
+
+        Args:
+            usub ([type], optional): [description]. Defaults to None.
+        """
         if usub is None:
             usub = self.strm_usub.usub
         if usub:
@@ -1064,6 +1323,11 @@ class CNMFViewer:
             self.pipusub.send([])
 
     def _spatial_all_wgt(self):
+        """[summary]
+
+        Returns:
+            [type]: [description]
+        """
         wgt_useAC = pnwgt.Checkbox(
             name="UseAC", value=self._useAC, width=120, height=15
         )
@@ -1076,6 +1340,11 @@ class CNMFViewer:
         return pn.layout.WidgetBox(wgt_useAC, width=150)
 
     def _spatial_all(self):
+        """[summary]
+
+        Returns:
+            [type]: [description]
+        """
         metas = self.metas
         Asum = regrid(
             hv.Image(self.Asum.sel(**metas), ["width", "height"]), precompute=True
@@ -1119,11 +1388,24 @@ class CNMFViewer:
         return pn.panel(Asum * cents + AC * ulab + mov)
 
     def update_spatial_all(self):
+        """[summary]
+        """
         self.spatial_all.objects = self._spatial_all().objects
 
 
 class AlignViewer:
+    """[summary]
+    """
+
     def __init__(self, shiftds, sampling=2, pct_thres=99.9, on=0):
+        """[summary]
+
+        Args:
+            shiftds ([type]): [description]
+            sampling (int, optional): [description]. Defaults to 2.
+            pct_thres (float, optional): [description]. Defaults to 99.9.
+            on (int, optional): [description]. Defaults to 0.
+        """
         self.shiftds = shiftds
         self.temps = shiftds["temps"]
         self.on = on
@@ -1145,10 +1427,20 @@ class AlignViewer:
         self.hvobjs = self._get_objs()
 
     def show(self):
+        """[summary]
+        """
         display(self.wgts)
         display(self.hvobjs)
 
     def _box(self, data):
+        """[summary]
+
+        Args:
+            data ([type]): [description]
+
+        Returns:
+            [type]: [description]
+        """
         if data is None:
             return hv.Polygons([])
         else:
@@ -1168,16 +1460,43 @@ class AlignViewer:
             return hv.Polygons([{("x", "y"): cnr.squeeze()} for cnr in corners])
 
     def _temps(self, anm, ss):
+        """[summary]
+
+        Args:
+            anm ([type]): [description]
+            ss ([type]): [description]
+
+        Returns:
+            [type]: [description]
+        """
         ims = hv.Image(self.temps.sel(animal=anm, session=ss), ["width", "height"])
         return ims
 
     def _temp0(self, anm, ss):
+        """[summary]
+
+        Args:
+            anm ([type]): [description]
+            ss ([type]): [description]
+
+        Returns:
+            [type]: [description]
+        """
         im0 = hv.Image(
             self.temps.sel(animal=anm).isel(session=self.on), ["width", "height"]
         )
         return im0
 
     def _re(self, anm, ss):
+        """[summary]
+
+        Args:
+            anm ([type]): [description]
+            ss ([type]): [description]
+
+        Returns:
+            [type]: [description]
+        """
         re = hv.Image(
             self.shiftds["temps_shifted"].sel(animal=anm, session=ss),
             ["width", "height"],
@@ -1185,6 +1504,11 @@ class AlignViewer:
         return re
 
     def _widgets(self):
+        """[summary]
+
+        Returns:
+            [type]: [description]
+        """
         sel_anm = iwgt.Dropdown(options=self.ls_anm, description="Animal:")
         sel_ss = iwgt.Dropdown(options=self.ls_ss, description="Session:")
         bt_mask0 = iwgt.Button(description="Update Template")
@@ -1195,6 +1519,11 @@ class AlignViewer:
         return iwgt.HBox([sel_anm, sel_ss, bt_mask0, bt_mask])
 
     def _get_objs(self):
+        """[summary]
+
+        Returns:
+            [type]: [description]
+        """
         opts = {
             "plot": {"height": self.hh, "width": self.ww, "colorbar": True},
             "style": {"cmap": "Viridis"},
@@ -1209,6 +1538,11 @@ class AlignViewer:
         )
 
     def _save_mask0(self, _):
+        """[summary]
+
+        Args:
+            _ ([type]): [description]
+        """
         print("save mask 0")
         cur_anm = self.str_sel.anm
         cur_ss = self.str_sel.ss
@@ -1230,6 +1564,11 @@ class AlignViewer:
         ] = True
 
     def _save_mask(self, _):
+        """[summary]
+
+        Args:
+            _ ([type]): [description]
+        """
         print("entering")
         cur_anm = self.str_sel.anm
         cur_ss = self.str_sel.ss
@@ -1286,6 +1625,16 @@ class AlignViewer:
 
 
 def write_vid_blk(arr, vpath, options):
+    """[summary]
+
+    Args:
+        arr ([type]): [description]
+        vpath ([type]): [description]
+        options ([type]): [description]
+
+    Returns:
+        [type]: [description]
+    """
     uid = uuid4()
     vname = "{}.mp4".format(uid)
     fpath = os.path.join(vpath, vname)
@@ -1307,7 +1656,20 @@ def write_vid_blk(arr, vpath, options):
     return fpath
 
 
-def write_video(arr, vname=None, vpath=".", options={'crf': '18', 'preset': 'ultrafast'}):
+def write_video(
+    arr, vname=None, vpath=".", options={"crf": "18", "preset": "ultrafast"}
+):
+    """[summary]
+
+    Args:
+        arr ([type]): [description]
+        vname ([type], optional): [description]. Defaults to None.
+        vpath (str, optional): [description]. Defaults to ".".
+        options (dict, optional): [description]. Defaults to {'crf': '18', 'preset': 'ultrafast'}.
+
+    Returns:
+        [type]: [description]
+    """
     if not vname:
         vname = "{}.mp4".format(uuid4())
     fname = os.path.join(vpath, vname)
@@ -1315,7 +1677,7 @@ def write_video(arr, vname=None, vpath=".", options={'crf': '18', 'preset': 'ult
         dask.delayed(write_vid_blk)(np.asscalar(a), vpath, options)
         for a in arr.data.to_delayed()
     ]
-    with dask.config.set(scheduler='processes'):
+    with dask.config.set(scheduler="processes"):
         paths = dask.compute(paths)[0]
     streams = [ffmpeg.input(p) for p in paths]
     (ffmpeg.concat(*streams).output(fname).run(overwrite_output=True))
@@ -1324,7 +1686,27 @@ def write_video(arr, vname=None, vpath=".", options={'crf': '18', 'preset': 'ult
     return fname
 
 
-def generate_videos(minian, varr, vpath=".", vname="minian.mp4", scale="auto", options={'crf': '18', 'preset': 'ultrafast'}):
+def generate_videos(
+    minian,
+    varr,
+    vpath=".",
+    vname="minian.mp4",
+    scale="auto",
+    options={"crf": "18", "preset": "ultrafast"},
+):
+    """[summary]
+
+    Args:
+        minian ([type]): [description]
+        varr ([type]): [description]
+        vpath (str, optional): [description]. Defaults to ".".
+        vname (str, optional): [description]. Defaults to "minian.mp4".
+        scale (str, optional): [description]. Defaults to "auto".
+        options (dict, optional): [description]. Defaults to {'crf': '18', 'preset': 'ultrafast'}.
+
+    Returns:
+        [type]: [description]
+    """
     print("generating traces")
     A = minian["A"].compute().transpose("unit_id", "height", "width")
     C = minian["C"].chunk(dict(unit_id=-1)).transpose("frame", "unit_id")
@@ -1380,6 +1762,16 @@ def generate_videos(minian, varr, vpath=".", vname="minian.mp4", scale="auto", o
 
 
 def datashade_ndcurve(ovly, kdim=None, spread=False):
+    """[summary]
+
+    Args:
+        ovly ([type]): [description]
+        kdim ([type], optional): [description]. Defaults to None.
+        spread (bool, optional): [description]. Defaults to False.
+
+    Returns:
+        [type]: [description]
+    """
     if not kdim:
         kdim = ovly.kdims[0].name
     var = np.unique(ovly.dimension_values(kdim)).tolist()
@@ -1403,6 +1795,15 @@ def datashade_ndcurve(ovly, kdim=None, spread=False):
 
 
 def construct_G(g, T):
+    """[summary]
+
+    Args:
+        g ([type]): [description]
+        T ([type]): [description]
+
+    Returns:
+        [type]: [description]
+    """
     cur_c, cur_r = np.zeros(T), np.zeros(T)
     cur_c[0] = 1
     cur_r[0] = 1
@@ -1411,10 +1812,27 @@ def construct_G(g, T):
 
 
 def normalize(a):
+    """[summary]
+
+    Args:
+        a ([type]): [description]
+
+    Returns:
+        [type]: [description]
+    """
     return np.interp(a, (np.nanmin(a), np.nanmax(a)), (0, +1))
 
 
 def convolve_G(s, g):
+    """[summary]
+
+    Args:
+        s ([type]): [description]
+        g ([type]): [description]
+
+    Returns:
+        [type]: [description]
+    """
     G = construct_G(g, len(s))
     try:
         c = np.linalg.inv(G).dot(s)
@@ -1424,6 +1842,15 @@ def convolve_G(s, g):
 
 
 def construct_pulse_response(g, length=500):
+    """[summary]
+
+    Args:
+        g ([type]): [description]
+        length (int, optional): [description]. Defaults to 500.
+
+    Returns:
+        [type]: [description]
+    """
     s = np.zeros(length)
     s[np.arange(0, length, 500)] = 1
     c = convolve_G(s, g)
@@ -1431,7 +1858,22 @@ def construct_pulse_response(g, length=500):
 
 
 def centroid(A, verbose=False):
+    """[summary]
+
+    Args:
+        A ([type]): [description]
+        verbose (bool, optional): [description]. Defaults to False.
+    """
+
     def rel_cent(im):
+        """[summary]
+
+        Args:
+            im ([type]): [description]
+
+        Returns:
+            [type]: [description]
+        """
         im_nan = np.isnan(im)
         if im_nan.all():
             return np.array([np.nan, np.nan])
@@ -1474,6 +1916,16 @@ def centroid(A, verbose=False):
 
 
 def visualize_preprocess(fm, fn=None, include_org=True, **kwargs):
+    """[summary]
+
+    Args:
+        fm ([type]): [description]
+        fn ([type], optional): [description]. Defaults to None.
+        include_org (bool, optional): [description]. Defaults to True.
+
+    Returns:
+        [type]: [description]
+    """
     fh, fw = fm.sizes["height"], fm.sizes["width"]
     asp = fw / fh
     opts_im = {
@@ -1494,6 +1946,14 @@ def visualize_preprocess(fm, fn=None, include_org=True, **kwargs):
     }
 
     def _vis(f):
+        """[summary]
+
+        Args:
+            f ([type]): [description]
+
+        Returns:
+            [type]: [description]
+        """
         im = hv.Image(f, kdims=["width", "height"]).opts(**opts_im)
         cnt = hv.operation.contours(im).opts(**opts_cnt)
         return im, cnt
@@ -1536,6 +1996,17 @@ def visualize_preprocess(fm, fn=None, include_org=True, **kwargs):
 
 
 def visualize_seeds(max_proj, seeds, mask=None, datashade=False):
+    """[summary]
+
+    Args:
+        max_proj ([type]): [description]
+        seeds ([type]): [description]
+        mask ([type], optional): [description]. Defaults to None.
+        datashade (bool, optional): [description]. Defaults to False.
+
+    Returns:
+        [type]: [description]
+    """
     h, w = max_proj.sizes["height"], max_proj.sizes["width"]
     asp = w / h
     pt_cmap = {True: "white", False: "red"}
@@ -1563,6 +2034,14 @@ def visualize_seeds(max_proj, seeds, mask=None, datashade=False):
 
 
 def visualize_gmm_fit(values, gmm, bins):
+    """[summary]
+
+    Args:
+        values ([type]): [description]
+        gmm ([type]): [description]
+        bins ([type]): [description]
+    """
+
     def gaussian(x, mu, sig):
         return np.exp(-np.power(x - mu, 2.0) / (2 * np.power(sig, 2.0)))
 
@@ -1580,6 +2059,18 @@ def visualize_gmm_fit(values, gmm, bins):
 
 
 def visualize_spatial_update(A_dict, C_dict, kdims=None, norm=True, datashading=True):
+    """[summary]
+
+    Args:
+        A_dict ([type]): [description]
+        C_dict ([type]): [description]
+        kdims ([type], optional): [description]. Defaults to None.
+        norm (bool, optional): [description]. Defaults to True.
+        datashading (bool, optional): [description]. Defaults to True.
+
+    Returns:
+        [type]: [description]
+    """
     if not kdims:
         A_dict = dict(dummy=A_dict)
         C_dict = dict(dummy=C_dict)
@@ -1648,6 +2139,22 @@ def visualize_temporal_update(
     norm=True,
     datashading=True,
 ):
+    """[summary]
+
+    Args:
+        YA_dict ([type]): [description]
+        C_dict ([type]): [description]
+        S_dict ([type]): [description]
+        g_dict ([type]): [description]
+        sig_dict ([type]): [description]
+        A_dict ([type]): [description]
+        kdims ([type], optional): [description]. Defaults to None.
+        norm (bool, optional): [description]. Defaults to True.
+        datashading (bool, optional): [description]. Defaults to True.
+
+    Returns:
+        [type]: [description]
+    """
     inputs = [YA_dict, C_dict, S_dict, sig_dict, g_dict]
     if not kdims:
         inputs = [dict(dummy=i) for i in inputs]
@@ -1753,6 +2260,14 @@ def visualize_temporal_update(
 
 
 def roi_draw(im):
+    """[summary]
+
+    Args:
+        im ([type]): [description]
+
+    Returns:
+        [type]: [description]
+    """
     h, w = im.sizes["height"], im.sizes["width"]
     opts_im = {"plot": {"height": h, "width": w}, "style": {"cmap": "Viridis"}}
     opts_box = {"style": {"fill_alpha": 0.3, "line_color": "white"}}
@@ -1763,6 +2278,14 @@ def roi_draw(im):
 
 
 def flatten(l):
+    """[summary]
+
+    Args:
+        l ([type]): [description]
+
+    Yields:
+        [type]: [description]
+    """
     for el in l:
         if isinstance(el, collections.Iterable) and not isinstance(el, basestring):
             for sub in flatten(el):
@@ -1772,6 +2295,14 @@ def flatten(l):
 
 
 def _get_figures_core(objs):
+    """[summary]
+
+    Args:
+        objs ([type]): [description]
+
+    Returns:
+        [type]: [description]
+    """
     if isinstance(objs, list):
         objs = [_get_figures_core(plot) for plot in objs]
     elif isinstance(objs, (models.Column, models.Row)):
@@ -1784,6 +2315,14 @@ def _get_figures_core(objs):
 
 
 def _get_figures(objs):
+    """[summary]
+
+    Args:
+        objs ([type]): [description]
+
+    Returns:
+        [type]: [description]
+    """
     try:
         return list(flatten(_get_figures_core(objs)))
     except TypeError:
@@ -1791,6 +2330,12 @@ def _get_figures(objs):
 
 
 def _save_to_svg(hv_obj, save):
+    """[summary]
+
+    Args:
+        hv_obj ([type]): [description]
+        save ([type]): [description]
+    """
     bokeh_obj = hv.renderer("bokeh").get_plot(hv_obj).state
     figures = _get_figures(bokeh_obj)
     for i, figure in enumerate(figures):
@@ -1811,6 +2356,14 @@ def _save_to_svg(hv_obj, save):
 
 
 def NNsort(cents):
+    """[summary]
+
+    Args:
+        cents ([type]): [description]
+
+    Returns:
+        [type]: [description]
+    """
     cents_hw = cents[["height", "width"]]
     kdtree = cKDTree(cents_hw)
     idu_start = cents_hw.sum(axis="columns").idxmin()
