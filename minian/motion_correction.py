@@ -19,6 +19,14 @@ from .utilities import get_optimal_chk
 
 
 def detect_and_correct_old(mov):
+    """[summary]
+
+    Args:
+        mov ([type]): [description]
+
+    Returns:
+        [type]: [description]
+    """
     surf = cv2.xfeatures2d.SURF_create(200)
     matcher = cv2.BFMatcher(crossCheck=True)
     detect_list = [surf.detectAndCompute(f, None) for f in mov]
@@ -38,58 +46,81 @@ def detect_and_correct_old(mov):
         points0 = np.float32(np.array(points0))
         points1 = np.float32(np.array(points1))
         matching_points.append((points0, points1))
-    trans_list = [
-        cv2.getAffineTransform(pt[0], pt[1]) for pt in matching_points
-    ]
+    trans_list = [cv2.getAffineTransform(pt[0], pt[1]) for pt in matching_points]
     mov_correct = mov.copy()
     for iframe, trans in enumerate(trans_list):
-        mov_correct[iframe + 1] = cv2.warpAffine(mov_correct[iframe], trans,
-                                                 mov[0].shape[::-1])
+        mov_correct[iframe + 1] = cv2.warpAffine(
+            mov_correct[iframe], trans, mov[0].shape[::-1]
+        )
     return mov_correct
 
 
-def detect_and_correct(varray,
-                       d_th=None,
-                       r_th=None,
-                       z_th=None,
-                       q_th=None,
-                       h_th=400,
-                       std_thres=5,
-                       opt_restr=5,
-                       opt_std_thres=15,
-                       opt_h_prop=0.1,
-                       opt_err_thres=40,
-                       method='translation',
-                       upsample=None,
-                       weight=False,
-                       invert=False,
-                       enhance=True):
+def detect_and_correct(
+    varray,
+    d_th=None,
+    r_th=None,
+    z_th=None,
+    q_th=None,
+    h_th=400,
+    std_thres=5,
+    opt_restr=5,
+    opt_std_thres=15,
+    opt_h_prop=0.1,
+    opt_err_thres=40,
+    method="translation",
+    upsample=None,
+    weight=False,
+    invert=False,
+    enhance=True,
+):
+    """[summary]
+
+    Args:
+        varray ([type]): [description]
+        d_th ([type], optional): [description]. Defaults to None.
+        r_th ([type], optional): [description]. Defaults to None.
+        z_th ([type], optional): [description]. Defaults to None.
+        q_th ([type], optional): [description]. Defaults to None.
+        h_th (int, optional): [description]. Defaults to 400.
+        std_thres (int, optional): [description]. Defaults to 5.
+        opt_restr (int, optional): [description]. Defaults to 5.
+        opt_std_thres (int, optional): [description]. Defaults to 15.
+        opt_h_prop (float, optional): [description]. Defaults to 0.1.
+        opt_err_thres (int, optional): [description]. Defaults to 40.
+        method (str, optional): [description]. Defaults to 'translation'.
+        upsample ([type], optional): [description]. Defaults to None.
+        weight (bool, optional): [description]. Defaults to False.
+        invert (bool, optional): [description]. Defaults to False.
+        enhance (bool, optional): [description]. Defaults to True.
+
+    Returns:
+        [type]: [description]
+    """
     surf = cv2.xfeatures2d.SURF_create(h_th, extended=True)
     matcher = cv2.BFMatcher_create(crossCheck=True)
     # clache = cv2.createCLAHE(clipLimit=2, tileGridSize=(50, 50))
-    varray = varray.transpose('frame', 'height', 'width')
+    varray = varray.transpose("frame", "height", "width")
     varr_mc = varray.astype(np.uint8)
     varr_ref = varray.astype(np.uint8)
     lk_params = dict(
         winSize=(200, 300),
         maxLevel=0,
-        criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 1000,
-                  0.0001),
-        flags=cv2.OPTFLOW_USE_INITIAL_FLOW)
-    frm_idx = varr_mc.coords['frame']
+        criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 1000, 0.0001),
+        flags=cv2.OPTFLOW_USE_INITIAL_FLOW,
+    )
+    frm_idx = varr_mc.coords["frame"]
     if invert:
         varr_ref = 255 - varr_ref
     if upsample:
-        w = varray.coords['width']
-        h = varray.coords['height']
+        w = varray.coords["width"]
+        h = varray.coords["height"]
         w_up = np.linspace(w[0], w[-1], len(w) * upsample)
         h_up = np.linspace(h[0], h[-1], len(h) * upsample)
-        varr_ref = varr_ref.reindex(method='nearest', width=w_up, height=h_up)
+        varr_ref = varr_ref.reindex(method="nearest", width=w_up, height=h_up)
     if enhance:
         for fid in frm_idx.values:
             fm = varr_ref.sel(frame=fid)
-            fm.values = cv2.bilateralFilter(
-                cv2.equalizeHist(fm.values), 9, 250, 250)
+            fm.values = cv2.bilateralFilter(cv2.equalizeHist(fm.values), 9, 250, 250)
             varr_ref.loc[dict(frame=fid)] = fm
     match_dict = OrderedDict()
     shifts, shifts_idx, drop_idx = ([], [], [])
@@ -116,9 +147,9 @@ def detect_and_correct(varray,
                 pt0 = np.array(detect_src[0][ma.queryIdx].pt)
                 pt1 = np.array(detect_dst[0][ma.trainIdx].pt)
                 pt_diff = pt0 - pt1
-                d = np.sqrt(np.sum(pt_diff**2))
+                d = np.sqrt(np.sum(pt_diff ** 2))
                 r = ma.distance
-                if (d < d_th if d_th else True and r < r_th if r_th else True):
+                if d < d_th if d_th else True and r < r_th if r_th else True:
                     p_src.append(detect_src[0][ma.queryIdx].pt)
                     p_dst.append(detect_dst[0][ma.trainIdx].pt)
                     eu_d.append(d)
@@ -127,8 +158,11 @@ def detect_and_correct(varray,
                     vma.append(ma)
         if not len(vma) > 0:
             set_trace()
-            print("unable to find valid match for frame {} and {}".format(
-                last_registered, fid))
+            print(
+                "unable to find valid match for frame {} and {}".format(
+                    last_registered, fid
+                )
+            )
             drop_idx.append(fid)
             continue
         p_src, p_dst, vma = np.array(p_src), np.array(p_dst), np.array(vma)
@@ -138,7 +172,8 @@ def detect_and_correct(varray,
             eu_y_z_mask = np.absolute(zscore(eu_y)) < z_th
             eu_dist_z_mask = np.absolute(zscore(eu_d)) < z_th
             dist_z_mask = np.logical_and.reduce(
-                [eu_dist_z_mask, eu_x_z_mask, eu_y_z_mask])
+                [eu_dist_z_mask, eu_x_z_mask, eu_y_z_mask]
+            )
         else:
             dist_z_mask = np.ones_like(eu_d)
         if q_th:
@@ -149,7 +184,8 @@ def detect_and_correct(varray,
             d_h_ma = eu_d < np.percentile(eu_d, q_th)
             d_l_ma = eu_d > np.percentile(eu_d, 100 - q_th)
             dist_q_mask = np.logical_and.reduce(
-                [x_h_ma, x_l_ma, y_h_ma, y_l_ma, d_h_ma, d_l_ma])
+                [x_h_ma, x_l_ma, y_h_ma, y_l_ma, d_h_ma, d_l_ma]
+            )
         else:
             dist_q_mask = np.ones_like(eu_d)
         mask = np.logical_and(dist_z_mask, dist_q_mask)
@@ -157,45 +193,60 @@ def detect_and_correct(varray,
         eu_d, eu_x, eu_y = eu_d[mask], eu_x[mask], eu_y[mask]
         if not len(vma) > 0:
             sys.stdout.write("\033[K")
-            print("No matches passed consistency test for frame {} and {}".
-                  format(last_registered, fid))
+            print(
+                "No matches passed consistency test for frame {} and {}".format(
+                    last_registered, fid
+                )
+            )
             drop_idx.append(fid)
             continue
         trans, hmask = cv2.findHomography(
-            p_src, p_dst, method=cv2.RANSAC, ransacReprojThreshold=1)
+            p_src, p_dst, method=cv2.RANSAC, ransacReprojThreshold=1
+        )
         hmask = hmask.squeeze().astype(bool)
         p_src, p_dst, vma = p_src[hmask], p_dst[hmask], vma[hmask]
         eu_d, eu_x, eu_y = eu_d[hmask], eu_x[hmask], eu_y[hmask]
         if not len(vma) > 0:
             sys.stdout.write("\033[K")
-            print("no matches formed a homography for frame {} and {}".format(
-                last_registered, fid))
+            print(
+                "no matches formed a homography for frame {} and {}".format(
+                    last_registered, fid
+                )
+            )
             drop_idx.append(fid)
             continue
         elif np.std(eu_d) > std_thres if std_thres else False:
             sys.stdout.write("\033[K")
-            print("dist variance too high for frame {} and {}. variance: {}".
-                  format(last_registered, fid, np.std(eu_d)))
+            print(
+                "dist variance too high for frame {} and {}. variance: {}".format(
+                    last_registered, fid, np.std(eu_d)
+                )
+            )
             drop_idx.append(fid)
             continue
         elif np.std(eu_x) > std_thres if std_thres else False:
             sys.stdout.write("\033[K")
-            print("x variance too high for frame {} and {}. variance: {}".
-                  format(last_registered, fid, np.std(eu_x)))
+            print(
+                "x variance too high for frame {} and {}. variance: {}".format(
+                    last_registered, fid, np.std(eu_x)
+                )
+            )
             drop_idx.append(fid)
             continue
         elif np.std(eu_y) > std_thres if std_thres else False:
             sys.stdout.write("\033[K")
-            print("y variance too high for frame {} and {}. variance: {}".
-                  format(last_registered, fid, np.std(eu_y)))
+            print(
+                "y variance too high for frame {} and {}. variance: {}".format(
+                    last_registered, fid, np.std(eu_y)
+                )
+            )
             drop_idx.append(fid)
             continue
         est_shift = np.median(p_dst - p_src, axis=0)
         pts_src = cv2.goodFeaturesToTrack(im_src, 100, 0.5, 3, blockSize=3)
         if pts_src is None or not len(pts_src) > 1:
             sys.stdout.write("\033[K")
-            print(
-                "not enough good corners for frame {}".format(last_registered))
+            print("not enough good corners for frame {}".format(last_registered))
             drop_idx.append(fid)
             continue
         pts_dst = cv2.goodFeaturesToTrack(im_dst, 100, 0.5, 3, blockSize=3)
@@ -210,33 +261,37 @@ def detect_and_correct(varray,
         vld_mask = pts_dst.min(axis=1) > 0
         if not vld_mask.sum() > 0:
             sys.stdout.write("\033[K")
-            print("no valid corners for frame {} and {}".format(
-                last_registered, fid))
+            print("no valid corners for frame {} and {}".format(last_registered, fid))
             drop_idx.append(fid)
             continue
         pts_src, pts_dst = pts_src[vld_mask], pts_dst[vld_mask]
-        p1, st0, err0 = cv2.calcOpticalFlowPyrLK(im_src, im_dst,
-                                                 pts_src.copy(),
-                                                 pts_dst.copy(), **lk_params)
-        p0r, st1, err1 = cv2.calcOpticalFlowPyrLK(im_dst, im_src,
-                                                  p1.copy(),
-                                                  pts_src.copy(), **lk_params)
+        p1, st0, err0 = cv2.calcOpticalFlowPyrLK(
+            im_src, im_dst, pts_src.copy(), pts_dst.copy(), **lk_params
+        )
+        p0r, st1, err1 = cv2.calcOpticalFlowPyrLK(
+            im_dst, im_src, p1.copy(), pts_src.copy(), **lk_params
+        )
         d_mask = np.absolute(pts_src - p0r).reshape(-1, 2).max(-1) < 1
         st0 = st0.squeeze().astype(bool)
         st1 = st1.squeeze().astype(bool)
         optmask = np.logical_and.reduce([st0, st1, d_mask])
         if not np.any(optmask):
             sys.stdout.write("\033[K")
-            print(("no valid optical flow matching was found "
-                   "for frame {} and {}").format(last_registered, fid))
+            print(
+                (
+                    "no valid optical flow matching was found " "for frame {} and {}"
+                ).format(last_registered, fid)
+            )
             drop_idx.append(fid)
             continue
         pts_src, pts_dst, err0 = p0r[optmask], p1[optmask], err0[optmask]
         if err0.mean() > opt_err_thres:
             sys.stdout.write("\033[K")
-            print(("optical flow error too high "
-                   "for frame {} and {}. error: {}").format(
-                       last_registered, fid, err0.mean()))
+            print(
+                (
+                    "optical flow error too high " "for frame {} and {}. error: {}"
+                ).format(last_registered, fid, err0.mean())
+            )
             drop_idx.append(fid)
             continue
         # consmask = np.absolute(pts_src - pts_dst - est_shift).max(
@@ -249,38 +304,46 @@ def detect_and_correct(varray,
         # pts_src, pts_dst = pts_src[consmask], pts_dst[consmask]
         if len(pts_src) > 3:
             trans, hmask = cv2.findHomography(
-                pts_src, pts_dst, method=cv2.RANSAC, ransacReprojThreshold=3)
+                pts_src, pts_dst, method=cv2.RANSAC, ransacReprojThreshold=3
+            )
             hmask = hmask.squeeze().astype(bool)
         else:
             hmask = np.ones(len(pts_src), dtype=bool)
         if hmask.sum() < opt_h_prop * len(hmask):
             sys.stdout.write("\033[K")
-            print(("too many optical flow matches were outliers "
-                   "for frame {} and {}").format(last_registered, fid))
+            print(
+                (
+                    "too many optical flow matches were outliers " "for frame {} and {}"
+                ).format(last_registered, fid)
+            )
             hmask = np.ones(len(pts_src), dtype=bool)
         pts_src = pts_src[hmask]
         pts_dst = pts_dst[hmask]
         pts_diff = pts_src - pts_dst
-        pts_dist = np.sqrt((pts_diff**2).sum(axis=1))
+        pts_dist = np.sqrt((pts_diff ** 2).sum(axis=1))
         if np.std(pts_dist) > opt_std_thres:
             sys.stdout.write("\033[K")
-            print(("optical flow distance variance too high "
-                   "for frame {} and {}. std:{}").format(
-                       last_registered, fid, np.std(pts_dist)))
+            print(
+                (
+                    "optical flow distance variance too high "
+                    "for frame {} and {}. std:{}"
+                ).format(last_registered, fid, np.std(pts_dist))
+            )
             drop_idx.append(fid)
             continue
         pts_src = pts_src.reshape((-1, 2))
         pts_dst = pts_dst.reshape((-1, 2))
-        if method == 'opencv':
+        if method == "opencv":
             trans = cv2.estimateRigidTransform(pts_dst, pts_src, False)
             if trans is not None:
                 varr_mc.loc[dict(frame=fid)] = cv2.warpAffine(
                     varr_mc.sel(frame=fid).values,
                     trans,
-                    varr_mc.sel(frame=fid).values.shape[::-1])
+                    varr_mc.sel(frame=fid).values.shape[::-1],
+                )
             else:
                 print("unable to find transform for frame {}".format(fid))
-        elif method == 'translation':
+        elif method == "translation":
             if weight and len(pts_dist) > 1:
                 weights = np.exp(-np.array(np.absolute(zscore(pts_dist))) * 10)
                 weights = weights / np.sum(weights)
@@ -289,57 +352,71 @@ def detect_and_correct(varray,
             shift = estimate_translation(pts_src, pts_dst, weights)
             shifts.append(shift)
             shifts_idx.append(fid)
-        elif method == 'skimage':
-            trans = tf.estimate_transform('similarity', pts_src, pts_dst)
+        elif method == "skimage":
+            trans = tf.estimate_transform("similarity", pts_src, pts_dst)
             varr_mc.loc[dict(frame=fid)] = tf.warp(
-                varr_mc.sel(frame=fid), trans.inverse)
+                varr_mc.sel(frame=fid), trans.inverse
+            )
         print(
-            ("processing frame {:5d} of {:5d}, "
-             "current features: {:3d}, current err: {:06.4f}").format(
-                 i, len(frm_idx), len(pts_src), err0.mean()),
-            end='\r')
+            (
+                "processing frame {:5d} of {:5d}, "
+                "current features: {:3d}, current err: {:06.4f}"
+            ).format(i, len(frm_idx), len(pts_src), err0.mean()),
+            end="\r",
+        )
         last_registered = fid
         match_dict[fid] = dict(
             src=detect_src,
             dst=detect_dst,
             match=vma,
             src_fid=last_registered,
-            upsample=upsample if upsample else 1)
-    if method == 'translation':
+            upsample=upsample if upsample else 1,
+        )
+    if method == "translation":
         shifts = xr.DataArray(
-            shifts,
-            coords=dict(frame=shifts_idx),
-            dims=['frame', 'shift_dims'])
+            shifts, coords=dict(frame=shifts_idx), dims=["frame", "shift_dims"]
+        )
         shifts_final = []
         for fid in frm_idx[1:].values:
             cur_sh_hist = shifts.sel(frame=slice(frm_idx[0], fid))
-            cur_shift = cur_sh_hist.sum('frame')
+            cur_shift = cur_sh_hist.sum("frame")
             cur_shift = cur_shift.values.astype(int)
             shifts_final.append(cur_shift)
             varr_mc.loc[dict(frame=fid)] = apply_translation(
-                varr_mc.sel(frame=fid), cur_shift)
+                varr_mc.sel(frame=fid), cur_shift
+            )
         shifts_final = xr.DataArray(
-            shifts_final,
-            coords=dict(frame=frm_idx[1:]),
-            dims=['frame', 'shift_dims'])
+            shifts_final, coords=dict(frame=frm_idx[1:]), dims=["frame", "shift_dims"]
+        )
     else:
         shifts_final = None
     varr_mc = varr_mc.reindex(
-        method='nearest',
-        width=varray.coords['width'],
-        height=varray.coords['height'])
-    return varr_mc.rename(varray.name + "_MotionCorrected"
-                          ), match_dict, np.array(drop_idx), shifts_final
+        method="nearest", width=varray.coords["width"], height=varray.coords["height"]
+    )
+    return (
+        varr_mc.rename(varray.name + "_MotionCorrected"),
+        match_dict,
+        np.array(drop_idx),
+        shifts_final,
+    )
 
 
 def remove_duplicate_keypoints(detect, threshold=2):
+    """[summary]
+
+    Args:
+        detect ([type]): [description]
+        threshold (int, optional): [description]. Defaults to 2.
+
+    Returns:
+        [type]: [description]
+    """
     remv_idx = []
     kps = detect[0]
     des = detect[1]
     for kp0, kp1 in itt.combinations(enumerate(kps), 2):
         if not (kp0[0] in remv_idx or kp1[0] in remv_idx):
-            dist = np.sqrt(
-                np.sum(np.array(kp0[1].pt) - np.array(kp1[1].pt))**2)
+            dist = np.sqrt(np.sum(np.array(kp0[1].pt) - np.array(kp1[1].pt)) ** 2)
             if dist < threshold:
                 remv_idx.append(kp0[0])
     kps = [kp for ikp, kp in enumerate(kps) if ikp not in remv_idx]
@@ -348,17 +425,49 @@ def remove_duplicate_keypoints(detect, threshold=2):
 
 
 def estimate_translation(pts_src, pts_dst, weights=None):
+    """[summary]
+
+    Args:
+        pts_src ([type]): [description]
+        pts_dst ([type]): [description]
+        weights ([type], optional): [description]. Defaults to None.
+
+    Returns:
+        [type]: [description]
+    """
     return np.average(pts_src - pts_dst, axis=0, weights=weights)
     # return np.median(pts_src - pts_dst, axis=0)
 
 
 def apply_translation(img, shift):
+    """[summary]
+
+    Args:
+        img ([type]): [description]
+        shift ([type]): [description]
+
+    Returns:
+        [type]: [description]
+    """
     return np.roll(img, shift, axis=(1, 0))
 
 
 def mask_shifts(varr_fft, corr, shifts, z_thres, perframe=True, pad_f=1):
+    """[summary]
+
+    Args:
+        varr_fft ([type]): [description]
+        corr ([type]): [description]
+        shifts ([type]): [description]
+        z_thres ([type]): [description]
+        perframe (bool, optional): [description]. Defaults to True.
+        pad_f (int, optional): [description]. Defaults to 1.
+
+    Returns:
+        [type]: [description]
+    """
     dims = list(varr_fft.dims)
-    dims.remove('frame')
+    dims.remove("frame")
     sizes = [varr_fft.sizes[d] for d in dims]
     pad_s = np.array(sizes) * pad_f
     pad_s = pad_s.astype(int)
@@ -367,10 +476,11 @@ def mask_shifts(varr_fft, corr, shifts, z_thres, perframe=True, pad_f=1):
     if perframe:
         mask_diff = xr.DataArray(
             np.diff(mask.astype(int)),
-            coords=dict(frame=mask.coords['frame'][1:]),
-            dims=['frame'])
-        good_idx = mask.coords['frame'].where(mask > 0, drop=True)
-        bad_idx = mask_diff.coords['frame'].where(mask_diff == -1, drop=True)
+            coords=dict(frame=mask.coords["frame"][1:]),
+            dims=["frame"],
+        )
+        good_idx = mask.coords["frame"].where(mask > 0, drop=True)
+        bad_idx = mask_diff.coords["frame"].where(mask_diff == -1, drop=True)
         for cur_bad in bad_idx:
             gb_diff = good_idx - cur_bad
             try:
@@ -386,6 +496,18 @@ def mask_shifts(varr_fft, corr, shifts, z_thres, perframe=True, pad_f=1):
 
 
 def estimate_shifts(varr, max_sh, dim="frame", npart=3, local=False):
+    """[summary]
+
+    Args:
+        varr ([type]): [description]
+        max_sh ([type]): [description]
+        dim (str, optional): [description]. Defaults to "frame".
+        npart (int, optional): [description]. Defaults to 3.
+        local (bool, optional): [description]. Defaults to False.
+
+    Returns:
+        [type]: [description]
+    """
     varr = varr.chunk({"height": -1, "width": -1})
     vmax, sh = xr.apply_ufunc(
         est_sh_part,
@@ -399,6 +521,17 @@ def estimate_shifts(varr, max_sh, dim="frame", npart=3, local=False):
 
 
 def est_sh_part(varr, max_sh, npart, local):
+    """[summary]
+
+    Args:
+        varr ([type]): [description]
+        max_sh ([type]): [description]
+        npart ([type]): [description]
+        local ([type]): [description]
+
+    Returns:
+        [type]: [description]
+    """
     if varr.shape[0] <= 1:
         return varr.squeeze(), np.array([[0, 0]])
     idx_spt = np.array_split(np.arange(varr.shape[0]), npart)
@@ -435,9 +568,22 @@ def est_sh_part(varr, max_sh, npart, local):
 
 
 def match_temp(src, dst, max_sh, local, subpixel=False):
+    """[summary]
+
+    Args:
+        src ([type]): [description]
+        dst ([type]): [description]
+        max_sh ([type]): [description]
+        local ([type]): [description]
+        subpixel (bool, optional): [description]. Defaults to False.
+
+    Returns:
+        [type]: [description]
+    """
     src = np.pad(src, max_sh)
     cor = cv2.matchTemplate(
-        src.astype(np.float32), dst.astype(np.float32), cv2.TM_CCOEFF_NORMED)
+        src.astype(np.float32), dst.astype(np.float32), cv2.TM_CCOEFF_NORMED
+    )
     if not len(np.unique(cor)) > 1:
         return np.array([0, 0])
     cent = np.floor(np.array(cor.shape) / 2)
@@ -455,10 +601,7 @@ def match_temp(src, dst, max_sh, local, subpixel=False):
         y1 = cor[imax[0], x1]
         p0 = np.polyfit(x0, y0, 2)
         p1 = np.polyfit(x1, y1, 2)
-        imax = np.array([
-            -0.5 * p0[1] / p0[0],
-            -0.5 * p1[1] / p1[0]
-        ])
+        imax = np.array([-0.5 * p0[1] / p0[0], -0.5 * p1[1] / p1[0]])
         # m0 = np.roots(np.polyder(p0))
         # m1 = np.roots(np.polyder(p1))
         # m0 = m0[np.argmin(np.abs(m0 - imax[0]))]
@@ -469,20 +612,38 @@ def match_temp(src, dst, max_sh, local, subpixel=False):
 
 
 def apply_shifts(varr, shifts):
-    sh_dim = shifts.coords['variable'].values.tolist()
+    """[summary]
+
+    Args:
+        varr ([type]): [description]
+        shifts ([type]): [description]
+
+    Returns:
+        [type]: [description]
+    """
+    sh_dim = shifts.coords["variable"].values.tolist()
     varr_sh = xr.apply_ufunc(
         shift_perframe,
         varr.chunk({d: -1 for d in sh_dim}),
         shifts,
-        input_core_dims=[sh_dim, ['variable']],
+        input_core_dims=[sh_dim, ["variable"]],
         output_core_dims=[sh_dim],
         vectorize=True,
-        dask = 'parallelized',
-        output_dtypes = [varr.dtype])
+        dask="parallelized",
+        output_dtypes=[varr.dtype],
+    )
     return varr_sh
 
 
 def mser_thres(fm):
+    """[summary]
+
+    Args:
+        fm ([type]): [description]
+
+    Returns:
+        [type]: [description]
+    """
     mser = cv2.MSER_create(_min_area=100, _delta=1, _max_variation=2)
     reg, _ = mser.detectRegions(fm.T)
     reg_set = [set(tuple(crd) for crd in r) for r in reg]
@@ -494,6 +655,15 @@ def mser_thres(fm):
 
 
 def shift_perframe(fm, sh):
+    """[summary]
+
+    Args:
+        fm ([type]): [description]
+        sh ([type]): [description]
+
+    Returns:
+        [type]: [description]
+    """
     sh = np.around(sh).astype(int)
     fm = np.roll(fm, sh, axis=np.arange(fm.ndim))
     index = [slice(None) for _ in range(fm.ndim)]
@@ -511,18 +681,27 @@ def shift_perframe(fm, sh):
 
 
 def interpolate_frame(varr, drop_idx):
+    """[summary]
+
+    Args:
+        varr ([type]): [description]
+        drop_idx ([type]): [description]
+
+    Returns:
+        [type]: [description]
+    """
     if drop_idx.dtype == bool:
-        drop_idx = drop_idx.coords['frame'].where(~drop_idx, drop=True).values
+        drop_idx = drop_idx.coords["frame"].where(~drop_idx, drop=True).values
     if not set(drop_idx):
         print("no bad frame to interpolate, returning input")
         return varr
-    keep_idx = np.array(list(set(varr.coords['frame'].values) - set(drop_idx)))
+    keep_idx = np.array(list(set(varr.coords["frame"].values) - set(drop_idx)))
     varr_int = varr.copy()
     for i, fid in enumerate(drop_idx):
         print(
-            "processing frame: {} progress: {}/{}".format(
-                fid, i, len(drop_idx)),
-            end='\r')
+            "processing frame: {} progress: {}/{}".format(fid, i, len(drop_idx)),
+            end="\r",
+        )
         diff = keep_idx - fid
         try:
             fid_fwd = diff[diff > 0].min() + fid
@@ -533,8 +712,8 @@ def interpolate_frame(varr, drop_idx):
         except ValueError:
             fid_bak = keep_idx.min()
         int_src = xr.concat(
-            [varr.sel(frame=fid_fwd),
-             varr.sel(frame=fid_bak)], dim='frame')
-        varr_int.loc[dict(frame=fid)] = int_src.mean('frame')
+            [varr.sel(frame=fid_fwd), varr.sel(frame=fid_bak)], dim="frame"
+        )
+        varr_int.loc[dict(frame=fid)] = int_src.mean("frame")
     print("\ninterpolation done")
     return varr_int.rename(varr.name + "_Interpolated")
