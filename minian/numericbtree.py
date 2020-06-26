@@ -25,6 +25,7 @@ def interval_iter(self):
     for n in lrange(self.begin, self.end):
         yield n
 
+
 Interval.intersect = interval_intersect
 Interval.subtract = interval_subtract
 Interval.to_set = interval_toset
@@ -69,7 +70,9 @@ class NBTree(object):
         self._dview = dview
         if not nodes:
             self._nodes = OrderedDict(
-                (i, IntervalTree.from_tuples([(2**i - 1, 2**(i+1) - 1)])) for i in range(1, depth + 1))
+                (i, IntervalTree.from_tuples([(2 ** i - 1, 2 ** (i + 1) - 1)]))
+                for i in range(1, depth + 1)
+            )
         else:
             self._nodes = nodes
 
@@ -100,7 +103,7 @@ class NBTree(object):
         if check:
             return self._nodes[level].overlaps(nid)
         else:
-            return 2**level - 1 <= nid < 2**(level+1) - 1
+            return 2 ** level - 1 <= nid < 2 ** (level + 1) - 1
 
     def level(self, nid, check=True):
         for lev in range(1, self._depth + 1):
@@ -112,14 +115,14 @@ class NBTree(object):
     def leaves(self, nid, level=None):
         if not level:
             level = self._depth
-        lb = 2**level - 1
-        hb = 2**(level+1) - 2
-        levn = hb-lb + 1
+        lb = 2 ** level - 1
+        hb = 2 ** (level + 1) - 2
+        levn = hb - lb + 1
         levid = self.level(nid)
-        shift = nid - (2**levid - 1)
-        div = 2**levid
-        llea = lb + levn/div*shift
-        rlea = lb + levn/div*(shift + 1)
+        shift = nid - (2 ** levid - 1)
+        div = 2 ** levid
+        llea = lb + levn / div * shift
+        rlea = lb + levn / div * (shift + 1)
         return self._nodes[level].intersect(IntervalTree.from_tuples([(llea, rlea)]))
 
     def parent(self, nid, check=True, level=None):
@@ -171,5 +174,3 @@ class NBTree(object):
             else:
                 curnid = self.parent(curnid, level=lev)
                 yield curnid
-
-
