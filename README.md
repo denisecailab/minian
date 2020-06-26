@@ -1,6 +1,8 @@
 [![Build Status](https://img.shields.io/travis/DeniseCaiLab/minian/master.svg?style=flat&label=master)](https://travis-ci.org/DeniseCaiLab/minian)
 [![Build Status](https://img.shields.io/travis/DeniseCaiLab/minian/dev.svg?style=flat&label=dev)](https://travis-ci.org/DeniseCaiLab/minian)
 
+[![codecov](https://codecov.io/gh/DeniseCaiLab/minian/branch/master/graph/badge.svg)](https://codecov.io/gh/DeniseCaiLab/minian)
+[![codecov](https://codecov.io/gh/MetaCell/minian/branch/master/graph/badge.svg)](https://codecov.io/gh/MetaCell/minian)
 
 # About MiniAn
 
