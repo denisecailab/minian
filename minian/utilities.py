@@ -664,9 +664,9 @@ def save_variable(var, fpath, fname, meta_dict=None):
 
 
 def open_minian(dpath, fname='minian', backend='netcdf', chunks=None, post_process=None):
-    if backend is 'netcdf':
+    if backend == 'netcdf':
         fname = fname + '.nc'
-        if chunks is 'auto':
+        if chunks == 'auto':
             chunks = dict([(d, 'auto') for d in ds.dims])
         mpath = pjoin(dpath, fname)
         with xr.open_dataset(mpath) as ds:
@@ -676,11 +676,11 @@ def open_minian(dpath, fname='minian', backend='netcdf', chunks=None, post_proce
         if post_process:
             ds = post_process(ds, mpath)
         return ds
-    elif backend is 'zarr':
+    elif backend == 'zarr':
         mpath = pjoin(dpath, fname)
         dslist = [xr.open_zarr(pjoin(mpath, d)) for d in listdir(mpath) if isdir(pjoin(mpath, d))]
         ds = xr.merge(dslist)
-        if chunks is 'auto':
+        if chunks == 'auto':
             chunks = dict([(d, 'auto') for d in ds.dims])
         if post_process:
             ds = post_process(ds, mpath)
@@ -709,9 +709,9 @@ def open_minian_mf(dpath, index_dims, result_format='xarray', pattern=r'minian\.
             key = tuple([np.array_str(minian[d].values) for d in index_dims])
             minian_dict[key] = minian
             print(["{}: {}".format(d, v) for d, v in zip(index_dims, key)])
-    if result_format is 'xarray':
+    if result_format == 'xarray':
         return xrconcat_recursive(minian_dict, index_dims)
-    elif result_format is 'pandas':
+    elif result_format == 'pandas':
         minian_df = pd.Series(minian_dict).rename('minian')
         minian_df.index.set_names(index_dims, inplace=True)
         return minian_df.to_frame()
@@ -727,14 +727,14 @@ def save_minian(var, dpath, fname='minian', backend='netcdf', meta_dict=None, ov
         pathlist = os.path.abspath(dpath).split(os.sep)
         ds = ds.assign_coords(
             **dict([(dn, pathlist[di]) for dn, di in meta_dict.items()]))
-    if backend is 'netcdf':
+    if backend == 'netcdf':
         try:
             md = {True: 'w', False: 'a'}[overwrite]
             ds.to_netcdf(os.path.join(dpath, fname + '.nc'), mode=md)
         except FileNotFoundError:
             ds.to_netcdf(os.path.join(dpath, fname + '.nc'), mode=md)
         return ds
-    elif backend is 'zarr':
+    elif backend == 'zarr':
         md = {True: 'w', False: 'w-'}[overwrite]
         fp = os.path.join(dpath, fname, var.name + '.zarr')
         ds.to_zarr(fp, mode=md)
