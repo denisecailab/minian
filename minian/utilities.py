@@ -868,13 +868,17 @@ def get_optimal_chk(ref, arr=None, dim_grp=None, ncores="auto", mem_limit="auto"
         * ref.dtype.itemsize
         / (1024 ** 2)
     )
-    csize = min(int(np.floor((mem_limit - tempsz) / ncores / 4)), 1024)
-    if csize <= 0:
+    csize = int(np.floor((mem_limit - tempsz) / ncores / 4))
+    if csize < 64:
         warnings.warn(
-            "estimated memory limit is smaller than 0. Using 64MiB chunksize instead. "
-            "Make sure you have enough memory or manually set mem_limit"
+            "estimated memory limit is smaller than 64MiB. Using 64MiB chunksize instead. "
         )
         csize = 64
+    if csize > 512:
+        warnings.warn(
+            "estimated memory limit is bigger than 512MiB. Using 512MiB chunksize instead. "
+        )
+        csize = 512
     dims = arr.dims
     if not dim_grp:
         dim_grp = [(d,) for d in dims]
