@@ -159,7 +159,6 @@ class VArrayViewer:
             im = self._img(dat=dat, f=f)
         return hv.operation.histogram(im, frequency_label="freq", num_bins=50)
 
-
 class MCViewer:
     """[summary]
     """

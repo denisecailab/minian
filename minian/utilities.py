@@ -908,7 +908,7 @@ def open_minian(
     Returns:
         [type]: [description]
     """
-    if backend is "netcdf":
+    if backend == "netcdf":
         fname = fname + ".nc"
         if chunks is "auto":
             chunks = dict([(d, "auto") for d in ds.dims])
@@ -920,7 +920,7 @@ def open_minian(
         if post_process:
             ds = post_process(ds, mpath)
         return ds
-    elif backend is "zarr":
+    elif backend == "zarr":
         mpath = pjoin(dpath, fname)
         dslist = [
             xr.open_zarr(pjoin(mpath, d))
@@ -928,7 +928,8 @@ def open_minian(
             if isdir(pjoin(mpath, d))
         ]
         ds = xr.merge(dslist)
-        if chunks is "auto":
+
+        if chunks == "auto":
             chunks = dict([(d, "auto") for d in ds.dims])
         if post_process:
             ds = post_process(ds, mpath)
@@ -985,9 +986,10 @@ def open_minian_mf(
             key = tuple([np.array_str(minian[d].values) for d in index_dims])
             minian_dict[key] = minian
             print(["{}: {}".format(d, v) for d, v in zip(index_dims, key)])
-    if result_format is "xarray":
+
+    if result_format == "xarray":
         return xrconcat_recursive(minian_dict, index_dims)
-    elif result_format is "pandas":
+    elif result_format == "pandas":
         minian_df = pd.Series(minian_dict).rename("minian")
         minian_df.index.set_names(index_dims, inplace=True)
         return minian_df.to_frame()
@@ -1021,14 +1023,14 @@ def save_minian(
         ds = ds.assign_coords(
             **dict([(dn, pathlist[di]) for dn, di in meta_dict.items()])
         )
-    if backend is "netcdf":
+    if backend == "netcdf":
         try:
             md = {True: "w", False: "a"}[overwrite]
             ds.to_netcdf(os.path.join(dpath, fname + ".nc"), mode=md)
         except FileNotFoundError:
             ds.to_netcdf(os.path.join(dpath, fname + ".nc"), mode=md)
         return ds
-    elif backend is "zarr":
+    elif backend == "zarr":
         md = {True: "w", False: "w-"}[overwrite]
         fp = os.path.join(dpath, fname, var.name + ".zarr")
         ds.to_zarr(fp, mode=md)
@@ -1191,13 +1193,17 @@ def get_optimal_chk(ref, arr=None, dim_grp=None, ncores="auto", mem_limit="auto"
         * ref.dtype.itemsize
         / (1024 ** 2)
     )
-    csize = min(int(np.floor((mem_limit - tempsz) / ncores / 4)), 1024)
-    if csize <= 0:
+    csize = int(np.floor((mem_limit - tempsz) / ncores / 4))
+    if csize < 64:
         warnings.warn(
-            "estimated memory limit is smaller than 0. Using 64MiB chunksize instead. "
-            "Make sure you have enough memory or manually set mem_limit"
+            "estimated memory limit is smaller than 64MiB. Using 64MiB chunksize instead. "
         )
         csize = 64
+    if csize > 512:
+        warnings.warn(
+            "estimated memory limit is bigger than 512MiB. Using 512MiB chunksize instead. "
+        )
+        csize = 512
     dims = arr.dims
     if not dim_grp:
         dim_grp = [(d,) for d in dims]
