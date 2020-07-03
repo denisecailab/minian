@@ -683,7 +683,6 @@ def fill_mapping(mappings, cents):
         mappings ([type]): [description]
         cents ([type]): [description]
     """
-
     def fill(cur_grp, cur_cent):
         fill_ls = []
         for cur_ss in list(cur_grp["session"]):
