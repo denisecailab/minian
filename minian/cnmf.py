@@ -416,6 +416,7 @@ def update_temporal(
     jac_thres=0.1,
     use_spatial=False,
     sparse_penal=1,
+    bseg=None,
     zero_thres=1e-8,
     max_iters=200,
     use_smooth=True,
@@ -566,6 +567,7 @@ def update_temporal(
                 update_temporal_cvxpy,
                 sparse_penal=sparse_penal,
                 max_iters=max_iters,
+                bseg=bseg,
                 scs_fallback=scs_fallback,
             ),
             signature="(f),(l),()->(t,f)",
@@ -632,6 +634,7 @@ def update_temporal(
                     kwargs=dict(
                         sparse_penal=sparse_penal,
                         max_iters=max_iters,
+                        bseg=bseg,
                         scs_fallback=scs_fallback,
                     ),
                     output_sizes=dict(trace=5),
@@ -650,7 +653,7 @@ def update_temporal(
         result = result_iso.sortby("unit_id").drop("unit_labels")
     C_new = result.isel(trace=0).dropna("unit_id")
     S_new = result.isel(trace=1).dropna("unit_id")
-    B_new = result.isel(trace=2, frame=0).dropna("unit_id").squeeze()
+    B_new = result.isel(trace=2).dropna("unit_id").squeeze()
     C0_new = result.isel(trace=3, frame=0).dropna("unit_id").squeeze()
     dc_new = result.isel(trace=4).dropna("unit_id")
     g_new = g.sel(unit_id=C_new.coords["unit_id"]).drop("unit_labels")
@@ -739,7 +742,7 @@ def get_p(y):
     return np.sum(rising[prd_ris == id_max_prd + 1])
 
 
-def update_temporal_cvxpy(y, g, sn, A=None, **kwargs):
+def update_temporal_cvxpy(y, g, sn, A=None, bseg=None, **kwargs):
     """
     spatial:
     (d, f), (u, p), (d), (d, u)
@@ -785,7 +788,16 @@ def update_temporal_cvxpy(y, g, sn, A=None, **kwargs):
     # get noise threshold
     thres_sn = sn * np.sqrt(_T)
     # construct variables
-    b = cvx.Variable(_u)  # baseline fluorescence per unit
+    if bseg is not None:
+        nseg = int(np.max(bseg) + 1)
+        b_temp = np.zeros((nseg, _T))
+        for iseg in range(nseg):
+            b_temp[iseg, bseg == iseg] = 1
+        b_cmp = cvx.Variable((_u, nseg))
+    else:
+        b_temp = np.ones((1, _T))
+        b_cmp = cvx.Variable((_u, 1))
+    b = b_cmp @ b_temp  # baseline fluorescence per unit
     c0 = cvx.Variable(_u)  # initial fluorescence per unit
     c = cvx.Variable((_u, _T))  # calcium trace per unit
     s = cvx.vstack([G_ls[u] * c[u, :] for u in range(_u)])  # spike train per unit
@@ -799,7 +811,7 @@ def update_temporal_cvxpy(y, g, sn, A=None, **kwargs):
         )
         noise = y - sig
     else:
-        sig = cvx.vstack([c[u, :] + b[u] + c0[u] * dc_vec[u, :] for u in range(_u)])
+        sig = cvx.vstack([c[u, :] + b[u, :] + c0[u] * dc_vec[u, :] for u in range(_u)])
         noise = y - sig
     noise = cvx.vstack([cvx.norm(noise[i, :], 2) for i in range(noise.shape[0])])
     # construct constraints
@@ -847,11 +859,7 @@ def update_temporal_cvxpy(y, g, sn, A=None, **kwargs):
     try:
         return np.stack(
             np.broadcast_arrays(
-                c.value,
-                s.value,
-                b.value.reshape((-1, 1)),
-                c0.value.reshape((-1, 1)),
-                dc_vec,
+                c.value, s.value, b.value, c0.value.reshape((-1, 1)), dc_vec
             )
         ).squeeze()
     except:
