@@ -33,8 +33,10 @@ install:
   - conda install -c conda-forge -y jupyterlab
   - jupyter labextension install @pyviz/jupyterlab_pyviz
   - conda env export
+  - conda install -y pytest
   - conda install -y pytest-cov
   - conda install -c anaconda -y black
+  - pip install opencv-python-headless
 
 script:
   # The test/check scripts go here
@@ -51,5 +53,4 @@ script:
   # - travis_fold end "Jupyter notebook pipeline"
 
 after_success:
-  - echo conda install codecov
-  - echo codecov
+  - bash <(curl -s https://codecov.io/bash)
