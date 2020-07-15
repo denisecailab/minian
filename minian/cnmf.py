@@ -1,35 +1,22 @@
+import functools as fct
+import warnings
+
+import cv2
+import cvxpy as cvx
+import dask as da
+import dask.array as darr
+import networkx as nx
 import numpy as np
 import xarray as xr
-import pandas as pd
-import dask as da
-import numba as nb
-import dask.array.fft as dafft
-import dask.array.linalg as dalin
-import dask.array as darr
-import functools as fct
-import cv2
-
-# import dask_ml.joblib
-from dask import delayed, compute
-from dask.diagnostics import Profiler
-from dask.distributed import progress
-from IPython.core.debugger import set_trace
-from scipy.ndimage import gaussian_filter, label
-from scipy.signal import welch, butter, lfilter
-from scipy.sparse import diags, dia_matrix
-from scipy.linalg import toeplitz, lstsq
-from scipy.spatial.distance import pdist, squareform
+from dask import delayed
+from scipy.linalg import lstsq, toeplitz
+from scipy.ndimage import label
+from scipy.signal import butter, lfilter, welch
+from scipy.sparse import dia_matrix, diags
+from skimage import morphology as moph
 from sklearn.linear_model import LassoLars
 from sklearn.utils import parallel_backend
-from numba import jit, guvectorize
-from skimage import morphology as moph
 from statsmodels.tsa.stattools import acovf
-import networkx as nx
-import cvxpy as cvx
-import pyfftw.interfaces.dask_fft as fftw
-from timeit import timeit
-import warnings
-from .utilities import get_chk, rechunk_like
 
 
 def get_noise_fft(varr, noise_range=(0.25, 0.5), noise_method="logmexp"):
@@ -83,108 +70,9 @@ def _noise_fft(px, noise_range=(0.25, 0.5), noise_method="logmexp"):
         return np.sqrt(px_band.sum())
 
 
-def psd_fft(varr):
-    """[summary]
-
-    Args:
-        varr ([type]): [description]
-
-    Returns:
-        [type]: [description]
-    """
-    _T = len(varr.coords["frame"])
-    ns = _T // 2 + 1
-    if _T % 2 == 0:
-        freq_crd = np.linspace(0, 0.5, ns)
-    else:
-        freq_crd = np.linspace(0, 0.5 * (_T - 1) / _T, ns)
-    print("computing psd of input")
-    varr_fft = xr.apply_ufunc(
-        fftw.rfft,
-        varr.chunk(dict(frame=-1)),
-        input_core_dims=[["frame"]],
-        output_core_dims=[["freq"]],
-        dask="allowed",
-        output_sizes=dict(freq=ns),
-        output_dtypes=[np.complex_],
-    )
-    varr_fft = varr_fft.assign_coords(freq=freq_crd)
-    varr_psd = 1 / _T * np.abs(varr_fft) ** 2
-    return varr_psd
-
-
-def psd_welch(varr):
-    """[summary]
-
-    Args:
-        varr ([type]): [description]
-
-    Returns:
-        [type]: [description]
-    """
-    _T = len(varr.coords["frame"])
-    ns = _T // 2 + 1
-    if _T % 2 == 0:
-        freq_crd = np.linspace(0, 0.5, ns)
-    else:
-        freq_crd = np.linspace(0, 0.5 * (_T - 1) / _T, ns)
-    varr_psd = xr.apply_ufunc(
-        _welch,
-        varr.chunk(dict(frame=-1)),
-        input_core_dims=[["frame"]],
-        output_core_dims=[["freq"]],
-        dask="parallelized",
-        vectorize=True,
-        kwargs=dict(nperseg=_T),
-        output_sizes=dict(freq=ns),
-        output_dtypes=[varr.dtype],
-    )
-    varr_psd = varr_psd.assign_coords(freq=freq_crd)
-    return varr_psd
-
-
-def _welch(x, **kwargs):
-    return welch(x, **kwargs)[1]
-
-
-def get_noise(psd, noise_range=(0.25, 0.5), noise_method="logmexp"):
-    """[summary]
-
-    Args:
-        psd ([type]): [description]
-        noise_range (tuple, optional): [description]. Defaults to (0.25, 0.5).
-        noise_method (str, optional): [description]. Defaults to 'logmexp'.
-
-    Returns:
-        [type]: [description]
-    """
-    psd_band = psd.sel(freq=slice(*noise_range))
-    print("estimating noise using method {}".format(noise_method))
-    if noise_method == "mean":
-        sn = np.sqrt(psd_band.mean("freq"))
-    elif noise_method == "median":
-        sn = np.sqrt(psd_band.median("freq"))
-    elif noise_method == "logmexp":
-        eps = np.finfo(psd_band.dtype).eps
-        sn = np.sqrt(np.exp(np.log(psd_band + eps).mean("freq")))
-    sn = sn.persist()
-    return sn
-
-
 def get_noise_welch(
     varr, noise_range=(0.25, 0.5), noise_method="logmexp", compute=True
 ):
-    """[summary]
-
-    Args:
-        varr ([type]): [description]
-        noise_range (tuple, optional): [description]. Defaults to (0.25, 0.5).
-        noise_method (str, optional): [description]. Defaults to 'logmexp'.
-        compute (bool, optional): [description]. Defaults to True.
-
-    Returns:
-        [type]: [description]
-    """
     print("estimating noise")
     sn = xr.apply_ufunc(
         noise_welch,
@@ -528,6 +416,7 @@ def update_temporal(
     jac_thres=0.1,
     use_spatial=False,
     sparse_penal=1,
+    bseg=None,
     zero_thres=1e-8,
     max_iters=200,
     use_smooth=True,
@@ -706,6 +595,7 @@ def update_temporal(
                 update_temporal_cvxpy,
                 sparse_penal=sparse_penal,
                 max_iters=max_iters,
+                bseg=bseg,
                 scs_fallback=scs_fallback,
             ),
             signature="(f),(l),()->(t,f)",
@@ -772,6 +662,7 @@ def update_temporal(
                     kwargs=dict(
                         sparse_penal=sparse_penal,
                         max_iters=max_iters,
+                        bseg=bseg,
                         scs_fallback=scs_fallback,
                     ),
                     output_sizes=dict(trace=5),
@@ -790,7 +681,7 @@ def update_temporal(
         result = result_iso.sortby("unit_id").drop("unit_labels")
     C_new = result.isel(trace=0).dropna("unit_id")
     S_new = result.isel(trace=1).dropna("unit_id")
-    B_new = result.isel(trace=2, frame=0).dropna("unit_id").squeeze()
+    B_new = result.isel(trace=2).dropna("unit_id").squeeze()
     C0_new = result.isel(trace=3, frame=0).dropna("unit_id").squeeze()
     dc_new = result.isel(trace=4).dropna("unit_id")
     g_new = g.sel(unit_id=C_new.coords["unit_id"]).drop("unit_labels")
@@ -899,7 +790,7 @@ def get_p(y):
     return np.sum(rising[prd_ris == id_max_prd + 1])
 
 
-def update_temporal_cvxpy(y, g, sn, A=None, **kwargs):
+def update_temporal_cvxpy(y, g, sn, A=None, bseg=None, **kwargs):
     """[summary]
 
     spatial:
@@ -914,6 +805,7 @@ def update_temporal_cvxpy(y, g, sn, A=None, **kwargs):
         g ([type]): [description]
         sn ([type]): [description]
         A ([type], optional): [description]. Defaults to None.
+        bseg ([type], optional): [description]. Defaults to None
 
     Raises:
         ValueError: [description]
@@ -960,7 +852,16 @@ def update_temporal_cvxpy(y, g, sn, A=None, **kwargs):
     # get noise threshold
     thres_sn = sn * np.sqrt(_T)
     # construct variables
-    b = cvx.Variable(_u)  # baseline fluorescence per unit
+    if bseg is not None:
+        nseg = int(np.max(bseg) + 1)
+        b_temp = np.zeros((nseg, _T))
+        for iseg in range(nseg):
+            b_temp[iseg, bseg == iseg] = 1
+        b_cmp = cvx.Variable((_u, nseg))
+    else:
+        b_temp = np.ones((1, _T))
+        b_cmp = cvx.Variable((_u, 1))
+    b = b_cmp @ b_temp  # baseline fluorescence per unit
     c0 = cvx.Variable(_u)  # initial fluorescence per unit
     c = cvx.Variable((_u, _T))  # calcium trace per unit
     s = cvx.vstack([G_ls[u] * c[u, :] for u in range(_u)])  # spike train per unit
@@ -974,7 +875,7 @@ def update_temporal_cvxpy(y, g, sn, A=None, **kwargs):
         )
         noise = y - sig
     else:
-        sig = cvx.vstack([c[u, :] + b[u] + c0[u] * dc_vec[u, :] for u in range(_u)])
+        sig = cvx.vstack([c[u, :] + b[u, :] + c0[u] * dc_vec[u, :] for u in range(_u)])
         noise = y - sig
     noise = cvx.vstack([cvx.norm(noise[i, :], 2) for i in range(noise.shape[0])])
     # construct constraints
@@ -1019,18 +920,11 @@ def update_temporal_cvxpy(y, g, sn, A=None, **kwargs):
                 return np.full((5, c.shape[0], c.shape[1]), np.nan).squeeze()
     if not (prob.status == "optimal"):
         warnings.warn("problem solved sub-optimally", RuntimeWarning)
-    try:
-        return np.stack(
-            np.broadcast_arrays(
-                c.value,
-                s.value,
-                b.value.reshape((-1, 1)),
-                c0.value.reshape((-1, 1)),
-                dc_vec,
-            )
-        ).squeeze()
-    except:
-        set_trace()
+    return np.stack(
+        np.broadcast_arrays(
+            c.value, s.value, b.value, c0.value.reshape((-1, 1)), dc_vec
+        )
+    ).squeeze()
 
 
 def unit_merge(A, C, add_list=None, thres_corr=0.9):
