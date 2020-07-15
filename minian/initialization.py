@@ -1,26 +1,19 @@
-import numpy as np
-import xarray as xr
-import pandas as pd
-import dask
-import pyfftw.interfaces.numpy_fft as npfft
-import dask.array.fft as dafft
-import dask.array as da
-import warnings
 import cv2
-from skimage.morphology import disk
-from dask import delayed, compute
-from scipy.ndimage.filters import maximum_filter, median_filter
-from scipy.ndimage.measurements import label
-from scipy.stats import zscore, kstest
-from scipy.spatial.distance import pdist, squareform
-from scipy.signal import hilbert
-from sklearn.mixture import GaussianMixture
-from IPython.core.debugger import set_trace
-from scipy.signal import butter, lfilter
-from tqdm import tqdm_notebook
-from .cnmf import smooth_sig, label_connected
-from .utilities import get_optimal_chk, rechunk_like
+import dask
+import dask.array as da
+import numpy as np
+import pandas as pd
+import xarray as xr
 from scipy.ndimage.filters import median_filter
+from scipy.ndimage.measurements import label
+from scipy.signal import butter, hilbert, lfilter
+from scipy.spatial.distance import pdist, squareform
+from scipy.stats import kstest, zscore
+from skimage.morphology import disk
+from sklearn.mixture import GaussianMixture
+
+from .cnmf import label_connected, smooth_sig
+from .utilities import get_optimal_chk, rechunk_like
 
 
 def seeds_init(
