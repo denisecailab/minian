@@ -17,6 +17,7 @@ from skimage import morphology as moph
 from sklearn.linear_model import LassoLars
 from sklearn.utils import parallel_backend
 from statsmodels.tsa.stattools import acovf
+from .utilities import rechunk_like
 
 
 def get_noise_fft(varr, noise_range=(0.25, 0.5), noise_method="logmexp"):
