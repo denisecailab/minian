@@ -10,7 +10,8 @@ Welcome to minian's documentation!
    :maxdepth: 4
    :caption: Contents:
 
-   minian
+   userguide
+   referenceguide
 
 
 Indices and tables
