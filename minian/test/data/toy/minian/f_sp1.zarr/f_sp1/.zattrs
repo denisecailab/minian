@@ -2,5 +2,5 @@
     "_ARRAY_DIMENSIONS": [
         "frame"
     ],
-    "coordinates": "animal unit_id session"
+    "coordinates": "animal session"
 }
