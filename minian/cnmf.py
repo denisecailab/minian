@@ -216,7 +216,7 @@ def update_spatial(
             A_new.stack(spatial=["height", "width"]),
             input_core_dims=[["spatial", "unit_id"]],
             output_core_dims=[["unit_id"]],
-            kwargs=dict(axis=0),
+            kwargs=dict(axis=0, ord=1),
             dask="allowed",
         )
         A_new = (A_new / A_norm).persist()
@@ -348,7 +348,7 @@ def update_temporal(
     max_iters=200,
     use_smooth=True,
     compute=True,
-    normalize=True,
+    normalize=False,
     post_scal=True,
     scs_fallback=False,
     sched="processes",
@@ -760,11 +760,9 @@ def update_temporal_cvxpy(y, g, sn, A=None, bseg=None, **kwargs):
                 warnings.warn("constrained version of problem infeasible")
             raise ValueError
     except (ValueError, cvx.SolverError):
-        lam = (
-            sn * sparse_penal / sn.shape[0]
-        )  # hacky correction for near-linear relationship between sparsity and number of concurrently updated units
+        lam = sn * sparse_penal
         obj = cvx.Minimize(
-            cvx.sum(cvx.sum(noise, axis=1) + lam * cvx.norm(s, 1, axis=1))
+            cvx.sum(cvx.sum(noise, axis=1) + cvx.multiply(lam, cvx.norm(s, 1, axis=1)))
         )
         prob = cvx.Problem(obj, cons)
         try:
