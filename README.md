@@ -1,5 +1,24 @@
-[![Build Status](https://img.shields.io/travis/DeniseCaiLab/minian/master.svg?style=flat)](https://travis-ci.org/DeniseCaiLab/minian)
-[![codecov](https://codecov.io/gh/DeniseCaiLab/minian/branch/master/graph/badge.svg)](https://codecov.io/gh/DeniseCaiLab/minian)
+<div style="-webkit-column-count: 2; -moz-column-count: 2; column-count: 2; -webkit-column-rule: 1px dotted #e0e0e0; -moz-column-rule: 1px dotted #e0e0e0; column-rule: 1px dotted #e0e0e0; margin-bottom: 24px;">
+    <div style="display: inline-block;">
+        <h3>master</h3>
+        <a href="https://travis-ci.org/DeniseCaiLab/minian">
+            <img src="https://img.shields.io/travis/DeniseCaiLab/minian/master.svg?style=flat&label=build">
+        </a>
+        <a href="https://codecov.io/gh/DeniseCaiLab/minian">
+            <img src="https://codecov.io/gh/DeniseCaiLab/minian/branch/master/graph/badge.svg">
+        </a>
+    </div>
+    <div style="display: inline-block; margin-left: 32px;">
+        <h3>develop</h3>
+        <a href="https://travis-ci.org/DeniseCaiLab/minian">
+            <img src="https://img.shields.io/travis/DeniseCaiLab/minian/dev.svg?style=flat&label=build">
+        </a>
+        <a href="https://codecov.io/gh/DeniseCaiLab/minian">
+            <img src="https://codecov.io/gh/DeniseCaiLab/minian/branch/dev/graph/badge.svg">
+        </a>
+    </div>
+</div>
+
 
 # About MiniAn
 
