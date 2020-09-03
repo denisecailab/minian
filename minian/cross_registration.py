@@ -70,9 +70,9 @@ def subset_pairs(A, B, tile):
     Ah, Aw, Bh, Bw = A["height"], A["width"], B["height"], B["width"]
     hh = (min(Ah.min(), Bh.min()), max(Ah.max(), Bh.max()))
     ww = (min(Aw.min(), Bw.min()), max(Aw.max(), Bw.max()))
-    dh, dw = np.ceil(tile[0] / 2), np.ceil(tile[1] / 2)
-    tile_h = np.linspace(hh[0], hh[1], np.ceil((hh[1] - hh[0]) * 2 / tile[0]))
-    tile_w = np.linspace(ww[0], ww[1], np.ceil((ww[1] - ww[0]) * 2 / tile[1]))
+    dh, dw = int(np.ceil(tile[0] / 2)), int(np.ceil(tile[1] / 2))
+    tile_h = np.linspace(hh[0], hh[1], int(np.ceil((hh[1] - hh[0]) * 2 / tile[0])))
+    tile_w = np.linspace(ww[0], ww[1], int(np.ceil((ww[1] - ww[0]) * 2 / tile[1])))
     pairs = set()
     for h, w in itt.product(tile_h, tile_w):
         curA = A[Ah.between(h - dh, h + dh) & Aw.between(w - dw, w + dw)]
