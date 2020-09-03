@@ -168,15 +168,21 @@ def fill_mapping(mappings, cents):
             cur_ss_all = cur_cent[cur_cent["session"] == cur_ss]["unit_id"].dropna()
             cur_fill_set = set(cur_ss_all.unique()) - set(cur_ss_grp.unique())
             cur_fill_df = pd.DataFrame({("session", cur_ss): list(cur_fill_set),})
+            cur_fill_df[("group", "group")] = [(cur_ss,)] * len(cur_fill_df)
             fill_ls.append(cur_fill_df)
         return pd.concat(fill_ls, ignore_index=True)
 
-    try:
-        for cur_id, cur_grp in mappings.groupby(list(mappings["meta"])):
-            cur_cent = cents.set_index(list(mappings["meta"])).loc[cur_id].reset_index()
+    meta_cols = list(filter(lambda c: c[0] == "meta", mappings.columns))
+    if meta_cols:
+        meta_cols_smp = [c[1] for c in meta_cols]
+        for cur_id, cur_grp in mappings.groupby(meta_cols):
+            cur_cent = cents.set_index(meta_cols_smp).loc[cur_id].reset_index()
             cur_grp_fill = fill(cur_grp, cur_cent)
+            cur_id = cur_id if type(cur_id) is tuple else tuple([cur_id])
+            for icol, col in enumerate(meta_cols):
+                cur_grp_fill[col] = cur_id[icol]
             mappings = pd.concat([mappings, cur_grp_fill], ignore_index=True)
-    except KeyError:
+    else:
         map_fill = fill(mappings, cents)
         mappings = pd.concat([mappings, map_fill], ignore_index=True)
     return mappings
