@@ -1,7 +1,7 @@
 import setuptools
 
 NAME = "MiniAn"
-VERSION = "0.0.3"
+VERSION = "0.0.5"
 
 with open("README.md", "r") as fh:
     long_description = fh.read()
