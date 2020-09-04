@@ -5,7 +5,7 @@ argon2-cffi==20.1.0
 asciitree==0.3.3
 async-generator==1.10
 attrs==20.1.0
-av==8.0.2
+av==7.0.1
 Babel==2.8.0
 backcall==0.2.0
 backports.functools-lru-cache==1.6.1
@@ -44,7 +44,6 @@ future==0.18.2
 HeapDict==1.0.1
 holoviews==1.12.7
 idna==2.10
-imagecodecs==2020.5.30
 imagecodecs-lite==2019.12.3
 imageio==2.9.0
 imagesize==1.2.0
@@ -86,7 +85,7 @@ numba==0.48.0
 numcodecs==0.6.4
 numpy==1.18.1
 olefile==0.46
-opencv-python==4.4.0.42
+opencv-python==4.2.0.34
 osqp==0.6.1
 packaging==20.4
 pandas==1.0.1
@@ -115,7 +114,7 @@ pyOpenSSL==19.1.0
 pyparsing==2.4.7
 PyQt5==5.12.3
 PyQt5-sip==4.19.18
-PyQtChart==5.12.0
+PyQtChart==5.12
 PyQtWebEngine==5.12.1
 pyrsistent==0.16.0
 PySocks==1.7.1
@@ -127,7 +126,7 @@ pyviz-comms==0.7.6
 PyWavelets==1.1.1
 PyYAML==5.3.1
 pyzmq==19.0.2
-qtconsole==4.7.6
+qtconsole==4.7.7
 QtPy==1.9.0
 regex==2020.7.14
 requests==2.24.0
