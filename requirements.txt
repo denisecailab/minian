@@ -167,5 +167,5 @@ webencodings==0.5.1
 widgetsnbextension==3.5.1
 xarray==0.15.0
 zarr==2.4.0
-zict==2.0.0
+#zict==2.0.0
 zipp==3.1.0
