@@ -10,6 +10,16 @@ MiniAn is an analysis pipeline and visualization tool inspired by both [CaImAn](
 
 # Quick Start Guide
 
+## Option #2: virtual env
+1. Create a python virtual env: `python3 -m venv minian`
+1. Activate the virtual enviornment you created during minian installation: `source minian/bin/activate`
+1. Install ffmpeg, for debian based systems: `sudo apt install ffmpeg`
+1. Install required files for AV: `sudo apt install libavformat-dev libavdevice-dev`
+1. Install the MiniAn package: `pip install MiniAn`
+1. Fire up jupyter: `jupyter notebook` and open the notebook "pipeline_noted.ipynb"
+
+# Quick Start Guide for build and use from source
+
 ## Option #1: conda
 1. Download and install [conda](https://conda.io/projects/conda/en/latest/).
 1. Make sure your conda is up to date: `conda update -n base -c default conda`
@@ -24,9 +34,9 @@ MiniAn is an analysis pipeline and visualization tool inspired by both [CaImAn](
 1. Go into MiniAn folder you just cloned: `cd minian/`
 1. Create a python virtual env: `python3 -m venv minian`
 1. Activate the virtual enviornment you created during minian installation: `source minian/bin/activate`
-1. Install the dependencies `pip install -r requirements.txt`
-1. Install ffmpeg, for debian based systems `sudo apt install ffmpeg`
-1. Install required files for AV `sudo apt install libavformat-dev libavdevice-dev`
+1. Install the dependencies: `pip install -r requirements.txt`
+1. Install ffmpeg, for debian based systems: `sudo apt install ffmpeg`
+1. Install required files for AV: `sudo apt install libavformat-dev libavdevice-dev`
 1. Fire up jupyter: `jupyter notebook` and open the notebook "pipeline_noted.ipynb"
 
 ## Option #3: docker
@@ -35,7 +45,7 @@ MiniAn is an analysis pipeline and visualization tool inspired by both [CaImAn](
 1. Once you read the following, open a browser and navigate to `localhost:8888`:
 
 > The Jupyter Notebook is running at:  
-http://blahblah:8888  
+http://<server/ip>:8888  
 Use Control-C to stop this server and shut down all kernels (twice to skip confirmation).
 
 Note: this approach runs everything in a more isolated docker container, which makes customizing/extending the code harder and may affect performance. It is recommended to use this approach only when you encounter errors during installation or running demo data with the first conda option, in which case it is highly recommended to submit an [issue](https://github.com/DeniseCaiLab/minian/issues) first as well.
