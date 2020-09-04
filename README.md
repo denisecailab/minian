@@ -16,11 +16,20 @@ MiniAn is an analysis pipeline and visualization tool inspired by both [CaImAn](
 1. Download the MiniAn package: `git clone https://github.com/DeniseCaiLab/minian.git`
 1. Go into MiniAn folder you just cloned: `cd minian/`
 1. Create an conda environment: `conda env create -n minian -f environment.yml`
-1. Activate the conda enviornment you created during minian installation: `source activate minian`
+1. Activate the conda enviornment you created during minian installation: `conda activate minian`
 1. Fire up jupyter: `jupyter notebook` and open the notebook "pipeline_noted.ipynb"
 
-## Option #2: docker
+## Option #2: virtual env
+1. Download the MiniAn package: `git clone https://github.com/DeniseCaiLab/minian.git`
+1. Go into MiniAn folder you just cloned: `cd minian/`
+1. Create a python virtual env: `python3 -m venv minian`
+1. Activate the virtual enviornment you created during minian installation: `source minian/bin/activate`
+1. Install the dependencies `pip install -r requirements.txt`
+1. Install ffmpeg, for debian based systems `sudo apt install ffmpeg`
+1. Install required files for AV `sudo apt install libavformat-dev libavdevice-dev`
+1. Fire up jupyter: `jupyter notebook` and open the notebook "pipeline_noted.ipynb"
 
+## Option #3: docker
 1. Download and install [docker](https://docs.docker.com/install/).
 1. Read the notes below first then run: `docker run -p 8888:8888 -v MY_DATA_PATH:/media denisecailab/minian:latest`
 1. Once you read the following, open a browser and navigate to `localhost:8888`:
