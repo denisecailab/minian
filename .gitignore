@@ -118,3 +118,6 @@ dask-worker-space
 
 # history
 .history
+*.pyc
+
+build_artifacts
