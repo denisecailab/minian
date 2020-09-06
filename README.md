@@ -66,6 +66,13 @@ make html
 
 After the process finishes the documentation files are in the build folder
 
+# Packaging for Conda (Forge) and PyPi
+
+## Conda (Forge)
+
+To create and upload the MiniAn package to Conda Forge install Conda Smity `conda install -y conda-smithy`
+Then follow this page: https://conda-forge.org/docs/user/ci-skeleton.html
+
 # License
 
 This project is licensed under GNU GPLv3.
