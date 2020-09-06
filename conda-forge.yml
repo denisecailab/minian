@@ -10,3 +10,7 @@ skip_render:
   - .github/ISSUE_TEMPLATE.md
   - .github/PULL_REQUEST_TEMPLATE.md
   - .github/workflows
+provider:
+  linux: azure
+  osx: azure
+  win: azure
