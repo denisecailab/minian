@@ -27,7 +27,7 @@ cvxpy==1.0.27
 cycler==0.10.0
 cytoolz==0.10.1
 dask==2.11.0
-datashader==0.10.0
+datashader==0.9
 datashape==0.5.2
 decorator==4.4.2
 defusedxml==0.6.0
