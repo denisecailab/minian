@@ -68,9 +68,8 @@ if ! git merge-base --is-ancestor origin/latest-release "$BRANCH" ; then
     exit 1
 fi
 
-sed -e "s/VERSION = .*/VERSION = $VERSION/" Makefile > Makefile.tmp
-mv -- Makefile.tmp Makefile
-git add Makefile
+echo "$VERSION" > VERSION
+git add VERSION
 
 if [ -f "setup.py" ]; then
     sed -e "s/version=.*/version='$VERSION',/" setup.py > setup.py.tmp
