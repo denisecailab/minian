@@ -164,8 +164,9 @@ typed-ast==1.4.1
 urllib3==1.25.10
 wcwidth==0.2.5
 webencodings==0.5.1
+wheel
 widgetsnbextension==3.5.1
 xarray==0.15.0
 zarr==2.4.0
-#zict==2.0.0
+zict==2.0.0
 zipp==3.1.0
