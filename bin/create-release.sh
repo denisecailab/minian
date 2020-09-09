@@ -5,24 +5,21 @@ set -e
 
 VERSION="$1"
 if [ "$VERSION" = "" ]; then
-    echo >&2 "error: Usage: $0 <VERSION> [<branch>] [--semver]"
+    echo >&2 "error: Usage: $0 <VERSION> [<branch>]"
     exit 1
 fi
 
 BRANCH=$2
-if [ "${!#}" == "--semver" ]; then
-    MODE=semver
-fi
 if [ "$#" == 1 ]; then
     BRANCH=master
-elif [ "$MODE" == "semver" ] && [ "$#" == 2 ]; then
-	BRANCH=master
+elif [ "$#" == 2 ]; then
+    BRANCH=master
 fi
 
-VERSION_PAT="^([1-9][0-9]*|0)\.([1-9][0-9]*|0)\.([1-9][0-9]*|0)$"
+VERSION_PAT="^v([1-9][0-9]*|0)\.([1-9][0-9]*|0)\.([1-9][0-9]*|0)$"
 if ! [[ "$VERSION" =~ $VERSION_PAT ]] ; then
     echo >&2 "error: Illegal version number"
-    echo >&2 "format should be 'X.Y.Z' according to sematic versioning; for example '0.1.2'"
+    echo >&2 "format should be 'vX.Y.Z' according to sematic versioning; for example 'v0.1.2'"
     exit 1
 fi
 
