@@ -16,6 +16,8 @@ MiniAn is an analysis pipeline and visualization tool inspired by both [CaImAn](
 1. Install ffmpeg, for debian based systems: `sudo apt install ffmpeg`
 1. Install required files for AV: `sudo apt install libavformat-dev libavdevice-dev`
 1. Install the MiniAn package: `pip install MiniAn`
+1. Install the pipeline notebooks: `minian-install-pipeline`
+1. Optional install the demo movies: `minian-install-demo`
 1. Fire up jupyter: `jupyter notebook` and open the notebook "pipeline_noted.ipynb"
 
 # Quick Start Guide for build and use from source
