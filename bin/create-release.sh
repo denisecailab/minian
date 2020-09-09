@@ -12,8 +12,6 @@ fi
 BRANCH=$2
 if [ "$#" == 1 ]; then
     BRANCH=master
-elif [ "$#" == 2 ]; then
-    BRANCH=master
 fi
 
 VERSION_PAT="^v([1-9][0-9]*|0)\.([1-9][0-9]*|0)\.([1-9][0-9]*|0)$"
