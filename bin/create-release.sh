@@ -14,10 +14,10 @@ if [ "$#" == 1 ]; then
     BRANCH=master
 fi
 
-VERSION_PAT="^v([1-9][0-9]*|0)\.([1-9][0-9]*|0)\.([1-9][0-9]*|0)$"
+VERSION_PAT="^v([1-9][0-9]*|0)\.([1-9][0-9]*|0)\.([1-9][0-9]*|0)([a|b|rc][1-9][0-9]*|0)?$"
 if ! [[ "$VERSION" =~ $VERSION_PAT ]] ; then
     echo >&2 "error: Illegal version number"
-    echo >&2 "format should be 'vX.Y.Z' according to sematic versioning; for example 'v0.1.2'"
+    echo >&2 "format should be 'vX.Y.Z[{a|b|rc}N]' according to sematic versioning; for example 'v0.1.2'"
     exit 1
 fi
 
