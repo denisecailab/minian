@@ -77,6 +77,17 @@ First add the conda-forge channel to your config: `conda config --add channels c
 Install conda build: `conda install conda-build`
 To create and upload the MiniAn package to Conda Forge install Conda Smithy: `conda install -y conda-smithy`
 
+## PyPi
+
+Create the dist build from the MiniAn source: `python3 setup.py sdist bdist_wheel`
+Install Twine: `pip install --upgrade twine`
+Upload the dist to PyPi: `python3 -m twine upload dist/*`
+
+for testing purpose you can upload to the PyPi test repo: `python3 -m twine upload --repository testpypi dist/*`
+installing the test package: `python3 -m pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple minian`
+
+see also: [packaging](https://packaging.python.org/tutorials/packaging-projects/)
+
 # License
 
 This project is licensed under GNU GPLv3.
