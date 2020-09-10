@@ -62,6 +62,7 @@ To generate documentation MiniAn uses Sphinx with the Read The Docs theme. All d
 
 To generate the documentation please execute these commands:
 ```
+pip install -r requirements/requirements-doc.txt
 cd docs
 make html
 ```

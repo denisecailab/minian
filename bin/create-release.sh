@@ -14,14 +14,14 @@ if [ "$#" == 1 ]; then
     BRANCH=master
 fi
 
-VERSION_PAT="^v([1-9][0-9]*|0)\.([1-9][0-9]*|0)\.([1-9][0-9]*|0)([a|b|rc][1-9][0-9]*|0)?$"
+VERSION_PAT="^([1-9][0-9]*|0)\.([1-9][0-9]*|0)\.([1-9][0-9]*|0)([a|b|rc][1-9][0-9]*|0)?$"
 if ! [[ "$VERSION" =~ $VERSION_PAT ]] ; then
     echo >&2 "error: Illegal version number"
-    echo >&2 "format should be 'vX.Y.Z[{a|b|rc}N]' according to sematic versioning; for example 'v0.1.2'"
+    echo >&2 "format should be 'X.Y.Z[{a|b|rc}N]' according to sematic versioning; for example 'v0.1.2'"
     exit 1
 fi
 
-if git show-ref --quiet --verify "refs/tags/$VERSION" ; then
+if git show-ref --quiet --verify "refs/tags/v$VERSION" ; then
     echo >&2 "error: Tag already exists"
     exit 1
 fi
@@ -72,11 +72,11 @@ if [ -f "setup.py" ]; then
     git add setup.py
 fi
 
-git commit -m "Bump version to $VERSION"
+git commit -m "Bump version to v$VERSION"
 
-git tag -a "$VERSION" -m "Version $VERSION"
+git tag -a "v$VERSION" -m "Version v$VERSION"
 
-git push --atomic origin "$BRANCH" "$BRANCH":latest-release "$VERSION"
+git push --atomic origin "$BRANCH" "$BRANCH":latest-release "v$VERSION"
 
 if ! git merge-base --is-ancestor "$BRANCH" origin/master ; then
     echo >&2 "hint: Don't forget to merge '$VERSION' in 'master'"
