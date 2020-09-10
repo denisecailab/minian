@@ -1,6 +1,7 @@
 import setuptools
 
 NAME = "MiniAn"
+REQUIREMENTS = "requirements/requirements-base.txt"
 
 with open("VERSION") as f:
     VERSION = f.read().splitlines()[0]
@@ -24,7 +25,7 @@ setuptools.setup(
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/DeniseCaiLab/minian",
-    install_requires=_get_requirements("requirements.txt"),
+    install_requires=_get_requirements(REQUIREMENTS),
     packages=setuptools.find_packages(),
     project_urls={
         "Documentation": "https://github.com/DeniseCaiLab/minian",
