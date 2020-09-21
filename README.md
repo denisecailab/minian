@@ -71,6 +71,12 @@ After the process finishes the documentation files are in the build folder
 
 # Packaging for Conda (Forge) and PyPi
 
+## Create/tag a new release
+
+Merge all branches for the release into master, make sure you are on the master branch `git checkout master`
+Run the create_release script `./bin/create_release.sh` with the new version number e.g. `./bin/create_release.sh 0.1.0`
+The script will do some checks on the Git repo, creates a new tag and updates the VERSION file with the new release number
+
 ## Conda (Forge)
 
 First add the conda-forge channel to your config: `conda config --add channels conda-forge`
