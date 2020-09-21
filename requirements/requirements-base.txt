@@ -134,7 +134,6 @@ scikit-learn==0.22.1
 scipy==1.4.1
 scs==2.1.1.post2
 Send2Trash==1.5.0
-SimpleITK==1.2.4
 six==1.15.0
 sk-video==1.1.10
 snowballstemmer==2.0.0

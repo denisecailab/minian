@@ -40,7 +40,6 @@ dependencies:
   - scipy=1.4.1
   - scs=2.1.1.2
   - sk-video=1.1.10
-  - simpleitk=1.2.4
   - statsmodels=0.11.1
   - tifffile=2020.2.16
   - tqdm=4.43.0
