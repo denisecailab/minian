@@ -45,7 +45,6 @@ dependencies:
   - zarr=2.4.0
   - pip:
     - ffmpeg-python==0.2.0
-    - medpy==0.4.0
     - pytest==5.4.3
     - simpleitk==1.2.4
     - sk-video==1.1.10
