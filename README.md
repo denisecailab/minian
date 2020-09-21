@@ -13,8 +13,13 @@ MiniAn is an analysis pipeline and visualization tool inspired by both [CaImAn](
 ## Option #2: virtual env
 1. Create a python virtual env: `python3 -m venv venv`
 1. Activate the virtual enviornment you created during minian installation: `source venv/bin/activate`
-1. Install ffmpeg, for debian based systems: `sudo apt install ffmpeg`
-1. Install required files for AV: `sudo apt install libavformat-dev libavdevice-dev`
+1. For Linux:
+    1. Install ffmpeg, for debian based systems: `sudo apt install ffmpeg` see also: [ffmpeg](https://ffmpeg.org/download.html#build-linux)
+    1. Install required files for AV: `sudo apt install libavformat-dev libavdevice-dev`
+1. For Mac OSx:
+    1. brew install libvpx
+    1. brew install ffmpeg --with-libvpx
+    1. brew install libav
 1. Install the MiniAn package: `pip install MiniAn`
 1. Install the pipeline notebooks: `minian-install-pipeline`
 1. Optional install the demo movies: `minian-install-demo`
@@ -82,6 +87,7 @@ The script will do some checks on the Git repo, creates a new tag and updates th
 First add the conda-forge channel to your config: `conda config --add channels conda-forge`
 Install conda build: `conda install conda-build`
 To create and upload the MiniAn package to Conda Forge install Conda Smithy: `conda install -y conda-smithy`
+Then build the package `conda-build recipes/minian`
 
 ## PyPi
 
