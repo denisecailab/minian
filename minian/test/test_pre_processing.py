@@ -23,7 +23,7 @@ def varr():
 
 
 def test_can_load_videos(varr):
-    assert varr.shape[0] == 1000  # frames
+    assert varr.shape[0] == 100  # frames
     assert varr.shape[1] == 480  # height
     assert varr.shape[2] == 752  # width
     return varr
