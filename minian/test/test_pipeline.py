@@ -1,5 +1,4 @@
 import pytest
-dpath_test_data = "./minian/test/test_data_demo_movies"
 
 # Setting up
 
@@ -32,7 +31,8 @@ from IPython.core.display import display, HTML
 
 #Set up Initial Basic Parameters#
 minian_path = "."
-dpath = "./demo_movies"
+dpath = "./minian/test/test_movie"
+dpath_fixture = "./minian/test/test_movie_fixture"
 subset = dict(frame=slice(0,None))
 subset_mc = None
 interactive = True
@@ -188,7 +188,7 @@ def test_preprocessing():
     varr_ref = varr_ref.chunk(chk)
     varr_ref = save_minian(varr_ref.rename('org'), **param_save_minian)
 
-    test_data_varr_ref = open_minian(dpath_test_data,
+    test_data_varr_ref = open_minian(dpath_fixture,
                       fname=param_save_minian['fname'],
                       backend=param_save_minian['backend'])['org']
 
@@ -422,7 +422,7 @@ def test_cnmf():
 
     # TODO Jesus: may be do some tests halfway the procedure?
     # TODO Jesus: do some testing with assertions
-    
+
 
     hv.output(size=output_size)
     if interactive:
