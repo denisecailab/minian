@@ -898,6 +898,16 @@ def normalize(a):
     return np.interp(a, (np.nanmin(a), np.nanmax(a)), (0, +1))
 
 
+def norm(a):
+    amax = np.nanmax(a)
+    amin = np.nanmin(a)
+    diff = amax - amin
+    if diff > 0:
+        return (a - amin) / (amax - amin)
+    else:
+        return a
+
+
 def convolve_G(s, g):
     G = construct_G(g, len(s))
     try:
