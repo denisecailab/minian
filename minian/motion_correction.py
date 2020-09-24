@@ -103,7 +103,7 @@ def apply_shifts(varr, shifts, fill=np.nan):
     return varr_sh
 
 
-def shift_perframe(fm, sh, fill):
+def shift_perframe(fm, sh, fill=np.nan):
     if np.isnan(fm).all():
         return fm
     sh = np.around(sh).astype(int)
