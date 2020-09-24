@@ -87,7 +87,7 @@ def match_temp(src, dst, max_sh, local, subpixel=False):
     return sh
 
 
-def apply_shifts(varr, shifts):
+def apply_shifts(varr, shifts, fill=np.nan):
     sh_dim = shifts.coords["variable"].values.tolist()
     varr_sh = xr.apply_ufunc(
         shift_perframe,
@@ -97,12 +97,15 @@ def apply_shifts(varr, shifts):
         output_core_dims=[sh_dim],
         vectorize=True,
         dask="parallelized",
+        kwargs={"fill": fill},
         output_dtypes=[varr.dtype],
     )
     return varr_sh
 
 
-def shift_perframe(fm, sh):
+def shift_perframe(fm, sh, fill):
+    if np.isnan(fm).all():
+        return fm
     sh = np.around(sh).astype(int)
     fm = np.roll(fm, sh, axis=np.arange(fm.ndim))
     index = [slice(None) for _ in range(fm.ndim)]
@@ -110,10 +113,10 @@ def shift_perframe(fm, sh):
         index = [slice(None) for _ in range(fm.ndim)]
         if s > 0:
             index[ish] = slice(None, s)
-            fm[tuple(index)] = np.nan
+            fm[tuple(index)] = fill
         elif s == 0:
             continue
         elif s < 0:
             index[ish] = slice(s, None)
-            fm[tuple(index)] = np.nan
+            fm[tuple(index)] = fill
     return fm
