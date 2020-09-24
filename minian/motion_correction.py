@@ -12,6 +12,7 @@ def estimate_shifts(varr, max_sh, dim="frame", npart=3, local=False):
         varr,
         input_core_dims=[[dim, "height", "width"]],
         output_core_dims=[["height", "width"], [dim, "variable"]],
+        vectorize=True,
         dask="allowed",
         kwargs={"max_sh": max_sh, "npart": npart, "local": local},
     )
