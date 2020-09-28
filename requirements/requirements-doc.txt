@@ -1,0 +1,12 @@
+Sphinx
+sphinx-rtd-theme
+sphinxcontrib-applehelp
+sphinxcontrib-devhelp
+sphinxcontrib-htmlhelp
+sphinxcontrib-jsmath
+sphinxcontrib-qthelp
+sphinxcontrib-serializinghtml
+jupyter-core
+ipython
+nbconvert
+wheel
