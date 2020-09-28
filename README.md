@@ -20,6 +20,11 @@ MiniAn is an analysis pipeline and visualization tool inspired by both [CaImAn](
     1. brew install libvpx
     1. brew install ffmpeg --with-libvpx
     1. brew install libav
+1. For Windows:
+    1. Install ffmpeg [ffmpeg](https://ffmpeg.org/download.html#build-windows)
+    1. add the path/folder where you installed the ffmpeg executable resides to your PATH (System PATH)
+    
+
 1. Install the MiniAn package: `pip install MiniAn`
 1. Install the pipeline notebooks: `minian-install-pipeline`
 1. Optional install the demo movies: `minian-install-demo`
