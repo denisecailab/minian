@@ -13,8 +13,18 @@ MiniAn is an analysis pipeline and visualization tool inspired by both [CaImAn](
 ## Option #2: virtual env
 1. Create a python virtual env: `python3 -m venv venv`
 1. Activate the virtual enviornment you created during minian installation: `source venv/bin/activate`
-1. Install ffmpeg, for debian based systems: `sudo apt install ffmpeg`
-1. Install required files for AV: `sudo apt install libavformat-dev libavdevice-dev`
+1. For Linux:
+    1. Install ffmpeg, for debian based systems: `sudo apt install ffmpeg` see also: [ffmpeg](https://ffmpeg.org/download.html#build-linux)
+    1. Install required files for AV: `sudo apt install libavformat-dev libavdevice-dev`
+1. For Mac OSx:
+    1. brew install libvpx
+    1. brew install ffmpeg --with-libvpx
+    1. brew install libav
+1. For Windows:
+    1. Install ffmpeg [ffmpeg](https://ffmpeg.org/download.html#build-windows)
+    1. add the path/folder where you installed the ffmpeg executable resides to your PATH (System PATH)
+    
+
 1. Install the MiniAn package: `pip install MiniAn`
 1. Install the pipeline notebooks: `minian-install-pipeline`
 1. Optional install the demo movies: `minian-install-demo`
@@ -71,11 +81,18 @@ After the process finishes the documentation files are in the build folder
 
 # Packaging for Conda (Forge) and PyPi
 
+## Create/tag a new release
+
+Merge all branches for the release into master, make sure you are on the master branch `git checkout master`
+Run the create_release script `./bin/create_release.sh` with the new version number e.g. `./bin/create_release.sh 0.1.0`
+The script will do some checks on the Git repo, creates a new tag and updates the VERSION file with the new release number
+
 ## Conda (Forge)
 
 First add the conda-forge channel to your config: `conda config --add channels conda-forge`
 Install conda build: `conda install conda-build`
 To create and upload the MiniAn package to Conda Forge install Conda Smithy: `conda install -y conda-smithy`
+Then build the package `conda-build recipes/minian`
 
 ## PyPi
 
