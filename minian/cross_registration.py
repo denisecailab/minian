@@ -6,44 +6,8 @@ import pandas as pd
 
 from .visualization import centroid
 
-def apply_shifts_old(var, shifts, inplace=False, dim="session"):
-    """[summary]
-
-    Args:
-        var ([type]): [description]
-        shifts ([type]): [description]
-        inplace (bool, optional): [description]. Defaults to False.
-        dim (str, optional): [description]. Defaults to 'session'.
-
-    Returns:
-        [type]: [description]
-    """
-    shifts = shifts.dropna(dim)
-    var_list = []
-    for dim_n, sh in shifts.groupby(dim):
-        sh_dict = (
-            sh.astype(int)
-            .to_series()
-            .reset_index()
-            .set_index("shift_dim")["shifts"]
-            .to_dict()
-        )
-        var_list.append(
-            (var.sel(**{dim: dim_n}).shift(**sh_dict).rename(var.name + "_shifted"))
-        )
-    return xr.concat(var_list, dim=dim)
-
 
 def calculate_centroids(A, window):
-    """[summary]
-
-    Args:
-        A ([type]): [description]
-        window ([type]): [description]
-
-    Returns:
-        [type]: [description]
-    """
     A = A.where(window, 0)
     return centroid(A, verbose=True)
 
@@ -103,22 +67,12 @@ def calculate_centroid_distance(
 
 
 def subset_pairs(A, B, tile):
-    """[summary]
-
-    Args:
-        A ([type]): [description]
-        B ([type]): [description]
-        tile ([type]): [description]
-
-    Returns:
-        [type]: [description]
-    """
     Ah, Aw, Bh, Bw = A["height"], A["width"], B["height"], B["width"]
     hh = (min(Ah.min(), Bh.min()), max(Ah.max(), Bh.max()))
     ww = (min(Aw.min(), Bw.min()), max(Aw.max(), Bw.max()))
-    dh, dw = np.ceil(tile[0] / 2), np.ceil(tile[1] / 2)
-    tile_h = np.linspace(hh[0], hh[1], np.ceil((hh[1] - hh[0]) * 2 / tile[0]))
-    tile_w = np.linspace(ww[0], ww[1], np.ceil((ww[1] - ww[0]) * 2 / tile[1]))
+    dh, dw = int(np.ceil(tile[0] / 2)), int(np.ceil(tile[1] / 2))
+    tile_h = np.linspace(hh[0], hh[1], int(np.ceil((hh[1] - hh[0]) * 2 / tile[0])))
+    tile_w = np.linspace(ww[0], ww[1], int(np.ceil((ww[1] - ww[0]) * 2 / tile[1])))
     pairs = set()
     for h, w in itt.product(tile_h, tile_w):
         curA = A[Ah.between(h - dh, h + dh) & Aw.between(w - dw, w + dw)]
@@ -129,39 +83,17 @@ def subset_pairs(A, B, tile):
 
 
 def pd_dist(A, B):
-    """[summary]
-
-    Args:
-        A ([type]): [description]
-        B ([type]): [description]
-
-    Returns:
-        [type]: [description]
-    """
     return np.sqrt(
         ((A[["height", "width"]] - B[["height", "width"]]) ** 2).sum("columns")
     )
 
 
 def cartesian(*args):
-    """[summary]
-
-    Returns:
-        [type]: [description]
-    """
     n = len(args)
     return np.array(np.meshgrid(*args)).T.reshape((-1, n))
 
 
 def group_by_session(df):
-    """[summary]
-
-    Args:
-        df ([type]): [description]
-
-    Returns:
-        [type]: [description]
-    """
     ss = df["session"].notnull()
     grp = ss.apply(lambda r: tuple(r.index[r].tolist()), axis=1)
     df["group", "group"] = grp
@@ -169,14 +101,6 @@ def group_by_session(df):
 
 
 def calculate_mapping(dist):
-    """[summary]
-
-    Args:
-        dist ([type]): [description]
-
-    Returns:
-        [type]: [description]
-    """
     map_idxs = set()
     try:
         for anm, grp in dist.groupby(dist["meta", "animal"]):
@@ -187,14 +111,6 @@ def calculate_mapping(dist):
 
 
 def mapping(dist):
-    """[summary]
-
-    Args:
-        dist ([type]): [description]
-
-    Returns:
-        [type]: [description]
-    """
     map_list = set()
     for sess, grp in dist.groupby(dist["group", "group"]):
         minidx_list = []
@@ -209,14 +125,6 @@ def mapping(dist):
 
 
 def resolve_mapping(mapping):
-    """[summary]
-
-    Args:
-        mapping ([type]): [description]
-
-    Returns:
-        [type]: [description]
-    """
     map_list = []
     try:
         for anm, grp in mapping.groupby(mapping["meta", "animal"]):
@@ -227,14 +135,6 @@ def resolve_mapping(mapping):
 
 
 def resolve(mapping):
-    """[summary]
-
-    Args:
-        mapping ([type]): [description]
-
-    Returns:
-        [type]: [description]
-    """
     mapping = mapping.reset_index(drop=True)
     map_ss = mapping["session"]
     for ss in map_ss.columns:
@@ -261,12 +161,6 @@ def resolve(mapping):
 
 
 def fill_mapping(mappings, cents):
-    """[summary]
-
-    Args:
-        mappings ([type]): [description]
-        cents ([type]): [description]
-    """
     def fill(cur_grp, cur_cent):
         fill_ls = []
         for cur_ss in list(cur_grp["session"]):
@@ -274,15 +168,22 @@ def fill_mapping(mappings, cents):
             cur_ss_all = cur_cent[cur_cent["session"] == cur_ss]["unit_id"].dropna()
             cur_fill_set = set(cur_ss_all.unique()) - set(cur_ss_grp.unique())
             cur_fill_df = pd.DataFrame({("session", cur_ss): list(cur_fill_set),})
+            cur_fill_df[("group", "group")] = [(cur_ss,)] * len(cur_fill_df)
             fill_ls.append(cur_fill_df)
         return pd.concat(fill_ls, ignore_index=True)
 
-    try:
-        for cur_id, cur_grp in mappings.groupby(list(mappings["meta"])):
-            cur_cent = cents.set_index(list(mappings["meta"])).loc[cur_id].reset_index()
+    meta_cols = list(filter(lambda c: c[0] == "meta", mappings.columns))
+    if meta_cols:
+        meta_cols_smp = [c[1] for c in meta_cols]
+        for cur_id, cur_grp in mappings.groupby(meta_cols):
+            cur_cent = cents.set_index(meta_cols_smp).loc[cur_id].reset_index()
             cur_grp_fill = fill(cur_grp, cur_cent)
+            cur_id = cur_id if type(cur_id) is tuple else tuple([cur_id])
+            for icol, col in enumerate(meta_cols):
+                cur_grp_fill[col] = cur_id[icol]
             mappings = pd.concat([mappings, cur_grp_fill], ignore_index=True)
-    except KeyError:
+    else:
         map_fill = fill(mappings, cents)
         mappings = pd.concat([mappings, map_fill], ignore_index=True)
     return mappings
+
