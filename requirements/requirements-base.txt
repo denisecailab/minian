@@ -5,7 +5,7 @@ argon2-cffi==20.1.0
 asciitree==0.3.3
 async-generator==1.10
 attrs==20.1.0
-av==7.0.1
+av==8.0.2
 Babel==2.8.0
 backcall==0.2.0
 backports.functools-lru-cache==1.6.1
@@ -134,7 +134,6 @@ scikit-learn==0.22.1
 scipy==1.4.1
 scs==2.1.1.post2
 Send2Trash==1.5.0
-SimpleITK==1.2.4
 six==1.15.0
 sk-video==1.1.10
 snowballstemmer==2.0.0
