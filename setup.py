@@ -36,8 +36,7 @@ setuptools.setup(
     ],
     entry_points={
         "console_scripts": [
-            "minian-install-demo = minian.install:demo",
-            "minian-install-pipeline = minian.install:pipeline",
+            "minian-install = minian.install:main",
         ],
     },
     python_requires='>=3.7',
