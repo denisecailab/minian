@@ -27,7 +27,8 @@ from holoviews.operation.datashader import datashade, regrid, dynspread
 from datashader.colors import Sets1to3
 from dask.diagnostics import ProgressBar
 from IPython.core.display import display, HTML
-
+import numpy as np;
+import shutil
 
 #Set up Initial Basic Parameters#
 minian_path = "."
@@ -163,7 +164,7 @@ def test_preprocessing():
 
     varr_min = varr_ref.min('frame').compute()
     varr_ref = varr_ref - varr_min
-
+    
     hv.output(size=output_size)
     if interactive:
         vaviewer = VArrayViewer(
@@ -178,24 +179,22 @@ def test_preprocessing():
         display(visualize_preprocess(varr_ref.isel(frame=0), denoise, method=['median'], ksize=[5, 7, 9]))
 
     varr_ref = denoise(varr_ref, **param_denoise)
-
+    
     hv.output(size=output_size)
     if interactive:
         display(visualize_preprocess(varr_ref.isel(frame=0), remove_background, method=['tophat'], wnd=[10, 15, 20]))
 
     varr_ref = remove_background(varr_ref, **param_background_removal)
-
+    
     varr_ref = varr_ref.chunk(chk)
+    
     varr_ref = save_minian(varr_ref.rename('org'), **param_save_minian)
-
     test_data_varr_ref = open_minian(dpath_fixture,
                       fname=param_save_minian['fname'],
                       backend=param_save_minian['backend'])['org']
 
-    # TODO Jesus: do some testing with assertions
-    # something like this: assert varr_ref.DataArray.equals(test_data_varr_ref)
-    assert False
-
+    assert xr.testing.assert_equal(test_data_varr_ref, varr_ref), "Test Fail: arrays are not the same";
+    
 # motion correction
 def test_motion_correction():
     varr_ref = open_minian(dpath,
@@ -235,22 +234,26 @@ def test_motion_correction():
     (regrid(hv.Image(varr_ref.max('frame').compute(), ['width', 'height'], label='before_mc')).opts(**im_opts)
     + regrid(hv.Image(Y.max('frame').compute(), ['width', 'height'], label='after_mc')).opts(**im_opts))
 
-    # TODO Jesus: do some testing with assertions
-    assert False
-
-
+    assert os.path.exists(os.path.join(dpath, "minian_mc.mp4")) == True, "minian_mc.mp4 was written to local folder"
+    assert os.path.getsize(os.path.join(dpath, "minian_mc.mp4"))/(1024*1024) > 2, "minian_mc.mp4 was created and is at least 2 MB"
+    
+    # Remove "minian_mc.mp4" file after test is done
+    os.remove(os.path.join(dpath, "minian_mc.mp4"))
+    
 # initialization
 def test_initialization():
     minian = open_minian(dpath,
                         fname=param_save_minian['fname'],
                         backend=param_save_minian['backend'])
-
+    
     Y = minian['Y'].astype(np.float)
     max_proj = Y.max('frame').compute()
     Y_flt = Y.stack(spatial=['height', 'width'])
-
+    
     seeds = seeds_init(Y, **param_seeds_init)
 
+    assert len(seeds) == 688, "Original 'seeds' array contains 688 elements"
+    
     hv.output(size=output_size)
     visualize_seeds(max_proj, seeds)
 
@@ -284,25 +287,38 @@ def test_initialization():
         display(hv_res)
 
     seeds, pnr, gmm = pnr_refine(Y_flt, seeds.copy(), **param_pnr_refine)
-
+    
     if gmm:
         display(visualize_gmm_fit(pnr, gmm, 100))
-
+    
     hv.output(size=output_size)
     visualize_seeds(max_proj, seeds, 'mask_pnr')
-
+    
+    assert len(seeds["mask_pnr"]) == 688, "Seeds array added new column 'mask_pnr' with 688 elements"
+    
     seeds = ks_refine(Y_flt, seeds[seeds['mask_pnr']], **param_ks_refine)
-
+    
     hv.output(size=output_size)
     visualize_seeds(max_proj, seeds, 'mask_ks')
 
     seeds_final = seeds[seeds['mask_ks']].reset_index(drop=True)
     seeds_mrg = seeds_merge(Y_flt, seeds_final, **param_seeds_merge)
 
+    assert len(seeds_final) == 521, 'Seeds array merged'    
+    assert len(seeds_final['mask_mrg']) == 521, 'Seeds array contain mask_mrg column after merge'
+    assert len(seeds_final['mask_ks']) == 521, 'Seeds array contain mask_ks column after merge'
+        
     hv.output(size=output_size)
     visualize_seeds(max_proj, seeds_mrg, 'mask_mrg')
+    
+    # assert seeds_final['mask_mrg'] != None
 
     A, C, b, f = initialize(Y, seeds_mrg[seeds_mrg['mask_mrg']], **param_initialize)
+    
+    assert A.name == 'Y', 'Variable A before renamed'
+    assert C.name == 'Y', 'Variable C before renamed'
+    assert b.name == 'Y', 'Variable b before renamed'
+    assert f.name == 'Y', 'Variable f before renamed'
 
     im_opts = dict(frame_width=500, aspect=A.sizes['width']/A.sizes['height'], cmap='Viridis', colorbar=True)
     cr_opts = dict(frame_width=750, aspect=1.5*A.sizes['width']/A.sizes['height'])
@@ -311,16 +327,17 @@ def test_initialization():
     + regrid(hv.Image(b.rename('b').compute(), kdims=['width', 'height'])).opts(**im_opts)
     + datashade(hv.Curve(f.rename('f').compute(), kdims=['frame']), min_alpha=200).opts(**cr_opts)
     ).cols(2)
-
+    
     A = save_minian(A.rename('A_init').rename(unit_id='unit_id_init'), **param_save_minian)
     C = save_minian(C.rename('C_init').rename(unit_id='unit_id_init'), **param_save_minian)
     b = save_minian(b.rename('b_init'), **param_save_minian)
     f = save_minian(f.rename('f_init'), **param_save_minian)
-
-    # TODO Jesus: do some testing with assertions
-    assert False
-
-
+    
+    assert A.name == 'A_init', 'Variable A renamed'
+    assert C.name == 'C_init', 'Variable C renamed'
+    assert b.name == 'b_init', 'Variable b renamed'
+    assert f.name == 'f_init', 'Variable f renamed'
+    
 # # CNMF
 def test_cnmf():
     minian = open_minian(dpath,
@@ -598,5 +615,10 @@ def test_cnmf():
     if interactive:
         save_minian(cnmfviewer.unit_labels, **param_save_minian)
 
-    # TODO Jesus: do some testing with assertions
-    assert False
+    assert os.path.exists(os.path.join(dpath, "minian.mp4")) == True, "minian.mp4 was written to local folder"
+    assert os.path.getsize(os.path.join(dpath, "minian.mp4"))/(1024*1024) >= 2, "minian.mp4 is at least 2 MB"
+    
+    # Remove create 'minian.mp4' file and 'minian' folder, this is needed so when test is run again it doesn't test
+    # using the files from the previous test run
+    os.remove(os.path.join(dpath, "minian.mp4"))
+    shutil.rmtree(os.path.join(dpath, "minian"))
