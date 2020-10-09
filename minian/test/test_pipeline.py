@@ -29,11 +29,13 @@ from dask.diagnostics import ProgressBar
 from IPython.core.display import display, HTML
 import numpy as np;
 import shutil
+import ffmpeg
 
 #Set up Initial Basic Parameters#
 minian_path = "."
 dpath = "./minian/test/test_movie"
 dpath_fixture = "./minian/test/test_movie_fixture"
+
 subset = dict(frame=slice(0,None))
 subset_mc = None
 interactive = True
@@ -150,6 +152,7 @@ chk = get_optimal_chk(varr.astype(float), dim_grp=[('frame',), ('height', 'width
 
 def test_preprocessing():
     hv.output(size=output_size)
+
     if interactive:
         vaviewer = VArrayViewer(varr, framerate=5, summary=None)
         display(vaviewer.show())
@@ -161,7 +164,7 @@ def test_preprocessing():
             pass
 
     varr_ref = varr.sel(subset)
-
+        
     varr_min = varr_ref.min('frame').compute()
     varr_ref = varr_ref - varr_min
     
@@ -180,21 +183,23 @@ def test_preprocessing():
 
     varr_ref = denoise(varr_ref, **param_denoise)
     
-    hv.output(size=output_size)
+    output = hv.output(size=output_size)
+    
     if interactive:
         display(visualize_preprocess(varr_ref.isel(frame=0), remove_background, method=['tophat'], wnd=[10, 15, 20]))
 
     varr_ref = remove_background(varr_ref, **param_background_removal)
     
     varr_ref = varr_ref.chunk(chk)
-    
+
     varr_ref = save_minian(varr_ref.rename('org'), **param_save_minian)
+    
     test_data_varr_ref = open_minian(dpath_fixture,
                       fname=param_save_minian['fname'],
-                      backend=param_save_minian['backend'])['org']
+                      backend=param_save_minian['backend'])
 
-    assert xr.testing.assert_equal(test_data_varr_ref, varr_ref), "Test Fail: arrays are not the same";
-    
+    # After denoise and remove_background, compare array to one in test folder
+    assert test_data_varr_ref.all() == varr_ref.all()
 # motion correction
 def test_motion_correction():
     varr_ref = open_minian(dpath,
@@ -205,7 +210,7 @@ def test_motion_correction():
 
     shifts = shifts.chunk(dict(frame=chk['frame'])).rename('shifts')
     shifts = save_minian(shifts, **param_save_minian)
-
+    
     hv.output(size=output_size)
     if interactive:
         display(hv.NdOverlay(dict(width=hv.Curve(shifts.sel(variable='width')),
@@ -225,20 +230,38 @@ def test_motion_correction():
 
     Y = Y.chunk(chk)
     Y = save_minian(Y.rename('Y'), **param_save_minian)
-
+    
     vid_arr = xr.concat([varr_ref, Y], 'width').chunk(dict(height=-1, width=-1))
+    
     vmax = varr_ref.max().compute().values
     write_video(vid_arr / vmax * 255, 'minian_mc.mp4', dpath)
 
     im_opts = dict(frame_width=500, aspect=752/480, cmap='Viridis', colorbar=True)
     (regrid(hv.Image(varr_ref.max('frame').compute(), ['width', 'height'], label='before_mc')).opts(**im_opts)
     + regrid(hv.Image(Y.max('frame').compute(), ['width', 'height'], label='after_mc')).opts(**im_opts))
-
+    
+    # Check 'minian_mc.mp4' was written to folder, with a size bigger than 2 mb
     assert os.path.exists(os.path.join(dpath, "minian_mc.mp4")) == True, "minian_mc.mp4 was written to local folder"
     assert os.path.getsize(os.path.join(dpath, "minian_mc.mp4"))/(1024*1024) > 2, "minian_mc.mp4 was created and is at least 2 MB"
     
+    probe = ffmpeg.probe(os.path.join(dpath, "minian_mc.mp4"))
+    video_streams = [stream for stream in probe["streams"] if stream["codec_type"] == "video"]
+    
+    # Read created 'minian_mc.mp4' file, and make sure its attributes are correct
+    assert video_streams[0]["width"] == 1504
+    assert video_streams[0]["height"] == 480
+    assert video_streams[0]["codec_type"] == 'video'
+    assert video_streams[0]["duration_ts"] == 51200
+    assert video_streams[0]["codec_long_name"] == 'H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10'
+    
     # Remove "minian_mc.mp4" file after test is done
     os.remove(os.path.join(dpath, "minian_mc.mp4"))
+    
+    test_data_varr_ref = open_minian(dpath_fixture,
+                      fname=param_save_minian['fname'],
+                      backend=param_save_minian['backend'])
+                      
+    assert shifts.all() == test_data_varr_ref["shifts"].all(), "Test Fail: arrays are not the same";
     
 # initialization
 def test_initialization():
@@ -252,10 +275,13 @@ def test_initialization():
     
     seeds = seeds_init(Y, **param_seeds_init)
 
+    # Test method 'seeds_init' return array with correct amount of elements
     assert len(seeds) == 688, "Original 'seeds' array contains 688 elements"
     
     hv.output(size=output_size)
-    visualize_seeds(max_proj, seeds)
+    vis_seeds = visualize_seeds(max_proj, seeds)
+    
+    # assert type(vis_seeds)["class"] == "holoviews.core.overlay.Overlay";
 
     if interactive:
         noise_freq_list = [0.005, 0.01, 0.02, 0.06, 0.1, 0.2, 0.3, 0.45]
@@ -292,8 +318,9 @@ def test_initialization():
         display(visualize_gmm_fit(pnr, gmm, 100))
     
     hv.output(size=output_size)
-    visualize_seeds(max_proj, seeds, 'mask_pnr')
+    vis_seeds = visualize_seeds(max_proj, seeds, 'mask_pnr')
     
+    # If visualize_seeds step succeeded, array 'seeds' will have a new column named 'mask_pnr'
     assert len(seeds["mask_pnr"]) == 688, "Seeds array added new column 'mask_pnr' with 688 elements"
     
     seeds = ks_refine(Y_flt, seeds[seeds['mask_pnr']], **param_ks_refine)
@@ -304,6 +331,7 @@ def test_initialization():
     seeds_final = seeds[seeds['mask_ks']].reset_index(drop=True)
     seeds_mrg = seeds_merge(Y_flt, seeds_final, **param_seeds_merge)
 
+    #
     assert len(seeds_final) == 521, 'Seeds array merged'    
     assert len(seeds_final['mask_mrg']) == 521, 'Seeds array contain mask_mrg column after merge'
     assert len(seeds_final['mask_ks']) == 521, 'Seeds array contain mask_ks column after merge'
@@ -314,11 +342,6 @@ def test_initialization():
     # assert seeds_final['mask_mrg'] != None
 
     A, C, b, f = initialize(Y, seeds_mrg[seeds_mrg['mask_mrg']], **param_initialize)
-    
-    assert A.name == 'Y', 'Variable A before renamed'
-    assert C.name == 'Y', 'Variable C before renamed'
-    assert b.name == 'Y', 'Variable b before renamed'
-    assert f.name == 'Y', 'Variable f before renamed'
 
     im_opts = dict(frame_width=500, aspect=A.sizes['width']/A.sizes['height'], cmap='Viridis', colorbar=True)
     cr_opts = dict(frame_width=750, aspect=1.5*A.sizes['width']/A.sizes['height'])
@@ -333,10 +356,13 @@ def test_initialization():
     b = save_minian(b.rename('b_init'), **param_save_minian)
     f = save_minian(f.rename('f_init'), **param_save_minian)
     
-    assert A.name == 'A_init', 'Variable A renamed'
-    assert C.name == 'C_init', 'Variable C renamed'
-    assert b.name == 'b_init', 'Variable b renamed'
-    assert f.name == 'f_init', 'Variable f renamed'
+    test_data_varr_ref = open_minian(dpath_fixture,
+                      fname=param_save_minian['fname'],
+                      backend=param_save_minian['backend'])
+    
+    assert (
+       test_data_varr_ref['A'].all() == minian['A_init'].all()
+    ), "Test Fail: arrays are not the same";
     
 # # CNMF
 def test_cnmf():
@@ -436,11 +462,7 @@ def test_cnmf():
     + regrid(hv.Image(S_temporal.compute().rename('s1'), kdims=['frame', 'unit_id'])).opts(**opts_im).relabel("Spikes First Update")
     ).cols(2)
 
-
-    # TODO Jesus: may be do some tests halfway the procedure?
-    # TODO Jesus: do some testing with assertions
-
-
+    
     hv.output(size=output_size)
     if interactive:
         h, w = A_spatial.sizes['height'], A_spatial.sizes['width']
@@ -615,8 +637,19 @@ def test_cnmf():
     if interactive:
         save_minian(cnmfviewer.unit_labels, **param_save_minian)
 
+    # Check that 'minian.mp4' exists
     assert os.path.exists(os.path.join(dpath, "minian.mp4")) == True, "minian.mp4 was written to local folder"
     assert os.path.getsize(os.path.join(dpath, "minian.mp4"))/(1024*1024) >= 2, "minian.mp4 is at least 2 MB"
+    
+    probe = ffmpeg.probe(os.path.join(dpath, "minian.mp4"))
+    video_streams = [stream for stream in probe["streams"] if stream["codec_type"] == "video"]
+    
+    # Test 'minian.mp4' was created with right attributes
+    assert video_streams[0]["width"] == 1504
+    assert video_streams[0]["height"] == 960
+    assert video_streams[0]["codec_type"] == 'video'
+    assert video_streams[0]["duration_ts"] == 51200
+    assert video_streams[0]["codec_long_name"] == 'H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10'
     
     # Remove create 'minian.mp4' file and 'minian' folder, this is needed so when test is run again it doesn't test
     # using the files from the previous test run
