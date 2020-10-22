@@ -1223,9 +1223,9 @@ def visualize_seeds(max_proj, seeds, mask=None, datashade=False):
         style=dict(fill_alpha=0.8, line_alpha=0, cmap=pt_cmap),
     )
     if mask:
-        vdims = ["index", "seeds", mask]
+        vdims = ["seeds", mask]
     else:
-        vdims = ["index", "seeds"]
+        vdims = ["seeds"]
         opts_pts["style"]["color"] = "white"
     im = hv.Image(max_proj, kdims=["width", "height"])
     pts = hv.Points(seeds, kdims=["width", "height"], vdims=vdims)
