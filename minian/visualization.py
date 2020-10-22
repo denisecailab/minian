@@ -940,22 +940,43 @@ def write_vid_blk(arr, vpath, options):
 
 
 def write_video(
-    arr, vname=None, vpath=".", options={"crf": "18", "preset": "ultrafast"}
+    arr, vname=None, vpath=".", norm=True, options={"crf": "18", "preset": "ultrafast"}
 ):
     if not vname:
         vname = "{}.mp4".format(uuid4())
     fname = os.path.join(vpath, vname)
+    if norm:
+        arr = arr.astype(np.float32)
+        arr_max = arr.max().compute().values
+        arr_min = arr.min().compute().values
+        den = arr_max - arr_min
+        arr -= arr_min
+        arr /= den
+        arr *= 255
+    arr = arr.clip(0, 255).astype(np.uint8)
     paths = [
         dask.delayed(write_vid_blk)(np.asscalar(a), vpath, options)
         for a in arr.data.to_delayed()
     ]
-    with dask.config.set(scheduler="processes"):
-        paths = dask.compute(paths)[0]
-    streams = [ffmpeg.input(p) for p in paths]
-    (ffmpeg.concat(*streams).output(fname).run(overwrite_output=True))
-    for vp in paths:
+    paths = dask.compute(paths)[0]
+    return concat_video_recursive(paths, vname=fname)
+
+
+def concat_video_recursive(vlist, vname=None):
+    if not len(vlist) > 1:
+        return vlist[0]
+    if len(vlist) > 256:
+        vlist = np.array_split(vlist, 256)
+        vlist = [concat_video_recursive(list(v)) for v in vlist]
+    vpath = os.path.dirname(vlist[0])
+    streams = [ffmpeg.input(p) for p in vlist]
+    if vname is None:
+        vname = "{}.mp4".format(uuid4())
+    fpath = os.path.join(vpath, vname)
+    ffmpeg.concat(*streams).output(fpath).run(overwrite_output=True)
+    for vp in vlist:
         os.remove(vp)
-    return fname
+    return fpath
 
 
 def generate_videos(
