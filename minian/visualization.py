@@ -36,6 +36,7 @@ from scipy import linalg
 from scipy.ndimage.measurements import center_of_mass
 from scipy.spatial import cKDTree
 
+from .cnmf import compute_AtC
 from .motion_correction import apply_shifts
 from .utilities import rechunk_like
 
@@ -980,52 +981,26 @@ def concat_video_recursive(vlist, vname=None):
 
 
 def generate_videos(
-    minian,
     varr,
+    Y,
+    A=None,
+    C=None,
+    AC=None,
     vpath=".",
     vname="minian.mp4",
-    scale="auto",
     options={"crf": "18", "preset": "ultrafast"},
 ):
-    print("generating traces")
-    A = minian["A"].compute().transpose("unit_id", "height", "width")
-    C = minian["C"].chunk(dict(unit_id=-1)).transpose("frame", "unit_id")
-    Y = (
-        minian["Y"]
-        .chunk(dict(height=-1, width=-1))
-        .transpose("frame", "height", "width")
-    )
-    org = varr
-    try:
-        bl = minian["bl"].chunk(dict(unit_id=-1))
-    except KeyError:
-        print("cannot find background term")
-        bl = 0
-    C = C + bl
-    AC = xr.apply_ufunc(
-        da.tensordot,
-        C,
-        A,
-        input_core_dims=[["frame", "unit_id"], ["unit_id", "height", "width"]],
-        output_core_dims=[["frame", "height", "width"]],
-        dask="allowed",
-        kwargs=dict(axes=(1, 0)),
-        output_dtypes=[A.dtype],
-    )
-    org_norm = org
-    if scale == "auto":
-        Y_max = Y.max().compute()
-        Y_norm = Y * (255 / Y_max)
-        AC_norm = AC * (255 / Y_max)
-    else:
-        Y_norm = Y * scale
-        AC_norm = AC * scale
-    res_norm = Y_norm - AC_norm
+    if AC is None:
+        print("generating traces")
+        AC = compute_AtC(A, C)
+    Y = Y * 255 / Y.max().compute().values
+    AC = AC * 255 / AC.max().compute().values
+    res = Y - AC
     print("writing videos")
-    path_org = write_video(org_norm, vpath=vpath, options=options)
-    path_Y = write_video(Y_norm, vpath=vpath, options=options)
-    path_AC = write_video(AC_norm, vpath=vpath, options=options)
-    path_res = write_video(res_norm, vpath=vpath, options=options)
+    path_org = write_video(varr, vpath=vpath, options=options)
+    path_Y = write_video(Y, vpath=vpath, norm=False, options=options)
+    path_AC = write_video(AC, vpath=vpath, norm=False, options=options)
+    path_res = write_video(res, vpath=vpath, norm=False, options=options)
     print("concatenating results")
     str_org = ffmpeg.input(path_org)
     str_Y = ffmpeg.input(path_Y)

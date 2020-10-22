@@ -769,3 +769,21 @@ def smooth_sig(sig, freq, btype="low"):
         output_dtypes=[sig.dtype],
     )
     return sig_smth
+
+
+def compute_AtC(A, C):
+    fm, h, w = (
+        C.coords["frame"].values,
+        A.coords["height"].values,
+        A.coords["width"].values,
+    )
+    A = A.data.map_blocks(sparse.COO, dtype=A.dtype).rechunk(-1)
+    C = C.transpose("frame", "unit_id").data.map_blocks(sparse.COO, dtype=C.dtype)
+    AtC = darr.tensordot(C, A, axes=(1, 0)).map_blocks(
+        lambda a: a.todense(), dtype=A.dtype
+    )
+    return xr.DataArray(
+        AtC,
+        dims=["frame", "height", "width"],
+        coords={"frame": fm, "height": h, "width": w},
+    )
