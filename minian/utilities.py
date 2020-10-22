@@ -1,11 +1,13 @@
 import os
 import re
+import shutil
 import warnings
 from copy import deepcopy
 from os import listdir
 from os.path import isdir
 from os.path import join as pjoin
 from pathlib import Path
+from uuid import uuid4
 
 import cv2
 import dask as da
@@ -13,7 +15,9 @@ import dask.array as darr
 import numpy as np
 import pandas as pd
 import psutil
+import rechunker
 import xarray as xr
+import zarr as zr
 from natsort import natsorted
 from tifffile import TiffFile, imread
 
@@ -148,37 +152,18 @@ def load_avi_perframe(fname, fid):
         return np.zeros((h, w))
 
 
-def open_minian(
-    dpath, fname="minian", backend="netcdf", chunks=None, post_process=None
-):
-    if backend == "netcdf":
-        fname = fname + ".nc"
-        if chunks == "auto":
-            chunks = dict([(d, "auto") for d in ds.dims])
-        mpath = pjoin(dpath, fname)
-        with xr.open_dataset(mpath) as ds:
-            dims = ds.dims
-        chunks = dict([(d, "auto") for d in dims])
-        ds = xr.open_dataset(os.path.join(dpath, fname), chunks=chunks)
-        if post_process:
-            ds = post_process(ds, mpath)
-        return ds
-    elif backend == "zarr":
-        mpath = pjoin(dpath, fname)
-        dslist = [
-            xr.open_zarr(pjoin(mpath, d))
-            for d in listdir(mpath)
-            if isdir(pjoin(mpath, d))
-        ]
-        ds = xr.merge(dslist)
-
-        if chunks == "auto":
-            chunks = dict([(d, "auto") for d in ds.dims])
-        if post_process:
-            ds = post_process(ds, mpath)
-        return ds.chunk(chunks)
+def open_minian(dpath, post_process=None, return_dict=False):
+    dslist = [
+        xr.open_zarr(pjoin(dpath, d)) for d in listdir(dpath) if isdir(pjoin(dpath, d))
+    ]
+    if return_dict:
+        dslist = [list(d.values())[0] for d in dslist]
+        ds = {d.name: d for d in dslist}
     else:
-        raise NotImplementedError("backend {} not supported".format(backend))
+        ds = xr.merge(dslist, compat="no_conflicts")
+    if (not return_dict) and post_process:
+        ds = post_process(ds, dpath)
+    return ds
 
 
 def open_minian_mf(
@@ -225,29 +210,44 @@ def open_minian_mf(
 
 
 def save_minian(
-    var, dpath, fname="minian", backend="netcdf", meta_dict=None, overwrite=False
+    var, dpath, meta_dict=None, overwrite=False, chunks=None, mem_limit="200MB"
 ):
     dpath = os.path.normpath(dpath)
+    Path(dpath).mkdir(parents=True, exist_ok=True)
     ds = var.to_dataset()
     if meta_dict is not None:
         pathlist = os.path.abspath(dpath).split(os.sep)
         ds = ds.assign_coords(
             **dict([(dn, pathlist[di]) for dn, di in meta_dict.items()])
         )
-    if backend == "netcdf":
+    md = {True: "a", False: "w-"}[overwrite]
+    fp = os.path.join(dpath, var.name + ".zarr")
+    if overwrite:
         try:
-            md = {True: "w", False: "a"}[overwrite]
-            ds.to_netcdf(os.path.join(dpath, fname + ".nc"), mode=md)
+            shutil.rmtree(fp)
         except FileNotFoundError:
-            ds.to_netcdf(os.path.join(dpath, fname + ".nc"), mode=md)
-        return ds
-    elif backend == "zarr":
-        md = {True: "w", False: "w-"}[overwrite]
-        fp = os.path.join(dpath, fname, var.name + ".zarr")
-        ds.to_zarr(fp, mode=md)
-        return xr.open_zarr(fp)[var.name]
-    else:
-        raise NotImplementedError("backend {} not supported".format(backend))
+            pass
+    ds.to_zarr(fp, mode=md)
+    if chunks is not None:
+        chunks = {d: var.sizes[d] if v <= 0 else v for d, v in chunks.items()}
+        dst_path = os.path.join(dpath, str(uuid4()))
+        temp_path = os.path.join(dpath, str(uuid4()))
+        zstore = zr.open(fp)
+        rechk = rechunker.rechunk(
+            zstore[var.name], chunks, mem_limit, dst_path, temp_store=temp_path
+        )
+        rechk.execute()
+        try:
+            shutil.rmtree(temp_path)
+        except FileNotFoundError:
+            pass
+        arr_path = os.path.join(fp, var.name)
+        for f in os.listdir(arr_path):
+            os.remove(os.path.join(arr_path, f))
+        for f in os.listdir(dst_path):
+            os.rename(os.path.join(dst_path, f), os.path.join(arr_path, f))
+        os.rmdir(dst_path)
+    return xr.open_zarr(fp)[var.name]
 
 
 def xrconcat_recursive(var, dims):
@@ -337,6 +337,7 @@ def get_optimal_chk(ref, arr=None, dim_grp=None, ncores="auto", mem_limit="auto"
             "estimated memory limit is smaller than 64MiB. Using 64MiB chunksize instead. "
         )
         csize = 64
+    csize = int(np.floor((mem_limit) / ncores))
     if csize > 512:
         warnings.warn(
             "estimated memory limit is bigger than 512MiB. Using 512MiB chunksize instead. "
