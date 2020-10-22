@@ -4,7 +4,6 @@ import os
 from collections import OrderedDict
 from uuid import uuid4
 
-import av
 import colorcet as cc
 import cv2
 import dask
@@ -15,6 +14,7 @@ import numpy as np
 import pandas as pd
 import panel as pn
 import param
+import skvideo.io
 import xarray as xr
 from bokeh.palettes import Category10_10, Viridis256
 from dask.diagnostics import ProgressBar
@@ -928,21 +928,14 @@ def write_vid_blk(arr, vpath, options):
     uid = uuid4()
     vname = "{}.mp4".format(uid)
     fpath = os.path.join(vpath, vname)
-    arr = np.clip(arr, 0, 255).astype(np.uint8)
-    container = av.open(fpath, mode="w")
-    stream = container.add_stream("libx264", rate=30)
-    stream.width = arr.shape[2]
-    stream.height = arr.shape[1]
-    stream.pix_fmt = "yuv420p"
-    stream.options = options
+    if len(arr.shape) == 2:
+        arr = np.expand_dims(arr, axis=0)
+    writer = skvideo.io.FFmpegWriter(
+        fpath, outputdict={"-" + k: v for k, v in options.items()}
+    )
     for fm in arr:
-        fm = cv2.cvtColor(fm, cv2.COLOR_GRAY2RGB)
-        fmav = av.VideoFrame.from_ndarray(fm, format="rgb24")
-        for p in stream.encode(fmav):
-            container.mux(p)
-    for p in stream.encode():
-        container.mux(p)
-    container.close()
+        writer.writeFrame(fm)
+    writer.close()
     return fpath
 
 
