@@ -7,6 +7,7 @@ import dask as da
 import dask.array as darr
 import networkx as nx
 import numpy as np
+import pyfftw.interfaces.numpy_fft as numpy_fft
 import xarray as xr
 from dask import delayed
 from scipy.linalg import lstsq, toeplitz
@@ -38,9 +39,7 @@ def get_noise_fft(varr, noise_range=(0.25, 0.5), noise_method="logmexp"):
 def _noise_fft(px, noise_range=(0.25, 0.5), noise_method="logmexp"):
     _T = len(px)
     nr = np.around(np.array(noise_range) * 2 * _T).astype(int)
-    px_fft = np.fft.rfft(px)
-    px_psd = 1 / _T * np.abs(px_fft) ** 2
-    px_band = px_psd[nr[0] : nr[1]]
+    px_band = (1 / _T * np.abs(numpy_fft.rfft(px)) ** 2)[nr[0] : nr[1]]
     if noise_method == "mean":
         return np.sqrt(px_band.mean())
     elif noise_method == "median":
