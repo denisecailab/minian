@@ -19,7 +19,7 @@ import xarray as xr
 from bokeh.palettes import Category10_10, Viridis256
 from dask.diagnostics import ProgressBar
 from datashader import count_cat
-from holoviews.operation.datashader import datashade, dynspread, regrid
+from holoviews.operation.datashader import datashade, dynspread
 from holoviews.streams import (
     BoxEdit,
     DoubleTap,
@@ -131,7 +131,7 @@ class VArrayViewer:
             except ValueError:
                 curds = self.ds_sub
             fim = fct.partial(img, ds=curds)
-            im = regrid(hv.DynamicMap(fim, streams=[self.strm_f])).opts(
+            im = hv.DynamicMap(fim, streams=[self.strm_f]).opts(
                 frame_width=500, aspect=self._w / self._h, cmap="Viridis"
             )
             if self.rerange:
@@ -721,9 +721,7 @@ class CNMFViewer:
 
     def _spatial_all(self):
         metas = self.metas
-        Asum = regrid(
-            hv.Image(self.Asum.sel(**metas), ["width", "height"]), precompute=True
-        ).opts(
+        Asum = hv.Image(self.Asum.sel(**metas), ["width", "height"]).opts(
             plot=dict(frame_height=len(self._h), frame_width=len(self._w)),
             style=dict(cmap="Viridis"),
         )
@@ -748,11 +746,11 @@ class CNMFViewer:
         )
         self.strm_uid.source = cents
         fim = fct.partial(hv.Image, kdims=["width", "height"])
-        AC = regrid(hv.DynamicMap(fim, streams=[self.pipAC]), precompute=True).opts(
+        AC = hv.DynamicMap(fim, streams=[self.pipAC]).opts(
             plot=dict(frame_height=len(self._h), frame_width=len(self._w)),
             style=dict(cmap="Viridis"),
         )
-        mov = regrid(hv.DynamicMap(fim, streams=[self.pipmov]), precompute=True).opts(
+        mov = hv.DynamicMap(fim, streams=[self.pipmov]).opts(
             plot=dict(frame_height=len(self._h), frame_width=len(self._w)),
             style=dict(cmap="Viridis"),
         )
@@ -1160,15 +1158,13 @@ def visualize_preprocess(fm, fn=None, include_org=True, **kwargs):
             )
             im_dict[p_str] = cur_im
             cnt_dict[p_str] = cur_cnt
-        hv_im = regrid(hv.HoloMap(im_dict, kdims=list(pkey)), precompute=True).opts(
-            **opts_im
-        )
+        hv_im = Dynamic(hv.HoloMap(im_dict, kdims=list(pkey)).opts(**opts_im))
         hv_cnt = datashade(
             hv.HoloMap(cnt_dict, kdims=list(pkey)), precompute=True, cmap=Viridis256
         ).opts(**opts_cnt)
         if include_org:
             im, cnt = _vis(fm)
-            im = regrid(im, precompute=True).relabel("Before").opts(**opts_im)
+            im = im.relabel("Before").opts(**opts_im)
             cnt = (
                 datashade(cnt, precompute=True, cmap=Viridis256)
                 .relabel("Before")
@@ -1182,7 +1178,7 @@ def visualize_preprocess(fm, fn=None, include_org=True, **kwargs):
         return im + cnt
 
 
-def visualize_seeds(max_proj, seeds, mask=None, datashade=False):
+def visualize_seeds(max_proj, seeds, mask=None):
     h, w = max_proj.sizes["height"], max_proj.sizes["width"]
     asp = w / h
     pt_cmap = {True: "white", False: "red"}
@@ -1204,8 +1200,6 @@ def visualize_seeds(max_proj, seeds, mask=None, datashade=False):
         opts_pts["style"]["color"] = "white"
     im = hv.Image(max_proj, kdims=["width", "height"])
     pts = hv.Points(seeds, kdims=["width", "height"], vdims=vdims)
-    if datashade:
-        im = regrid(im)
     return im.opts(**opts_im) * pts.opts(**opts_pts)
 
 
@@ -1259,9 +1253,9 @@ def visualize_spatial_update(A_dict, C_dict, kdims=None, norm=True, datashading=
             (A > 0).sum("unit_id").rename("A_bin"), kdims=["width", "height"]
         )
         hv_C_dict[key] = hv.Dataset(C.rename("C")).to(hv.Curve, kdims="frame")
-    hv_pts = hv.HoloMap(hv_pts_dict, kdims=kdims)
-    hv_A = hv.HoloMap(hv_A_dict, kdims=kdims)
-    hv_Ab = hv.HoloMap(hv_Ab_dict, kdims=kdims)
+    hv_pts = Dynamic(hv.HoloMap(hv_pts_dict, kdims=kdims))
+    hv_A = Dynamic(hv.HoloMap(hv_A_dict, kdims=kdims))
+    hv_Ab = Dynamic(hv.HoloMap(hv_Ab_dict, kdims=kdims))
     hv_C = (
         hv.HoloMap(hv_C_dict, kdims=kdims)
         .collate()
@@ -1269,9 +1263,9 @@ def visualize_spatial_update(A_dict, C_dict, kdims=None, norm=True, datashading=
         .add_dimension("time", 0, 0)
     )
     if datashading:
-        hv_A = regrid(hv_A)
-        hv_Ab = regrid(hv_Ab)
         hv_C = datashade(hv_C)
+    else:
+        hv_C = Dynamic(hv_C)
     hv_A = hv_A.opts(frame_width=400, aspect=w / h, colorbar=True, cmap="viridis")
     hv_Ab = hv_Ab.opts(frame_width=400, aspect=w / h, colorbar=True, cmap="viridis")
     hv_C = hv_C.map(
@@ -1376,13 +1370,11 @@ def visualize_temporal_update(
     hv_pul = {"Simulated Calcium": hvobjs[4], "Simulated Spike": hvobjs[5]}
     hv_unit = hv.HoloMap(hv_unit, kdims="traces").collate().overlay("traces")
     hv_pul = hv.HoloMap(hv_pul, kdims="traces").collate().overlay("traces")
-    hv_A = hvobjs[6]
+    hv_A = Dynamic(hvobjs[6])
     if datashading:
         hv_unit = datashade_ndcurve(hv_unit, "traces")
-        hv_A = regrid(hv_A)
     else:
         hv_unit = Dynamic(hv_unit)
-        hv_A = Dynamic(hv_A)
     hv_pul = Dynamic(hv_pul)
     hv_unit = hv_unit.map(
         lambda p: p.opts(plot=dict(frame_height=400, frame_width=1000))
