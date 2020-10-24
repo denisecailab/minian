@@ -40,7 +40,7 @@ def get_noise_fft(varr, noise_range=(0.25, 0.5), noise_method="logmexp"):
 
 def _noise_fft(px, noise_range=(0.25, 0.5), noise_method="logmexp"):
     _T = len(px)
-    nr = np.around(np.array(noise_range) * 2 * _T).astype(int)
+    nr = np.around(np.array(noise_range) * _T).astype(int)
     px_band = (1 / _T * np.abs(numpy_fft.rfft(px)) ** 2)[nr[0] : nr[1]]
     if noise_method == "mean":
         return np.sqrt(px_band.mean())
@@ -757,10 +757,26 @@ def label_connected(adj, only_connected=False):
     return labels
 
 
-def smooth_sig(sig, freq, btype="low"):
-    but_b, but_a = butter(2, freq, btype=btype, analog=False)
+def smooth_sig(sig, freq, method="fft", btype="low"):
+    if method == "fft":
+        _T = sig.sizes["frame"]
+        if btype == "low":
+            zero_range = slice(int(freq * _T), None)
+        elif btype == "high":
+            zero_range = slice(None, int(freq * _T))
+
+        def filt_func(x):
+            xfft = np.fft.rfft(x)
+            xfft[zero_range] = 0
+            return np.fft.irfft(xfft)
+
+    elif method == "butter":
+        but_b, but_a = butter(2, freq * 2, btype=btype, analog=False)
+        filt_func = lambda x: lfilter(but_b, but_a, x)
+    else:
+        raise NotImplementedError(method)
     sig_smth = xr.apply_ufunc(
-        lambda x: lfilter(but_b, but_a, x),
+        filt_func,
         sig,
         input_core_dims=[["frame"]],
         output_core_dims=[["frame"]],
