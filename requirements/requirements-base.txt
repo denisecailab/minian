@@ -127,6 +127,7 @@ PyYAML==5.3.1
 pyzmq==19.0.2
 qtconsole==4.7.7
 QtPy==1.9.0
+rechunker==0.2.0
 regex==2020.7.14
 requests==2.24.0
 scikit-image==0.16.2
@@ -138,6 +139,7 @@ six==1.15.0
 sk-video==1.1.10
 snowballstemmer==2.0.0
 sortedcontainers==2.2.2
+sparse==0.9.1
 statsmodels==0.11.1
 tblib==1.6.0
 tenacity==6.2.0

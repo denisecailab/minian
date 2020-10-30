@@ -4,7 +4,7 @@ import os
 from collections import OrderedDict
 from uuid import uuid4
 
-import av
+import colorcet as cc
 import cv2
 import dask
 import dask.array as da
@@ -14,11 +14,12 @@ import numpy as np
 import pandas as pd
 import panel as pn
 import param
+import skvideo.io
 import xarray as xr
 from bokeh.palettes import Category10_10, Viridis256
 from dask.diagnostics import ProgressBar
 from datashader import count_cat
-from holoviews.operation.datashader import datashade, dynspread, regrid
+from holoviews.operation.datashader import datashade, dynspread
 from holoviews.streams import (
     BoxEdit,
     DoubleTap,
@@ -29,10 +30,15 @@ from holoviews.streams import (
     Tap,
 )
 from holoviews.util import Dynamic
+from matplotlib import cm
 from panel import widgets as pnwgt
 from scipy import linalg
 from scipy.ndimage.measurements import center_of_mass
 from scipy.spatial import cKDTree
+
+from .cnmf import compute_AtC
+from .motion_correction import apply_shifts
+from .utilities import rechunk_like
 
 
 class VArrayViewer:
@@ -160,7 +166,7 @@ class VArrayViewer:
             except ValueError:
                 curds = self.ds_sub
             fim = fct.partial(img, ds=curds)
-            im = regrid(hv.DynamicMap(fim, streams=[self.strm_f])).opts(
+            im = hv.DynamicMap(fim, streams=[self.strm_f]).opts(
                 frame_width=500, aspect=self._w / self._h, cmap="Viridis"
             )
             if self.rerange:
@@ -870,9 +876,7 @@ class CNMFViewer:
             [type]: [description]
         """
         metas = self.metas
-        Asum = regrid(
-            hv.Image(self.Asum.sel(**metas), ["width", "height"]), precompute=True
-        ).opts(
+        Asum = hv.Image(self.Asum.sel(**metas), ["width", "height"]).opts(
             plot=dict(frame_height=len(self._h), frame_width=len(self._w)),
             style=dict(cmap="Viridis"),
         )
@@ -897,11 +901,11 @@ class CNMFViewer:
         )
         self.strm_uid.source = cents
         fim = fct.partial(hv.Image, kdims=["width", "height"])
-        AC = regrid(hv.DynamicMap(fim, streams=[self.pipAC]), precompute=True).opts(
+        AC = hv.DynamicMap(fim, streams=[self.pipAC]).opts(
             plot=dict(frame_height=len(self._h), frame_width=len(self._w)),
             style=dict(cmap="Viridis"),
         )
-        mov = regrid(hv.DynamicMap(fim, streams=[self.pipmov]), precompute=True).opts(
+        mov = hv.DynamicMap(fim, streams=[self.pipmov]).opts(
             plot=dict(frame_height=len(self._h), frame_width=len(self._w)),
             style=dict(cmap="Viridis"),
         )
@@ -915,6 +919,165 @@ class CNMFViewer:
         """[summary]
         """
         self.spatial_all.objects = self._spatial_all().objects
+
+
+class AlignViewer:
+    def __init__(self, minian_ds, cents, mappings, shiftds, brt_offset=0) -> None:
+        # init
+        self.minian_ds = minian_ds
+        self.cents = cents
+        self.mappings = mappings
+        self.shiftds = shiftds
+        self.brt_offset = brt_offset
+        A = self.minian_ds["A"].chunk(
+            {
+                "animal": 1,
+                "session": "auto",
+                "height": -1,
+                "width": -1,
+                "unit_id": "auto",
+            }
+        )
+        self.shifts = rechunk_like(self.shiftds["shifts"], A)
+        self.Ash = apply_shifts(A, self.shifts, fill=0)
+        # option widgets
+        self.erode = 3
+        wgt_er = pnwgt.Select(name="erode", options=np.arange(0, 20).tolist(), value=3)
+        wgt_er.param.watch(self.cb_update_erd, "value")
+        self.show_ma = True
+        wgt_ma = pnwgt.Checkbox(name="show matched", value=True)
+        wgt_ma.param.watch(self.cb_showma, "value")
+        self.show_uma = True
+        wgt_uma = pnwgt.Checkbox(name="show unmatched", value=True)
+        wgt_uma.param.watch(self.cb_showuma, "value")
+        self.wgt_opt = pn.layout.WidgetBox(wgt_er, wgt_ma, wgt_uma)
+        self.processA()
+        # handling meta
+        self.meta_dict = {
+            col: c.unique().tolist() for col, c in mappings["meta"].iteritems()
+        }
+        self.meta = {d: v[0] for d, v in self.meta_dict.items()}
+        wgt_meta = [
+            pnwgt.Select(name=dim, options=vals) for dim, vals in self.meta_dict.items()
+        ]
+        for w in wgt_meta:
+            w.param.watch(lambda v, n=w.name: self.cb_update_meta(n, v), "value")
+        self.wgt_meta = pn.layout.WidgetBox(*wgt_meta)
+        self.update_meta()
+        # sessionRGB
+        sess = list(mappings["session"].columns)
+        self.sess_rgb = {"r": sess[0], "g": sess[0], "b": sess[0]}
+        wgt_sess = {
+            c: pnwgt.Select(name="session{}".format(c.upper()), options=sess)
+            for c in ["r", "g", "b"]
+        }
+        for wname, w in wgt_sess.items():
+            w.param.watch(lambda v, n=wname: self.cb_update_rgb(n, v), "value")
+        self.wgt_rgb = pn.layout.WidgetBox(*list(wgt_sess.values()))
+        self.plot = self.update_plot()
+
+    def processA(self):
+        A = self.Ash
+        if self.erode >= 3:
+            A = xr.apply_ufunc(
+                cv2.erode,
+                A,
+                input_core_dims=[["height", "width"]],
+                output_core_dims=[["height", "width"]],
+                vectorize=True,
+                dask="parallelized",
+                kwargs={"kernel": np.ones((self.erode, self.erode))},
+                output_dtypes=[float],
+            )
+        self.dataA = xr.apply_ufunc(
+            norm,
+            A,
+            input_core_dims=[["height", "width"]],
+            output_core_dims=[["height", "width"]],
+            vectorize=True,
+            dask="parallelized",
+            output_dtypes=[float],
+        )
+
+    def update_plot(self):
+        Adict = {
+            c: self.curA.sel(session=self.sess_rgb[c])
+            .dropna("unit_id", how="all")
+            .compute()
+            for c in self.sess_rgb.keys()
+        }
+        map_sub = self.curmap["session"][list(self.sess_rgb.values())].dropna(how="all")
+        map_sub = map_sub.loc[:, ~map_sub.columns.duplicated()]
+        ma_mask = map_sub.notnull().all(axis="columns")
+        imdict = {
+            c: np.zeros((A.sizes["height"], A.sizes["width"])) for c, A in Adict.items()
+        }
+        if self.show_ma:
+            ma_map = map_sub.loc[ma_mask]
+            for c, im in imdict.items():
+                uids = ma_map[self.sess_rgb[c]].values
+                imdict[c] = im + Adict[c].sel(unit_id=uids).sum("unit_id").compute()
+        if self.show_uma:
+            uma_map = map_sub.loc[~ma_mask]
+            for c, im in imdict.items():
+                uids = uma_map[self.sess_rgb[c]].dropna().values
+                imdict[c] = im + Adict[c].sel(unit_id=uids).sum("unit_id").compute()
+        cmaps = {
+            "r": cc.m_linear_kryw_0_100_c71,
+            "g": cc.m_linear_green_5_95_c69,
+            "b": cc.m_linear_blue_5_95_c73,
+        }
+        for c, im in imdict.items():
+            imdict[c] = cm.ScalarMappable(cmap=cmaps[c]).to_rgba(im)
+        im_ovly = xr.DataArray(
+            np.clip(imdict["r"] + imdict["g"] + imdict["b"] + self.brt_offset, 0, 1),
+            dims=["height", "width", "rgb"],
+            coords={
+                "height": self.curA.coords["height"].values,
+                "width": self.curA.coords["width"].values,
+            },
+        )
+        im_opts = {
+            "frame_height": self.curA.sizes["height"],
+            "frame_width": self.curA.sizes["width"],
+        }
+        return pn.panel(hv.RGB(im_ovly, kdims=["width", "height"]).opts(**im_opts))
+
+    def update_meta(self):
+        self.curA = self.dataA.sel(**self.meta).persist()
+        self.curmap = (
+            self.mappings.set_index([("meta", d) for d in self.meta.keys()])
+            .loc[tuple(self.meta.values())]
+            .reset_index()
+        )
+
+    def cb_update_erd(self, val):
+        self.erode = val.new
+        self.processA()
+        self.update_meta()
+        self.plot.object = self.update_plot().object
+
+    def cb_update_meta(self, dim, val):
+        self.meta[dim] = val.new
+        self.update_meta()
+        self.plot.object = self.update_plot().object
+
+    def cb_update_rgb(self, ch, ss):
+        self.sess_rgb[ch] = ss.new
+        self.plot.object = self.update_plot().object
+
+    def cb_showma(self, val):
+        self.show_ma = val.new
+        self.plot.object = self.update_plot().object
+
+    def cb_showuma(self, val):
+        self.show_uma = val.new
+        self.plot.object = self.update_plot().object
+
+    def show(self):
+        return pn.layout.Row(
+            self.plot, pn.layout.Column(self.wgt_meta, self.wgt_rgb, self.wgt_opt)
+        )
 
 
 def write_vid_blk(arr, vpath, options):
@@ -931,26 +1094,19 @@ def write_vid_blk(arr, vpath, options):
     uid = uuid4()
     vname = "{}.mp4".format(uid)
     fpath = os.path.join(vpath, vname)
-    arr = np.clip(arr, 0, 255).astype(np.uint8)
-    container = av.open(fpath, mode="w")
-    stream = container.add_stream("libx264", rate=30)
-    stream.width = arr.shape[2]
-    stream.height = arr.shape[1]
-    stream.pix_fmt = "yuv420p"
-    stream.options = options
+    if len(arr.shape) == 2:
+        arr = np.expand_dims(arr, axis=0)
+    writer = skvideo.io.FFmpegWriter(
+        fpath, outputdict={"-" + k: v for k, v in options.items()}
+    )
     for fm in arr:
-        fm = cv2.cvtColor(fm, cv2.COLOR_GRAY2RGB)
-        fmav = av.VideoFrame.from_ndarray(fm, format="rgb24")
-        for p in stream.encode(fmav):
-            container.mux(p)
-    for p in stream.encode():
-        container.mux(p)
-    container.close()
+        writer.writeFrame(fm)
+    writer.close()
     return fpath
 
 
 def write_video(
-    arr, vname=None, vpath=".", options={"crf": "18", "preset": "ultrafast"}
+    arr, vname=None, vpath=".", norm=True, options={"crf": "18", "preset": "ultrafast"}
 ):
     """[summary]
 
@@ -966,79 +1122,76 @@ def write_video(
     if not vname:
         vname = "{}.mp4".format(uuid4())
     fname = os.path.join(vpath, vname)
+    if norm:
+        arr = arr.astype(np.float32)
+        arr_max = arr.max().compute().values
+        arr_min = arr.min().compute().values
+        den = arr_max - arr_min
+        arr -= arr_min
+        arr /= den
+        arr *= 255
+    arr = arr.clip(0, 255).astype(np.uint8)
     paths = [
         dask.delayed(write_vid_blk)(np.asscalar(a), vpath, options)
         for a in arr.data.to_delayed()
     ]
-    with dask.config.set(scheduler="processes"):
-        paths = dask.compute(paths)[0]
-    streams = [ffmpeg.input(p) for p in paths]
-    (ffmpeg.concat(*streams).output(fname).run(overwrite_output=True))
-    for vp in paths:
+    paths = dask.compute(paths)[0]
+    return concat_video_recursive(paths, vname=fname)
+
+
+def concat_video_recursive(vlist, vname=None):
+    if not len(vlist) > 1:
+        return vlist[0]
+    if len(vlist) > 256:
+        vlist = np.array_split(vlist, 256)
+        vlist = [concat_video_recursive(list(v)) for v in vlist]
+    vpath = os.path.dirname(vlist[0])
+    streams = [ffmpeg.input(p) for p in vlist]
+    if vname is None:
+        vname = "{}.mp4".format(uuid4())
+    fpath = os.path.join(vpath, vname)
+    ffmpeg.concat(*streams).output(fpath).run(overwrite_output=True)
+    for vp in vlist:
         os.remove(vp)
-    return fname
+    return fpath
 
 
 def generate_videos(
-    minian,
     varr,
+    Y,
+    A=None,
+    C=None,
+    AC=None,
     vpath=".",
     vname="minian.mp4",
-    scale="auto",
     options={"crf": "18", "preset": "ultrafast"},
 ):
     """[summary]
 
     Args:
-        minian ([type]): [description]
         varr ([type]): [description]
+        Y ([type]): [description]
+        A ([type]): [description]
+        C ([type]): [description]
+        AC ([type]): [description]
         vpath (str, optional): [description]. Defaults to ".".
         vname (str, optional): [description]. Defaults to "minian.mp4".
-        scale (str, optional): [description]. Defaults to "auto".
         options (dict, optional): [description]. Defaults to {'crf': '18', 'preset': 'ultrafast'}.
 
     Returns:
         [type]: [description]
     """
-    print("generating traces")
-    A = minian["A"].compute().transpose("unit_id", "height", "width")
-    C = minian["C"].chunk(dict(unit_id=-1)).transpose("frame", "unit_id")
-    Y = (
-        minian["Y"]
-        .chunk(dict(height=-1, width=-1))
-        .transpose("frame", "height", "width")
-    )
-    org = varr
-    try:
-        bl = minian["bl"].chunk(dict(unit_id=-1))
-    except KeyError:
-        print("cannot find background term")
-        bl = 0
-    C = C + bl
-    AC = xr.apply_ufunc(
-        da.tensordot,
-        C,
-        A,
-        input_core_dims=[["frame", "unit_id"], ["unit_id", "height", "width"]],
-        output_core_dims=[["frame", "height", "width"]],
-        dask="allowed",
-        kwargs=dict(axes=(1, 0)),
-        output_dtypes=[A.dtype],
-    )
-    org_norm = org
-    if scale == "auto":
-        Y_max = Y.max().compute()
-        Y_norm = Y * (255 / Y_max)
-        AC_norm = AC * (255 / Y_max)
-    else:
-        Y_norm = Y * scale
-        AC_norm = AC * scale
-    res_norm = Y_norm - AC_norm
+    if AC is None:
+        print("generating traces")
+        AC = compute_AtC(A, C)
+    Y = Y * 255 / Y.max().compute().values
+    AC = AC * 255 / AC.max().compute().values
+    res = Y - AC
     print("writing videos")
-    path_org = write_video(org_norm, vpath=vpath, options=options)
-    path_Y = write_video(Y_norm, vpath=vpath, options=options)
-    path_AC = write_video(AC_norm, vpath=vpath, options=options)
-    path_res = write_video(res_norm, vpath=vpath, options=options)
+    path_org = write_video(varr, vpath=vpath, options=options)
+    path_Y = write_video(Y, vpath=vpath, norm=False, options=options)
+    path_AC = write_video(AC, vpath=vpath, norm=False, options=options)
+    path_res = write_video(res, vpath=vpath, norm=False, options=options)
     print("concatenating results")
     str_org = ffmpeg.input(path_org)
     str_Y = ffmpeg.input(path_Y)
@@ -1114,6 +1267,16 @@ def normalize(a):
         [type]: [description]
     """
     return np.interp(a, (np.nanmin(a), np.nanmax(a)), (0, +1))
+
+
+def norm(a):
+    amax = np.nanmax(a)
+    amin = np.nanmin(a)
+    diff = amax - amin
+    if diff > 0:
+        return (a - amin) / (amax - amin)
+    else:
+        return a
 
 
 def convolve_G(s, g):
@@ -1266,15 +1429,13 @@ def visualize_preprocess(fm, fn=None, include_org=True, **kwargs):
             )
             im_dict[p_str] = cur_im
             cnt_dict[p_str] = cur_cnt
-        hv_im = regrid(hv.HoloMap(im_dict, kdims=list(pkey)), precompute=True).opts(
-            **opts_im
-        )
+        hv_im = Dynamic(hv.HoloMap(im_dict, kdims=list(pkey)).opts(**opts_im))
         hv_cnt = datashade(
             hv.HoloMap(cnt_dict, kdims=list(pkey)), precompute=True, cmap=Viridis256
         ).opts(**opts_cnt)
         if include_org:
             im, cnt = _vis(fm)
-            im = regrid(im, precompute=True).relabel("Before").opts(**opts_im)
+            im = im.relabel("Before").opts(**opts_im)
             cnt = (
                 datashade(cnt, precompute=True, cmap=Viridis256)
                 .relabel("Before")
@@ -1288,14 +1449,13 @@ def visualize_preprocess(fm, fn=None, include_org=True, **kwargs):
         return im + cnt
 
 
-def visualize_seeds(max_proj, seeds, mask=None, datashade=False):
+def visualize_seeds(max_proj, seeds, mask=None):
     """[summary]
 
     Args:
         max_proj ([type]): [description]
         seeds ([type]): [description]
         mask ([type], optional): [description]. Defaults to None.
-        datashade (bool, optional): [description]. Defaults to False.
 
     Returns:
         [type]: [description]
@@ -1315,14 +1475,12 @@ def visualize_seeds(max_proj, seeds, mask=None, datashade=False):
         style=dict(fill_alpha=0.8, line_alpha=0, cmap=pt_cmap),
     )
     if mask:
-        vdims = ["index", "seeds", mask]
+        vdims = ["seeds", mask]
     else:
-        vdims = ["index", "seeds"]
+        vdims = ["seeds"]
         opts_pts["style"]["color"] = "white"
     im = hv.Image(max_proj, kdims=["width", "height"])
     pts = hv.Points(seeds, kdims=["width", "height"], vdims=vdims)
-    if datashade:
-        im = regrid(im)
     return im.opts(**opts_im) * pts.opts(**opts_pts)
 
 
@@ -1396,9 +1554,9 @@ def visualize_spatial_update(A_dict, C_dict, kdims=None, norm=True, datashading=
             (A > 0).sum("unit_id").rename("A_bin"), kdims=["width", "height"]
         )
         hv_C_dict[key] = hv.Dataset(C.rename("C")).to(hv.Curve, kdims="frame")
-    hv_pts = hv.HoloMap(hv_pts_dict, kdims=kdims)
-    hv_A = hv.HoloMap(hv_A_dict, kdims=kdims)
-    hv_Ab = hv.HoloMap(hv_Ab_dict, kdims=kdims)
+    hv_pts = Dynamic(hv.HoloMap(hv_pts_dict, kdims=kdims))
+    hv_A = Dynamic(hv.HoloMap(hv_A_dict, kdims=kdims))
+    hv_Ab = Dynamic(hv.HoloMap(hv_Ab_dict, kdims=kdims))
     hv_C = (
         hv.HoloMap(hv_C_dict, kdims=kdims)
         .collate()
@@ -1406,19 +1564,22 @@ def visualize_spatial_update(A_dict, C_dict, kdims=None, norm=True, datashading=
         .add_dimension("time", 0, 0)
     )
     if datashading:
-        hv_A = regrid(hv_A)
-        hv_Ab = regrid(hv_Ab)
         hv_C = datashade(hv_C)
+    else:
+        hv_C = Dynamic(hv_C)
     hv_A = hv_A.opts(frame_width=400, aspect=w / h, colorbar=True, cmap="viridis")
     hv_Ab = hv_Ab.opts(frame_width=400, aspect=w / h, colorbar=True, cmap="viridis")
     hv_C = hv_C.map(
         lambda cr: cr.opts(frame_width=500, frame_height=50),
         hv.RGB if datashading else hv.Curve,
     )
-    return hv.NdLayout(
-        {"pseudo-color": (hv_pts * hv_A), "binary": (hv_pts * hv_Ab)},
-        kdims="Spatial Matrix",
-    ).cols(1) + hv_C.relabel("Temporal Components")
+    return (
+        hv.NdLayout(
+            {"pseudo-color": (hv_pts * hv_A), "binary": (hv_pts * hv_Ab)},
+            kdims="Spatial Matrix",
+        ).cols(1)
+        + hv_C.relabel("Temporal Components")
+    )
 
 
 def visualize_temporal_update(
@@ -1526,13 +1687,11 @@ def visualize_temporal_update(
     hv_pul = {"Simulated Calcium": hvobjs[4], "Simulated Spike": hvobjs[5]}
     hv_unit = hv.HoloMap(hv_unit, kdims="traces").collate().overlay("traces")
     hv_pul = hv.HoloMap(hv_pul, kdims="traces").collate().overlay("traces")
-    hv_A = hvobjs[6]
+    hv_A = Dynamic(hvobjs[6])
     if datashading:
         hv_unit = datashade_ndcurve(hv_unit, "traces")
-        hv_A = regrid(hv_A)
     else:
         hv_unit = Dynamic(hv_unit)
-        hv_A = Dynamic(hv_A)
     hv_pul = Dynamic(hv_pul)
     hv_unit = hv_unit.map(
         lambda p: p.opts(plot=dict(frame_height=400, frame_width=1000))
