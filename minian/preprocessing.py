@@ -18,7 +18,7 @@ def remove_background(varr, method, wnd):
     selem = disk(wnd)
     res = xr.apply_ufunc(
         remove_background_perframe,
-        varr.chunk(dict(height=-1, width=-1)),
+        varr,
         input_core_dims=[["height", "width"]],
         output_core_dims=[["height", "width"]],
         vectorize=True,
