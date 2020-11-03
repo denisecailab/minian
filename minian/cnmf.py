@@ -935,7 +935,7 @@ def smooth_sig(sig, freq, method="fft", btype="low"):
         def filt_func(x):
             xfft = np.fft.rfft(x)
             xfft[zero_range] = 0
-            return np.fft.irfft(xfft)
+            return np.fft.irfft(xfft, len(x))
 
     elif method == "butter":
         but_b, but_a = butter(2, freq * 2, btype=btype, analog=False)

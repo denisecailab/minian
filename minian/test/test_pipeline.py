@@ -3,6 +3,8 @@ import pytest
 import itertools as itt
 import os
 import sys
+import ffmpeg
+import shutil
 
 import holoviews as hv
 import numpy as np
@@ -150,6 +152,15 @@ client = Client(cluster)
 
 varr = load_videos(dpath, **param_load_videos)
 
+def test_pre_check ():
+    dirpath = os.path.join(dpath, 'minian')
+    if os.path.exists(dirpath) and os.path.isdir(dirpath):
+        shutil.rmtree(dirpath)
+    minianvideo = os.path.join(dpath, 'minian_mc.mp4')
+    if os.path.exists(minianvideo):
+        os.remove(minianvideo)
+    assert os.path.exists(minianvideo) == False
+    
 def test_pipeline():
     global varr, subset_mc
     hv.output(size=output_size)
@@ -212,13 +223,16 @@ def test_pipeline():
     varr_ref = remove_background(varr_ref, **param_background_removal)
 
     varr_ref = save_minian(varr_ref.rename("varr_ref"), dpath=intpath, overwrite=True)
-
+    
     # Motion correction
     # def test_motion_correction():
     #     varr_ref = open_minian(intpath, "varr")
     shifts = estimate_shifts(varr_ref.sel(subset_mc), npart=34, **param_estimate_shift)
 
     shifts = save_minian(shifts.rename("shifts").chunk({"frame": 20}), **param_save_minian)
+
+    test_shifts = open_minian(os.path.join(dpath_fixture, 'minian'),'shifts')
+    assert shifts.all() == test_shifts.all(), "Test Fail: arrays are not the same";
 
     hv.output(size=output_size)
     if interactive:
@@ -265,6 +279,24 @@ def test_pipeline():
     vid_arr = xr.concat([varr_ref, Y_fm_chk], "width").chunk({"width": -1})
     write_video(vid_arr, "minian_mc.mp4", dpath)
 
+    # Retrieve minian_mc.mp4 file inside fixture folder, used for testing
+    fixture_probe = ffmpeg.probe(os.path.join(dpath_fixture, "minian_mc.mp4"))
+    fixture_video_streams = [stream for stream in fixture_probe["streams"] if stream["codec_type"] == "video"]
+        
+    # Check 'minian_mc.mp4' was written to folder, with same size as the one in fixture folder
+    assert os.path.exists(os.path.join(dpath, "minian_mc.mp4")) == True, "minian_mc.mp4 was written to local folder"
+    assert os.path.getsize(os.path.join(dpath, "minian_mc.mp4")) == os.path.getsize(os.path.join(dpath_fixture, "minian_mc.mp4")) 
+    
+    probe = ffmpeg.probe(os.path.join(dpath, "minian_mc.mp4"))
+    video_streams = [stream for stream in probe["streams"] if stream["codec_type"] == "video"]
+
+    # Compare newly created minian_mc.mp4 file to the one in fixture folder
+    assert video_streams[0]["width"] == fixture_video_streams[0]["width"]
+    assert video_streams[0]["height"] == fixture_video_streams[0]["height"]
+    assert video_streams[0]["codec_type"] == fixture_video_streams[0]["codec_type"]
+    assert video_streams[0]["duration_ts"] == fixture_video_streams[0]["duration_ts"]
+    assert video_streams[0]["codec_long_name"] == fixture_video_streams[0]["codec_long_name"]
+   
     # Initialization
     # def test_initialization():
     #     Y_hw_chk = open_minian(intpath, "Y_hw_chk")
@@ -272,9 +304,12 @@ def test_pipeline():
     max_proj = save_minian(
         Y_hw_chk.max("frame").rename("max_proj"), **param_save_minian
     ).compute()
+    
+    test_max_proj = open_minian(os.path.join(dpath_fixture, 'minian'),'max_proj')
+    assert max_proj.all() == test_max_proj.all(), "Test Fail: arrays are not the same";
 
     seeds = seeds_init(Y_fm_chk, **param_seeds_init)
-
+    
     hv.output(size=output_size)
     visualize_seeds(max_proj, seeds)
 
@@ -350,6 +385,7 @@ def test_pipeline():
     )
 
     A, C = unit_merge(A_init, C_init, **param_first_merge)
+
     A = save_minian(A.rename("A"), intpath, overwrite=True)
     C = save_minian(C.rename("C"), intpath, overwrite=True)
     C_chk = save_minian(
@@ -359,7 +395,7 @@ def test_pipeline():
     b, f = initbf(Y_fm_chk, A, C_chk)
     b = save_minian(b.rename("b"), intpath, overwrite=True)
     f = save_minian(f.rename("f"), intpath, overwrite=True)
-
+    
     im_opts = dict(
         frame_width=500,
         aspect=A.sizes["width"] / A.sizes["height"],
@@ -928,6 +964,27 @@ def test_pipeline():
         c0 = c0.assign_coords(unit_labels=("unit_id", cnmfviewer.unit_labels))
         b0 = b0.assign_coords(unit_labels=("unit_id", cnmfviewer.unit_labels))
 
+    test_A = open_minian(os.path.join(dpath_fixture, 'minian'),'A')
+    assert A.all() == test_A.all(), "Test Fail: A does not match results in fixture folder";
+
+    test_C = open_minian(os.path.join(dpath_fixture, 'minian'),'C')
+    assert C.all() == test_C.all(), "Test Fail: C does not match results in fixture folder";
+
+    test_S = open_minian(os.path.join(dpath_fixture, 'minian'),'S')
+    assert S.all() == test_S.all(), "Test Fail: S does not match results in fixture folder";
+
+    test_c0 = open_minian(os.path.join(dpath_fixture, 'minian'),'c0')
+    assert c0.all() == test_c0.all(), "Test Fail: c0 does not match results in fixture folder";
+    
+    test_b0 = open_minian(os.path.join(dpath_fixture, 'minian'),'b0')
+    assert b0.all() == test_b0.all(), "Test Fail: b0 does not match results in fixture folder";
+
+    test_b = open_minian(os.path.join(dpath_fixture, 'minian'),'b')
+    assert b.all() == test_b.all(), "Test Fail: b does not match results in fixture folder";
+    
+    test_f = open_minian(os.path.join(dpath_fixture, 'minian'),'f')
+    assert f.all() == test_f.all(), "Test Fail: f does not match results in fixture folder";
+    
     A = save_minian(A.rename("A"), **param_save_minian)
     C = save_minian(C.rename("C"), **param_save_minian)
     S = save_minian(S.rename("S"), **param_save_minian)
