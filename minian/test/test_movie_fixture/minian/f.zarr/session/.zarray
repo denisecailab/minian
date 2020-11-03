@@ -1,7 +1,7 @@
 {
     "chunks": [],
     "compressor": null,
-    "dtype": "<U6",
+    "dtype": "<U10",
     "fill_value": null,
     "filters": null,
     "order": "C",

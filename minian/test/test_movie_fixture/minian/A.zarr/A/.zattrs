@@ -1,8 +1,8 @@
 {
     "_ARRAY_DIMENSIONS": [
+        "unit_id",
         "height",
-        "width",
-        "unit_id"
+        "width"
     ],
-    "coordinates": "session animal session_id"
+    "coordinates": "session session_id unit_labels animal"
 }
