@@ -100,6 +100,17 @@ First add the conda-forge channel to your config: `conda config --add channels c
 Install conda build: `conda install conda-build`
 To create and upload the MiniAn package to Conda Forge install Conda Smithy: `conda install -y conda-smithy`
 Then build the package `conda-build recipes/minian`
+When everything is fine you can continue with changing the minian-feedstock. 
+First fork the minian-feedstock to your accounts and clone it to your computer `git clone git@github.com:<your-github-id>/minian-feedstock`
+Now you have a fork of the minian-feedstock on your computer. We use this fork to create pull requests against the conda-forge/minian-feedstock
+repository.
+
+steps for syncing your repo with the conda-forge/minian-feedstock repo 
+```
+git remote add upstream git@github.com:conda-forge/minian-feedstock.git
+git fetch upstream
+git rebase upstream/master
+```
 
 ## PyPi
 

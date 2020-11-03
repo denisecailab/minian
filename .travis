@@ -15,7 +15,7 @@ before_install:
   - . scripts/travis/before_install_nix_win.sh
 
 install:
-    # Install miniconda
+  # Install miniconda
   - . scripts/travis/install_nix_win.sh
 
   - source $MINICONDA_PATH/etc/profile.d/conda.sh;
