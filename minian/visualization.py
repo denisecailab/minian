@@ -42,8 +42,7 @@ from .utilities import rechunk_like
 
 
 class VArrayViewer:
-    """[summary]
-    """
+    """[summary]"""
 
     def __init__(
         self,
@@ -139,8 +138,7 @@ class VArrayViewer:
         self.pnplot = pn.panel(self.get_hvobj())
 
     def get_hvobj(self):
-        """[summary]
-        """
+        """[summary]"""
 
         def get_im_ovly(meta):
             """[summary]
@@ -281,8 +279,7 @@ class VArrayViewer:
         return wgts
 
     def _update_subs(self):
-        """[summary]
-        """
+        """[summary]"""
         self.ds_sub = self.ds.sel(**self.cur_metas)
         if self.sum_sub is not None:
             self.sum_sub = self.summary.sel(**self.cur_metas)
@@ -306,8 +303,7 @@ class VArrayViewer:
 
 
 class CNMFViewer:
-    """[summary]
-    """
+    """[summary]"""
 
     def __init__(self, minian=None, A=None, C=None, S=None, org=None, sortNN=True):
         """[summary]
@@ -399,8 +395,7 @@ class CNMFViewer:
         self.wgt_temp_comp = self._temp_comp_wgt()
 
     def update_subs(self):
-        """[summary]
-        """
+        """[summary]"""
         self.A_sub = self._A.sel(**self.metas)
         self.C_sub = self._C.sel(**self.metas)
         self.S_sub = self._S.sel(**self.metas)
@@ -789,13 +784,11 @@ class CNMFViewer:
         )
 
     def update_temp_comp_wgt(self):
-        """[summary]
-        """
+        """[summary]"""
         self.wgt_temp_comp.objects = self._temp_comp_wgt().objects
 
     def update_temp(self):
-        """[summary]
-        """
+        """[summary]"""
         self.update_temp_comp_wgt()
 
     def update_AC(self, usub=None):
@@ -916,8 +909,7 @@ class CNMFViewer:
         return pn.panel(Asum * cents + AC * ulab + mov)
 
     def update_spatial_all(self):
-        """[summary]
-        """
+        """[summary]"""
         self.spatial_all.objects = self._spatial_all().objects
 
 

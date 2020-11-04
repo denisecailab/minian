@@ -16,10 +16,8 @@ param_load_videos = {
 
 param_denoise = {"method": "median", "ksize": 7}
 
-param_background_removal = {
-    'method': 'tophat',
-    'wnd': 15
-}
+param_background_removal = {"method": "tophat", "wnd": 15}
+
 
 @pytest.fixture
 def varr():
@@ -42,13 +40,14 @@ def test_subset_part_video(varr):
     varr_ref = varr.sel(subset)
     assert varr_ref.all() == varr.all()
 
-    
+
 def test_remove_background(varr):
     varr_ref = denoise(varr, **param_denoise)
     varr_ref_remove = remove_background(varr_ref, **param_background_removal)
     assert (
         varr_ref.all() != varr_ref_remove.all()
     )  # when both are equal the denoise didn't do anything --> fail
+
 
 def test_denoise(varr):
     varr_ref = denoise(varr, **param_denoise)

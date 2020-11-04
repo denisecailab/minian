@@ -14,9 +14,8 @@ param_load_videos = {
     "downsample_strategy": "subset",
 }
 
-param_estimate_shift = {
-    'dim': 'frame',
-    'max_sh': 20}
+param_estimate_shift = {"dim": "frame", "max_sh": 20}
+
 
 @pytest.fixture
 def varr():
@@ -25,13 +24,10 @@ def varr():
 
 def test_estimate_shifts(varr):
     shifts = estimate_shifts(varr, **param_estimate_shift)
-    assert (
-        shifts.any() != varr.any()
-    )
-    
+    assert shifts.any() != varr.any()
+
+
 def test_apply_shifts(varr):
     shifts = estimate_shifts(varr, **param_estimate_shift)
     varr_ref = apply_shifts(varr, shifts)
-    assert (
-        varr_ref.any() != shifts.any()
-    ) #If not equal, shifts have changed
+    assert varr_ref.any() != shifts.any()  # If not equal, shifts have changed
