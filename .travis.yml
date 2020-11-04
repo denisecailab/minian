@@ -1,7 +1,7 @@
 language: bash
 
 os:
-  - windows
+  # - windows
   - linux
 
 branches:
