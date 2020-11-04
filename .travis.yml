@@ -40,7 +40,7 @@ script:
   - travis_fold end "Black-check code quality"
 
   - travis_fold start "pytest"
-  - travis_wait 60 pytest -v --color=yes --cov=minian --pyargs minian
+  - travis_wait 120 pytest -v --color=yes --cov=minian --pyargs minian
   - travis_fold end "pytest"
 
 after_success:
