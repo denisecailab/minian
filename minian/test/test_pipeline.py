@@ -332,7 +332,7 @@ def test_pipeline():
             hv_trace = hv.HoloMap(
                 {
                     "signal": (
-                        hv.Dataset(trace_smt    h_low)
+                        hv.Dataset(trace_smth_low)
                         .to(hv.Curve, kdims=["frame"])
                         .opts(frame_width=300, aspect=2, ylabel="Signal (A.U.)")
                     ),
