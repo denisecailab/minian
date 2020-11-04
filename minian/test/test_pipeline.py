@@ -285,7 +285,8 @@ def test_pipeline():
         
     # Check 'minian_mc.mp4' was written to folder, with same size as the one in fixture folder
     assert os.path.exists(os.path.join(dpath, "minian_mc.mp4")) == True, "minian_mc.mp4 was written to local folder"
-    assert os.path.getsize(os.path.join(dpath, "minian_mc.mp4")) == os.path.getsize(os.path.join(dpath_fixture, "minian_mc.mp4")) 
+    # Check if the sizes of the minian_mc.mp4 are +/- equal
+    assert abs(os.path.getsize(os.path.join(dpath, "minian_mc.mp4")) - os.path.getsize(os.path.join(dpath_fixture, "minian_mc.mp4"))) < 5000
     
     probe = ffmpeg.probe(os.path.join(dpath, "minian_mc.mp4"))
     video_streams = [stream for stream in probe["streams"] if stream["codec_type"] == "video"]
@@ -331,7 +332,7 @@ def test_pipeline():
             hv_trace = hv.HoloMap(
                 {
                     "signal": (
-                        hv.Dataset(trace_smth_low)
+                        hv.Dataset(trace_smt    h_low)
                         .to(hv.Curve, kdims=["frame"])
                         .opts(frame_width=300, aspect=2, ylabel="Signal (A.U.)")
                     ),
