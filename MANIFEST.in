@@ -1,0 +1,4 @@
+include requirements.txt
+include requirements/*
+include LICENSE
+include VERSION
