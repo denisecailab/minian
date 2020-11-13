@@ -42,7 +42,20 @@ from .utilities import rechunk_like
 
 
 class VArrayViewer:
-    """[summary]"""
+    """
+    This function creates an interactive figure where the data array is displayed as a movie. In the interactive figure, the user can draw an arbitrary box in the field of view and record this box as a mask using the "save mask" button 
+        Args:
+            varr (xarray.DataArray): xarray.DataArray a labeled 3-d array representation of the videos with dimensions: frame, height and width.
+            framerate (int, optional): Acquisition frame rate. Defaults to 30.
+            rerange (dict, optional): the range by which the array will be color-mapped. Useful if the movie is visually too dim. Defaults to None. which would use the full range of the array.
+            summary (list, optional): [operation to perform on the data]. Defaults to ["mean"].
+            meta_dims (list, optional): List of metadata dimensions that defines each array if a list of arrays is passed in as `varr`. Defaults to None.
+            datashading (bool, optional): Use datashading yes or no. Defaults to True (yes).
+            layout (bool, optional): If set the output image will be boxed. Defaults to False.
+
+        Raises:
+            NotImplementedError
+    """
 
     def __init__(
         self,
@@ -54,20 +67,6 @@ class VArrayViewer:
         datashading=True,
         layout=False,
     ):
-        """[summary]
-
-        Args:
-            varr ([type]): [description]
-            framerate (int, optional): [description]. Defaults to 30.
-            rerange ([type], optional): [description]. Defaults to None.
-            summary (list, optional): [description]. Defaults to ["mean"].
-            meta_dims ([type], optional): [description]. Defaults to None.
-            datashading (bool, optional): [description]. Defaults to True.
-            layout (bool, optional): [description]. Defaults to False.
-
-        Raises:
-            NotImplementedError: [description]
-        """
         if isinstance(varr, list):
             for iv, v in enumerate(varr):
                 varr[iv] = v.assign_coords(data_var=v.name)
@@ -138,25 +137,9 @@ class VArrayViewer:
         self.pnplot = pn.panel(self.get_hvobj())
 
     def get_hvobj(self):
-        """[summary]"""
 
         def get_im_ovly(meta):
-            """[summary]
-
-            Args:
-                meta ([type]): [description]
-            """
-
             def img(f, ds):
-                """[summary]
-
-                Args:
-                    f ([type]): [description]
-                    ds ([type]): [description]
-
-                Returns:
-                    [type]: [description]
-                """
                 return hv.Image(ds.sel(frame=f).compute(), kdims=["width", "height"])
 
             try:
@@ -231,19 +214,15 @@ class VArrayViewer:
         return hvobj
 
     def show(self):
-        """[summary]
+        """
+        Refreshes viewer content with the new frame
 
         Returns:
-            [type]: [description]
+            panel.layout.Column
         """
         return pn.layout.Column(self.widgets, self.pnplot)
 
     def _widgets(self):
-        """[summary]
-
-        Returns:
-            [type]: [description]
-        """
         w_play = pnwgt.Player(
             length=len(self._f), interval=10, value=0, width=650, height=90
         )
@@ -279,18 +258,12 @@ class VArrayViewer:
         return wgts
 
     def _update_subs(self):
-        """[summary]"""
         self.ds_sub = self.ds.sel(**self.cur_metas)
         if self.sum_sub is not None:
             self.sum_sub = self.summary.sel(**self.cur_metas)
         self.pnplot.objects[0].object = self.get_hvobj()
 
     def _update_box(self, click):
-        """[summary]
-
-        Args:
-            click ([type]): [description]
-        """
         box = self.str_box.data
         self.mask.update(
             {
@@ -303,19 +276,19 @@ class VArrayViewer:
 
 
 class CNMFViewer:
-    """[summary]"""
+    """
+    This class creates a figure to visualize the results of the CNMF
+
+    Args:
+        minian (string, optional): folder under which the actual code of minian (.py files) reside. Defaults to None.
+        A (xarray.DataArray, optional): spatial footprint of each unit. Defaults to None.
+        C (xarray.DataArray, optional): temporal activity of a unit, i.e. neuron. Defaults to None.
+        S (xarray.DataArray, optional): . Defaults to None.
+        org (xarray.DataArray, optional): raw video after pre-processing and motion correction. Defaults to None.
+        sortNN (bool, optional): whether to sort cells based on nearest neighbor, so that cells that are spatially together will likely be displayed together. Defaults to True.
+    """
 
     def __init__(self, minian=None, A=None, C=None, S=None, org=None, sortNN=True):
-        """[summary]
-
-        Args:
-            minian ([type], optional): [description]. Defaults to None.
-            A ([type], optional): [description]. Defaults to None.
-            C ([type], optional): [description]. Defaults to None.
-            S ([type], optional): [description]. Defaults to None.
-            org ([type], optional): [description]. Defaults to None.
-            sortNN (bool, optional): [description]. Defaults to True.
-        """
         self._A = A if A is not None else minian["A"]
         self._C = C if C is not None else minian["C"]
         self._S = S if S is not None else minian["S"]
@@ -395,7 +368,6 @@ class CNMFViewer:
         self.wgt_temp_comp = self._temp_comp_wgt()
 
     def update_subs(self):
-        """[summary]"""
         self.A_sub = self._A.sel(**self.metas)
         self.C_sub = self._C.sel(**self.metas)
         self.S_sub = self._S.sel(**self.metas)
@@ -428,11 +400,6 @@ class CNMFViewer:
             self.cents_sub = self.cents
 
     def compute_subs(self, clicks=None):
-        """[summary]
-
-        Args:
-            clicks ([type], optional): [description]. Defaults to None.
-        """
         self.A_sub = self.A_sub.compute()
         self.C_sub = self.C_sub.compute()
         self.S_sub = self.S_sub.compute()
@@ -441,33 +408,17 @@ class CNMFViewer:
         self.S_norm_sub = self.S_norm_sub.compute()
 
     def update_all(self, clicks=None):
-        """[summary]
-
-        Args:
-            clicks ([type], optional): [description]. Defaults to None.
-        """
         self.update_subs()
         self.strm_uid.event(index=[])
         self.strm_f.event(x=0)
         self.update_spatial_all()
 
     def callback_uid(self, index=None):
-        """[summary]
-
-        Args:
-            index ([type], optional): [description]. Defaults to None.
-        """
         self.update_temp()
         self.update_AC()
         self.update_usub_lab()
 
     def callback_f(self, f, y):
-        """[summary]
-
-        Args:
-            f ([type]): [description]
-            y ([type]): [description]
-        """
         if len(self._AC) > 0 and len(self._mov) > 0:
             fidx = np.abs(self._f - f).argmin()
             f = self._f[fidx]
@@ -487,21 +438,11 @@ class CNMFViewer:
             self.pipmov.send([])
 
     def callback_usub(self, usub=None):
-        """[summary]
-
-        Args:
-            usub ([type], optional): [description]. Defaults to None.
-        """
         self.update_temp_comp_sub(usub)
         self.update_AC(usub)
         self.update_usub_lab(usub)
 
     def _meta_wgt(self):
-        """[summary]
-
-        Returns:
-            [type]: [description]
-        """
         wgt_meta = {
             d: pnwgt.Select(name=d, options=v, height=45, width=120)
             for d, v in self.meta_dicts.items()
@@ -530,11 +471,6 @@ class CNMFViewer:
         )
 
     def show(self):
-        """[summary]
-
-        Returns:
-            [type]: [description]
-        """
         return pn.layout.Column(
             self.spatial_all,
             pn.layout.Row(
@@ -548,14 +484,6 @@ class CNMFViewer:
         )
 
     def _temp_comp_sub(self, usub=None):
-        """[summary]
-
-        Args:
-            usub ([type], optional): [description]. Defaults to None.
-
-        Returns:
-            [type]: [description]
-        """
         if usub is None:
             usub = self.strm_usub.usub
         if self._normalize:
@@ -606,29 +534,14 @@ class CNMFViewer:
         return pn.panel(temp_comp)
 
     def update_temp_comp_sub(self, usub=None):
-        """[summary]
-
-        Args:
-            usub ([type], optional): [description]. Defaults to None.
-        """
         self.temp_comp_sub.object = self._temp_comp_sub(usub).object
         self.wgt_man.objects = self._man_wgt().objects
 
     def update_norm(self, norm):
-        """[summary]
-
-        Args:
-            norm ([type]): [description]
-        """
         self._normalize = norm.new
         self.update_temp_comp_sub()
 
     def _temp_comp_wgt(self):
-        """[summary]
-
-        Returns:
-            [type]: [description]
-        """
         if self.strm_uid.index:
             cur_idxs = self.strm_uid.index
         else:
@@ -714,11 +627,6 @@ class CNMFViewer:
         return pn.layout.Column(wgt_groups, wgt_play)
 
     def _man_wgt(self):
-        """[summary]
-
-        Returns:
-            [type]: [description]
-        """
         usub = self.strm_usub.usub
         usub.sort()
         usub.reverse()
@@ -784,19 +692,12 @@ class CNMFViewer:
         )
 
     def update_temp_comp_wgt(self):
-        """[summary]"""
         self.wgt_temp_comp.objects = self._temp_comp_wgt().objects
 
     def update_temp(self):
-        """[summary]"""
         self.update_temp_comp_wgt()
 
     def update_AC(self, usub=None):
-        """[summary]
-
-        Args:
-            usub ([type], optional): [description]. Defaults to None.
-        """
         if usub is None:
             usub = self.strm_usub.usub
         if usub:
@@ -833,11 +734,6 @@ class CNMFViewer:
             self.strm_f.event(x=0)
 
     def update_usub_lab(self, usub=None):
-        """[summary]
-
-        Args:
-            usub ([type], optional): [description]. Defaults to None.
-        """
         if usub is None:
             usub = self.strm_usub.usub
         if usub:
@@ -846,11 +742,6 @@ class CNMFViewer:
             self.pipusub.send([])
 
     def _spatial_all_wgt(self):
-        """[summary]
-
-        Returns:
-            [type]: [description]
-        """
         wgt_useAC = pnwgt.Checkbox(
             name="UseAC", value=self._useAC, width=120, height=15
         )
@@ -863,11 +754,6 @@ class CNMFViewer:
         return pn.layout.WidgetBox(wgt_useAC, width=150)
 
     def _spatial_all(self):
-        """[summary]
-
-        Returns:
-            [type]: [description]
-        """
         metas = self.metas
         Asum = hv.Image(self.Asum.sel(**metas), ["width", "height"]).opts(
             plot=dict(frame_height=len(self._h), frame_width=len(self._w)),
@@ -909,7 +795,6 @@ class CNMFViewer:
         return pn.panel(Asum * cents + AC * ulab + mov)
 
     def update_spatial_all(self):
-        """[summary]"""
         self.spatial_all.objects = self._spatial_all().objects
 
 
@@ -1073,16 +958,6 @@ class AlignViewer:
 
 
 def write_vid_blk(arr, vpath, options):
-    """[summary]
-
-    Args:
-        arr ([type]): [description]
-        vpath ([type]): [description]
-        options ([type]): [description]
-
-    Returns:
-        [type]: [description]
-    """
     uid = uuid4()
     vname = "{}.mp4".format(uid)
     fpath = os.path.join(vpath, vname)
@@ -1100,16 +975,17 @@ def write_vid_blk(arr, vpath, options):
 def write_video(
     arr, vname=None, vpath=".", norm=True, options={"crf": "18", "preset": "ultrafast"}
 ):
-    """[summary]
+    """
+    This function writes video to disk
 
     Args:
-        arr ([type]): [description]
-        vname ([type], optional): [description]. Defaults to None.
-        vpath (str, optional): [description]. Defaults to ".".
-        options (dict, optional): [description]. Defaults to {'crf': '18', 'preset': 'ultrafast'}.
+        arr (xarray.DataArray): data
+        vname (str, optional): name of the video. Defaults to None.
+        vpath (str, optional): path to the target location. Defaults to ".".
+        options (dict, optional): saving options. Defaults to {'crf': '18', 'preset': 'ultrafast'}.
 
     Returns:
-        [type]: [description]
+        string: absolute path to the file
     """
     if not vname:
         vname = "{}.mp4".format(uuid4())
@@ -1158,20 +1034,18 @@ def generate_videos(
     vname="minian.mp4",
     options={"crf": "18", "preset": "ultrafast"},
 ):
-    """[summary]
-
+    """
+    This function outputs a video that can help us quickly visualize the results of the CNMF. The resulting video will have six quadrants: Top Left: spatial footprints of all cells (projection of the sum); Top Middle: if UseAC, shows the dot product of A (spatial footprint) and C (temporal activities) matrix of selected neurons, if UseAC is False shows the spatial footprints of selected neurons (a sum projection); Top Right shows the raw video after pre-processing and motion correction, which is the movie that's fed in as org to CNMFViewer; Bottom Left Controller Panel has several features: Load Data (loads the data into memory), Refresh (refreshes the data when you switch to a new group of units), UseAC check box (controls the option of the top middle panel), Normalize (normalizes the bottom middle trace and spike plot for each unit to itself), ShowC (shows calcium traces for each unit across time in the bottom middle plot), ShowS (shows spikes for each unit across time in the bottom middle plot), Previous and Next Group buttons (allows to go backward/forward to another group of units), Video Play Panel (allows to play the top middle and right panel in real time); Bottom Middle Panel contains plots of units along the time axis; Bottom Right contains a labeling tool for the user to manually exclude unwanted units by labelling them (they will be demarcated with a -1).
     Args:
-        varr ([type]): [description]
-        Y ([type]): [description]
-        A ([type]): [description]
-        C ([type]): [description]
-        AC ([type]): [description]
-        vpath (str, optional): [description]. Defaults to ".".
-        vname (str, optional): [description]. Defaults to "minian.mp4".
-        options (dict, optional): [description]. Defaults to {'crf': '18', 'preset': 'ultrafast'}.
+        minian (xarray.DataArray): input data
+        varr (xarray.DataArray): input data
+        vpath (str, optional): path to the video. Defaults to ".".
+        vname (str, optional): video name. Defaults to "minian.mp4".
+        scale (str, optional): scale dimensions. Defaults to "auto".
+        options (dict, optional): export options. Defaults to {'crf': '18', 'preset': 'ultrafast'}.
 
     Returns:
-        [type]: [description]
+        string: absolute path to the generated video
     """
     if AC is None:
         print("generating traces")
@@ -1200,16 +1074,6 @@ def generate_videos(
 
 
 def datashade_ndcurve(ovly, kdim=None, spread=False):
-    """[summary]
-
-    Args:
-        ovly ([type]): [description]
-        kdim ([type], optional): [description]. Defaults to None.
-        spread (bool, optional): [description]. Defaults to False.
-
-    Returns:
-        [type]: [description]
-    """
     if not kdim:
         kdim = ovly.kdims[0].name
     var = np.unique(ovly.dimension_values(kdim)).tolist()
@@ -1233,15 +1097,6 @@ def datashade_ndcurve(ovly, kdim=None, spread=False):
 
 
 def construct_G(g, T):
-    """[summary]
-
-    Args:
-        g ([type]): [description]
-        T ([type]): [description]
-
-    Returns:
-        [type]: [description]
-    """
     cur_c, cur_r = np.zeros(T), np.zeros(T)
     cur_c[0] = 1
     cur_r[0] = 1
@@ -1250,14 +1105,6 @@ def construct_G(g, T):
 
 
 def normalize(a):
-    """[summary]
-
-    Args:
-        a ([type]): [description]
-
-    Returns:
-        [type]: [description]
-    """
     return np.interp(a, (np.nanmin(a), np.nanmax(a)), (0, +1))
 
 
@@ -1272,15 +1119,6 @@ def norm(a):
 
 
 def convolve_G(s, g):
-    """[summary]
-
-    Args:
-        s ([type]): [description]
-        g ([type]): [description]
-
-    Returns:
-        [type]: [description]
-    """
     G = construct_G(g, len(s))
     try:
         c = np.linalg.inv(G).dot(s)
@@ -1290,15 +1128,6 @@ def convolve_G(s, g):
 
 
 def construct_pulse_response(g, length=500):
-    """[summary]
-
-    Args:
-        g ([type]): [description]
-        length (int, optional): [description]. Defaults to 500.
-
-    Returns:
-        [type]: [description]
-    """
     s = np.zeros(length)
     s[np.arange(0, length, 500)] = 1
     c = convolve_G(s, g)
@@ -1306,22 +1135,7 @@ def construct_pulse_response(g, length=500):
 
 
 def centroid(A, verbose=False):
-    """[summary]
-
-    Args:
-        A ([type]): [description]
-        verbose (bool, optional): [description]. Defaults to False.
-    """
-
     def rel_cent(im):
-        """[summary]
-
-        Args:
-            im ([type]): [description]
-
-        Returns:
-            [type]: [description]
-        """
         im_nan = np.isnan(im)
         if im_nan.all():
             return np.array([np.nan, np.nan])
@@ -1364,15 +1178,16 @@ def centroid(A, verbose=False):
 
 
 def visualize_preprocess(fm, fn=None, include_org=True, **kwargs):
-    """[summary]
+    """
+    This function allows the visualization of preprocessed data
 
     Args:
-        fm ([type]): [description]
-        fn ([type], optional): [description]. Defaults to None.
-        include_org (bool, optional): [description]. Defaults to True.
+        fm (xarray.DataArray): input data
+        fn (tuple, optional): the function to apply to each frame (i.e. the function whose parameters needs exploration). Defaults to None.
+        include_org (bool, optional): Whether to include the original frame. Defaults to True.
 
     Returns:
-        [type]: [description]
+        image
     """
     fh, fw = fm.sizes["height"], fm.sizes["width"]
     asp = fw / fh
@@ -1394,14 +1209,6 @@ def visualize_preprocess(fm, fn=None, include_org=True, **kwargs):
     }
 
     def _vis(f):
-        """[summary]
-
-        Args:
-            f ([type]): [description]
-
-        Returns:
-            [type]: [description]
-        """
         im = hv.Image(f, kdims=["width", "height"]).opts(**opts_im)
         cnt = hv.operation.contours(im).opts(**opts_cnt)
         return im, cnt
@@ -1442,15 +1249,17 @@ def visualize_preprocess(fm, fn=None, include_org=True, **kwargs):
 
 
 def visualize_seeds(max_proj, seeds, mask=None):
-    """[summary]
+    """
+    This function allows the overlay of the seeds’ centroids over the maximum intensity projection
 
     Args:
-        max_proj ([type]): [description]
-        seeds ([type]): [description]
-        mask ([type], optional): [description]. Defaults to None.
+        max_proj (array): maximum intensity projection
+        seeds (dict): seeds
+        mask (array, optional): spatial mask of the Region of Interest. Defaults to None.
+        datashade (bool, optional): Use datashading yes o no. Defaults to False (no).
 
     Returns:
-        [type]: [description]
+        holoviews.core.overlay.Overlay: visualization object
     """
     h, w = max_proj.sizes["height"], max_proj.sizes["width"]
     asp = w / h
@@ -1477,12 +1286,16 @@ def visualize_seeds(max_proj, seeds, mask=None):
 
 
 def visualize_gmm_fit(values, gmm, bins):
-    """[summary]
+    """
+    This function allows the visualization of the Gaussian mixture model fit
 
     Args:
-        values ([type]): [description]
-        gmm ([type]): [description]
-        bins ([type]): [description]
+        values (array): peak to noise ratio
+        gmm (dict): gaussian model fit
+        bins (tuple): number of bins
+
+    Returns:
+        holoviews.core.overlay.Overlay: visualization object
     """
 
     def gaussian(x, mu, sig):
@@ -1502,17 +1315,18 @@ def visualize_gmm_fit(values, gmm, bins):
 
 
 def visualize_spatial_update(A_dict, C_dict, kdims=None, norm=True, datashading=True):
-    """[summary]
+    """
+    This function launches the visualizer to explore the parameters of the spatial noise estimation. This step precedes the CNMF and is used to estimate the noise introduced by motion. 
 
     Args:
-        A_dict ([type]): [description]
-        C_dict ([type]): [description]
-        kdims ([type], optional): [description]. Defaults to None.
-        norm (bool, optional): [description]. Defaults to True.
-        datashading (bool, optional): [description]. Defaults to True.
+        A_dict (dict): input spatial footprints
+        C_dict (dict): temporal activity of each unit
+        kdims (tuple, optional): dimension of the footprints (e.g. 'width', 'height'). Defaults to None.
+        norm (bool, optional): normalization (True/False). Defaults to True.
+        datashading (bool, optional): Use datashading yes or no. Defaults to True (yes).
 
     Returns:
-        [type]: [description]
+        holoviews.core.layout.Layout
     """
     if not kdims:
         A_dict = dict(dummy=A_dict)
@@ -1585,21 +1399,21 @@ def visualize_temporal_update(
     norm=True,
     datashading=True,
 ):
-    """[summary]
+    """This function launches the visualizer for the exploration of the fluorescence time series
 
     Args:
-        YA_dict ([type]): [description]
-        C_dict ([type]): [description]
-        S_dict ([type]): [description]
+        YA_dict (dict): spatial footprints
+        C_dict (dict): temporal activity of each unit
+        S_dict ([type]): [the dictionary containing the resulting `S` from runs with different parameters]
         g_dict ([type]): [description]
         sig_dict ([type]): [description]
         A_dict ([type]): [description]
-        kdims ([type], optional): [description]. Defaults to None.
-        norm (bool, optional): [description]. Defaults to True.
-        datashading (bool, optional): [description]. Defaults to True.
+        kdims (list, optional): [description]. Defaults to None.
+        norm (bool, optional): Normalize yes or no. Defaults to True (yes).
+        datashading (bool, optional): Use datashading yes or no. Defaults to True (yes).
 
     Returns:
-        [type]: [description]
+        holoviews.core.layout.Layout
     """
     inputs = [YA_dict, C_dict, S_dict, sig_dict, g_dict]
     if not kdims:
@@ -1704,14 +1518,6 @@ def visualize_temporal_update(
 
 
 def NNsort(cents):
-    """[summary]
-
-    Args:
-        cents ([type]): [description]
-
-    Returns:
-        [type]: [description]
-    """
     cents_hw = cents[["height", "width"]]
     kdtree = cKDTree(cents_hw)
     idu_start = cents_hw.sum(axis="columns").idxmin()
