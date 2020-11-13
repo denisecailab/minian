@@ -31,8 +31,7 @@ def load_videos(
     downsample_strategy="subset",
     post_process=None,
 ):
-    """Load videos from a folder.
-
+    """
     Load videos from the folder specified in `vpath` and according to the regex
     `pattern`, then concatenate them together across time and return a
     `xarray.DataArray` representation of the concatenated videos. The default
@@ -54,7 +53,6 @@ def load_videos(
         The labeled 3-d array representation of the videos with dimensions:
         ``frame``, ``height`` and ``width``. Returns ``None`` if no data was
         found in the specified folder.
-
     """
     vpath = os.path.normpath(vpath)
     ssname = os.path.basename(vpath)
@@ -108,14 +106,6 @@ def load_videos(
 
 
 def load_tif_lazy(fname):
-    """[summary]
-
-    Args:
-        fname ([type]): [description]
-
-    Returns:
-        [type]: [description]
-    """
     data = TiffFile(fname)
     f = len(data.pages)
 
@@ -131,27 +121,10 @@ def load_tif_lazy(fname):
 
 
 def load_tif_perframe(fname, fid):
-    """[summary]
-
-    Args:
-        fname ([type]): [description]
-        fid ([type]): [description]
-
-    Returns:
-        [type]: [description]
-    """
     return imread(fname, key=fid)
 
 
 def load_avi_lazy(fname):
-    """[summary]
-
-    Args:
-        fname ([type]): [description]
-
-    Returns:
-        [type]: [description]
-    """
     cap = cv2.VideoCapture(fname)
     f = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     fmread = da.delayed(load_avi_perframe)
@@ -165,15 +138,6 @@ def load_avi_lazy(fname):
 
 
 def load_avi_perframe(fname, fid):
-    """[summary]
-
-    Args:
-        fname ([type]): [description]
-        fid ([type]): [description]
-
-    Returns:
-        [type]: [description]
-    """
     cap = cv2.VideoCapture(fname)
     h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -187,6 +151,18 @@ def load_avi_perframe(fname, fid):
 
 
 def open_minian(dpath, var_name, return_dict=False):
+    """
+    Opens a file previously saved in minian handling the proper data format and chunks
+
+    Args:
+        dpath ([string]): contains the normalized absolutized version of the pathname path,which is the path to minian folder;
+        Fname ([string]): points to the parameters and metadata file;
+        Backend ([string]):  specify the format for data storage, defaults to “netcdf”
+        Post_process (function): post processing function, parameters: dataset (xarray.DataArray), mpath (string, path to the raw backend files)  
+
+    Returns:
+        xarray.DataArray: [loaded data]
+    """
     dpath = os.path.normpath(dpath)
     fp = os.path.join(dpath, var_name + ".zarr")
     return xr.open_zarr(fp)[var_name]
@@ -201,22 +177,6 @@ def open_minian_mf(
     exclude=True,
     **kwargs
 ):
-    """[summary]
-
-    Args:
-        dpath ([type]): [description]
-        index_dims ([type]): [description]
-        result_format (str, optional): [description]. Defaults to 'xarray'.
-        pattern (regexp, optional): [description]. Defaults to r'minian\.[0-9]+$'.
-        sub_dirs (list, optional): [description]. Defaults to [].
-        exclude (bool, optional): [description]. Defaults to True.
-
-    Raises:
-        NotImplementedError: [description]
-
-    Returns:
-        [type]: [description]
-    """
     minian_dict = dict()
     for nextdir, dirlist, filelist in os.walk(dpath, topdown=False):
         nextdir = os.path.abspath(nextdir)
@@ -254,21 +214,21 @@ def open_minian_mf(
 def save_minian(
     var, dpath, meta_dict=None, overwrite=False, chunks=None, mem_limit="200MB"
 ):
-    """[summary]
-
+    """
+    Saves the data (var) in the format specified by the backend variable, in the location specified by dpath under the name ‘minian’, if overwrite True
     Args:
-        var ([type]): [description]
-        dpath ([type]): [description]
-        fname (str, optional): [description]. Defaults to 'minian'.
-        backend (str, optional): [description]. Defaults to 'netcdf'.
-        meta_dict ([type], optional): [description]. Defaults to None.
-        overwrite (bool, optional): [description]. Defaults to False.
+        var (xarray.DataArray): data to be saved
+        dpath (str): path where to save the data
+        fname (str, optional): output file name. Defaults to 'minian'.
+        backend (str, optional): file storage format. Defaults to 'netcdf'.
+        meta_dict (dict, optional): metadata for example {‘animal’: -3, ‘session’: -2, ‘session_id’: -1}. Key value pair. Defaults to None.
+        overwrite (bool, optional): if true overwrites a file in the same location with the same name. Defaults to False.
 
     Raises:
-        NotImplementedError: [description]
+        NotImplementedError
 
     Returns:
-        [type]: [description]
+        xarray.DataArray: the saved var xarray.DataArray
     """
     dpath = os.path.normpath(dpath)
     Path(dpath).mkdir(parents=True, exist_ok=True)
@@ -309,18 +269,6 @@ def save_minian(
 
 
 def xrconcat_recursive(var, dims):
-    """[summary]
-
-    Args:
-        var ([type]): [description]
-        dims ([type]): [description]
-
-    Raises:
-        NotImplementedError: [description]
-
-    Returns:
-        [type]: [description]
-    """
     if len(dims) > 1:
         if type(var) is dict:
             var_dict = var
@@ -347,17 +295,6 @@ def xrconcat_recursive(var, dims):
 
 
 def update_meta(dpath, pattern=r"^minian\.nc$", meta_dict=None, backend="netcdf"):
-    """[summary]
-
-    Args:
-        dpath ([type]): [description]
-        pattern (regexp, optional): [description]. Defaults to r'^minian\.nc$'.
-        meta_dict ([type], optional): [description]. Defaults to None.
-        backend (str, optional): [description]. Defaults to 'netcdf'.
-
-    Raises:
-        NotImplementedError: [description]
-    """
     for dirpath, dirnames, fnames in os.walk(dpath):
         if backend == "netcdf":
             fnames = filter(lambda fn: re.search(pattern, fn), fnames)
@@ -385,26 +322,19 @@ def update_meta(dpath, pattern=r"^minian\.nc$", meta_dict=None, backend="netcdf"
 
 
 def get_chk(arr):
-    """[summary]
-
-    Args:
-        arr ([type]): [description]
-
-    Returns:
-        [type]: [description]
-    """
     return {d: c for d, c in zip(arr.dims, arr.chunks)}
 
 
 def rechunk_like(x, y):
-    """[summary]
+    """
+    Resizes chunks based on the new input dimensions
 
     Args:
-        x ([type]): [description]
-        y ([type]): [description]
+        x (array): the array to be rechunked. i.e. destination of rechunking
+        y (array): the array where chunk information are extracted. i.e. the source of rechunking
 
     Returns:
-        [type]: [description]
+        dict: data with new dimensions as specified in the input
     """
     try:
         dst_chk = get_chk(y)
@@ -416,17 +346,18 @@ def rechunk_like(x, y):
 
 
 def get_optimal_chk(ref, arr=None, dim_grp=None, ncores="auto", mem_limit="auto"):
-    """[summary]
+    """
+    Estimates the chunk of video (i.e. video sizes and number of frames) that optimizes computer memory use when the script is run parallel over multiple cores.
 
     Args:
-        ref ([type]): [description]
-        arr ([type], optional): [description]. Defaults to None.
-        dim_grp ([type], optional): [description]. Defaults to None.
-        ncores (str, optional): [description]. Defaults to 'auto'.
-        mem_limit (str, optional): [description]. Defaults to 'auto'.
+        ref (xarray.DataArray): xarray.DataArray a labeled 3-d array representation of the videos with dimensions: frame, height and width.
+        arr (xarray.DataArray): xarray.DataArray a labeled 3-d array representation of the videos with dimensions: frame, height and width. Defaults to None.
+        dim_grp (array, optional): provide labels for the dimension of the data. Defaults to None.
+        ncores (str, optional): number of CPU cores. Defaults to 'auto'.
+        mem_limit (str, optional): max available memory that can be given to a process without the system going into swap. Defaults to 'auto'.
 
     Returns:
-        [type]: [description]
+        dict: sizes of the chunks that optimize memory usage in parallel computing the key is the dimension, the value is the max chunk size
     """
     if arr is None:
         arr = ref

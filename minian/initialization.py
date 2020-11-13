@@ -31,19 +31,20 @@ def seeds_init(
     max_wnd=10,
     diff_thres=2,
 ):
-    """[summary]
+    """
+    This function computes the maximum intensity projection of a subset of frames and finds the local maxima. The set of local maxima constitutes  an overly-complete set of local maxima, which are the putative locations of cells, which we call seeds.
 
     Args:
-        varr ([type]): [description]
-        wnd_size (int, optional): [description]. Defaults to 500.
-        method (str, optional): [description]. Defaults to 'rolling'.
-        stp_size (int, optional): [description]. Defaults to 200.
-        nchunk (int, optional): [description]. Defaults to 100.
-        max_wnd (int, optional): [description]. Defaults to 10.
-        diff_thres (int, optional): [description]. Defaults to 2.
+        varr (xarray.DataArray): input data
+        wnd_size (int, optional): size of the temporal window in which the maximum intensity projection will be computed, i.e. number of frames. Defaults to 500.
+        method (str, optional): proceeds through the data in temporal order, alternative is randomly. Defaults to 'rolling'.
+        stp_size (int, optional): only if the method is rolling, defines the step size. Defaults to 200.
+        nchunk (int, optional): only if the method is random, defines the number of chunks randomly picked. Defaults to 100.
+        max_wnd (int, optional): max size (in pixel) of the diameter for cell detection. Defaults to 10.
+        diff_thres (int, optional): minimal fluorescence difference of a seed across frames. Defaults to 2.
 
     Returns:
-        [type]: [description]
+        pandas.core.frame.DataFrame: matrix of seeds
     """
     int_path = os.environ["MINIAN_INTERMEDIATE"]
     print("constructing chunks")
@@ -85,30 +86,10 @@ def seeds_init(
 
 
 def max_proj_frame(varr, idx):
-    """[summary]
-
-    Args:
-        varr ([type]): [description]
-        idx ([type]): [description]
-
-    Returns:
-        [type]: [description]
-    """
     return varr.isel(frame=idx).max("frame")
 
 
 def local_max_roll(fm, k0, k1, diff):
-    """[summary]
-
-    Args:
-        fm ([type]): [description]
-        k0 ([type]): [description]
-        k1 ([type]): [description]
-        diff ([type]): [description]
-
-    Returns:
-        [type]: [description]
-    """
     max_ls = []
     for ksize in range(k0, k1):
         selem = disk(ksize)
@@ -128,16 +109,6 @@ def local_max_roll(fm, k0, k1, diff):
 
 
 def local_max(fm, k, diff=0):
-    """[summary]
-
-    Args:
-        fm ([type]): [description]
-        k ([type]): [description]
-        diff (int, optional): [description]. Defaults to 0.
-
-    Returns:
-        [type]: [description]
-    """
     fm_max = cv2.dilate(fm, k)
     fm_min = cv2.erode(fm, k)
     fm_diff = ((fm_max - fm_min) > diff).astype(np.uint8)
@@ -148,18 +119,19 @@ def local_max(fm, k, diff=0):
 def gmm_refine(
     varr, seeds, q=(0.1, 99.9), n_components=2, valid_components=1, mean_mask=True
 ):
-    """[summary]
+    """
+    Estimate the initial parameters to estimate the distribution of fluorescence intensity using Gaussian mixture model
 
     Args:
-        varr ([type]): [description]
-        seeds ([type]): [description]
-        q (tuple, optional): [description]. Defaults to (0.1, 99.9).
-        n_components (int, optional): [description]. Defaults to 2.
-        valid_components (int, optional): [description]. Defaults to 1.
-        mean_mask (bool, optional): [description]. Defaults to True.
+        varr (xarray.DataArray): input data
+        seeds (dict): seeds value
+        q (tuple, optional): the quantile of signal of each seed, from which the peak-to-peak values are calculated. i.e., a value of (0,1) will be equivalent to defining the peak-to-peak value as the difference between minimum and maximum. However it’s usually useful to not use the absolute minimum and maximum so that the algorithm is more resilient to outliers. Defaults to (0.1, 99.9).
+        n_components (int, optional): number of mixture components. Defaults to 2.
+        valid_components (int, optional): number of mixture components to be considered signal. Defaults to 1.
+        mean_mask (bool, optional): whether to apply additional criteria where a seed is valid only if its peak-to-peak value exceeds the mean of the lowest gaussian distribution, only useful in corner cases where the distribution of the gaussian heavily overlap. Defaults to True.
 
     Returns:
-        [type]: [description]
+        [dict]: [seeds, signal range]
     """
     print("selecting seeds")
     varr_sub = varr.sel(spatial=[tuple(hw) for hw in seeds[["height", "width"]].values])
@@ -196,18 +168,20 @@ def gmm_refine(
 
 
 def pnr_refine(varr, seeds, noise_freq=0.25, thres=1.5, q=(0.1, 99.9), med_wnd=None):
-    """[summary]
+    """
+    "peak-to-noise ratio" refine. This function computes the ratio between noise range and the signal range, where signal is defined as the lower half of the frequency range, while noise is the higher half of the frequency range.
 
     Args:
-        varr ([type]): [description]
-        seeds ([type]): [description]
-        noise_freq (float, optional): [description]. Defaults to 0.25.
-        thres (float, optional): [description]. Defaults to 1.5.
-        q (tuple, optional): [description]. Defaults to (0.1, 99.9).
-        med_wnd ([type], optional): [description]. Defaults to None.
+        varr (xarray.DataArray): data array
+        seeds (pandas.core.frame.DataFrame): seeds
+        noise_freq (float, optional): frequency of the noise. Defaults to 0.25.
+        thres (float, optional): threshold. Defaults to 1.5.
+        q (tuple, optional): Defaults to (0.1, 99.9).
+        med_wnd (type, optional): if specified, a median filter with the set window size is applied to the signal from each seeds and subtracted from signal. Useful if there’s a shift in baseline fluorescence that produce lots of false positive seeds. Defaults to None.
 
     Returns:
-        [type]: [description]
+        [tuple pandas.core.frame.DataFrame, scikit-learn gmm object]: seeds, peak to noise ratio and gaussian mixture model.
+
     """
     print("selecting seeds")
     varr_sub = xr.concat(
@@ -259,8 +233,8 @@ def pnr_perseed(a, freq, q):
     ptp = ptp_q(a, q)
     but_b, but_a = butter(2, freq, btype="high", analog=False)
     a = lfilter(but_b, but_a, a).real
-    ptp_noise = ptp_q(a, q)
     return ptp / ptp_noise
+    ptp_noise = ptp_q(a, q)
 
 
 def med_baseline(a, wnd):
@@ -270,16 +244,6 @@ def med_baseline(a, wnd):
 
 
 def intensity_refine(varr, seeds, thres_mul=2):
-    """[summary]
-
-    Args:
-        varr ([type]): [description]
-        seeds ([type]): [description]
-        thres_mul (int, optional): [description]. Defaults to 2.
-
-    Returns:
-        [type]: [description]
-    """
     try:
         fm_max = varr.max("frame")
     except ValueError:
@@ -299,15 +263,16 @@ def intensity_refine(varr, seeds, thres_mul=2):
 
 
 def ks_refine(varr, seeds, sig=0.01):
-    """[summary]
+    """
+    This function refines the seeds using Kolmogorov-Smirnov (KS) test. This step is based on the assumption that the seeds’ fluorescence across frames notionally follows a bimodal distribution: with a large normal distribution representing baseline activity, and a second peak representing when the seed/cell is active. KS allows to discard the seeds where the null-hypothesis (i.e. the fluorescence intensity is simply a normal distribution) is rejected ad alpha = 0.05.
 
     Args:
-        varr ([type]): [description]
-        seeds ([type]): [description]
-        sig (float, optional): [description]. Defaults to 0.01.
+        varr (xarray.DataArray): flattened version of the video
+        seeds (dict): seeds
+        sig (float, optional): alpha. Defaults to 0.05.
 
     Returns:
-        [type]: [description]
+        dict: seeds
     """
     print("selecting seeds")
     varr_sub = xr.concat(
@@ -335,17 +300,18 @@ def ks_perseed(a):
 
 
 def seeds_merge(varr, max_proj, seeds, thres_dist=5, thres_corr=0.6, noise_freq=None):
-    """[summary]
+    """
+    This function merges neighboring seeds which potentially come from the same cell, based upon their spatial distance and temporal correlation of their activity
 
     Args:
-        varr ([type]): [description]
-        seeds ([type]): [description]
-        thres_dist (int, optional): [description]. Defaults to 5.
-        thres_corr (float, optional): [description]. Defaults to 0.6.
-        noise_freq (str, optional): [description]. Defaults to None.
+        varr (xarray.DataArray): input data
+        seeds (dict): seeds
+        thres_dist (int, optional): spatial distance threshold. Defaults to 5.
+        thres_corr (float, optional): activity correlation threshold. Defaults to 0.6.
+        noise_freq (str, optional): noise frequency. Defaults to 'envelope'.
 
     Returns:
-        [type]: [description]
+        dict: seeds
     """
     if noise_freq:
         varr = smooth_sig(varr, noise_freq)

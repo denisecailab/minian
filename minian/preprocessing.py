@@ -5,15 +5,16 @@ from skimage.morphology import disk
 
 
 def remove_background(varr, method, wnd):
-    """[summary]
+    """
+    Remove background from a video.
 
     Args:
-        varr ([type]): [description]
-        method ([type]): [description]
-        wnd ([type]): [description]
+        varr (xarray.DataArray): xarray.DataArray a labeled 3-d array representation of the videos with dimensions: frame, height and width.
+        method (string): ‘uniform‘ or ‘tophat’
+        wnd (int): size of the disk shaped kernel to use for filtering (in pixels)
 
     Returns:
-        [type]: [description]
+        xarray.DataArray: xarray.DataArray a labeled 3-d array with name <name>_substracted
     """
     selem = disk(wnd)
     res = xr.apply_ufunc(
@@ -31,16 +32,17 @@ def remove_background(varr, method, wnd):
 
 
 def remove_background_perframe(fm, method, wnd, selem):
-    """[summary]
+    """
+    Remove background per frame by applying the filtering method
 
     Args:
-        fm ([type]): [description]
-        method ([type]): [description]
-        wnd ([type]): [description]
-        selem ([type]): [description]
+        fm (uint8[]): frame, array of unsigned int 8 (bytes)
+        method (string): ‘uniform‘ or ‘tophat’
+        wnd (int): size of the disk shaped kernel to use for filtering (in pixels)
+        selem (uint8[]): kernel (mask) for filtering, array of unsigned int 8 (bytes)
 
     Returns:
-        [type]: [description]
+        uint8[]: frame, array of unsigned int 8 (bytes)
     """
     if method == "uniform":
         return fm - uniform_filter(fm, wnd)
@@ -49,19 +51,6 @@ def remove_background_perframe(fm, method, wnd, selem):
 
 
 def stripe_correction(varr, reduce_dim="height", on="mean"):
-    """[summary]
-
-    Args:
-        varr ([type]): [description]
-        reduce_dim (str, optional): [description]. Defaults to 'height'.
-        on (str, optional): [description]. Defaults to 'mean'.
-
-    Raises:
-        NotImplementedError: [description]
-
-    Returns:
-        [type]: [description]
-    """
     if on == "mean":
         temp = varr.mean(dim="frame")
     elif on == "max":
@@ -76,33 +65,24 @@ def stripe_correction(varr, reduce_dim="height", on="mean"):
 
 
 def gaussian_blur(varray, ksize=(3, 3), sigmaX=0):
-    """[summary]
-
-    Args:
-        varray ([type]): [description]
-        ksize (tuple, optional): [description]. Defaults to (3, 3).
-        sigmaX (int, optional): [description]. Defaults to 0.
-
-    Returns:
-        [type]: [description]
-    """
     return varray.groupby("frame").apply(
         lambda fm: cv2.GaussianBlur(fm.values, ksize, sigmaX)
     )
 
 
 def denoise(varr, method, **kwargs):
-    """[summary]
+    """
+    Remove noise from a video
 
     Args:
-        varr ([type]): [description]
-        method ([type]): [description]
+        varr (xarray.DataArray): xarray.DataArray a labeled 3-d array representation of the videos with dimensions: frame, height and width.
+        method (string): "gaussian", "anisotropic", "median" or "bilateral"
 
     Raises:
-        NotImplementedError: [description]
+        NotImplementedError: raised when the method is not one of "gaussian", "anisotropic", "median" or "bilateral"
 
     Returns:
-        [type]: [description]
+        xarray.DataArray: xarray.DataArray a labeled 3-d array with name <name>_denoised
     """
     if method == "gaussian":
         func = cv2.GaussianBlur

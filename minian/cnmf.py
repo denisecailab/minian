@@ -25,15 +25,17 @@ from .utilities import rechunk_like, save_minian
 
 
 def get_noise_fft(varr, noise_range=(0.25, 0.5), noise_method="logmexp"):
-    """[summary]
+    """
+    Estimates the power spectral density of the noise within the range specified by the input argument noise_range
 
     Args:
-        varr ([type]): [description]
-        noise_range (tuple, optional): [description]. Defaults to (0.25, 0.5).
-        noise_method (str, optional): [description]. Defaults to 'logmexp'.
+        varr (type): input data
+        noise_range (tuple, optional): noise range. Defaults to (0.25, 0.5).
+        noise_method (str, optional): methods for the identification of the principal harmonic in the noise spectrum. Defaults to 'logmexp'.
 
     Returns:
-        [type]: [description]
+        type: spectral density of the noise
+
     """
     sn = xr.apply_ufunc(
         _noise_fft,
@@ -49,15 +51,17 @@ def get_noise_fft(varr, noise_range=(0.25, 0.5), noise_method="logmexp"):
 
 
 def _noise_fft(px, noise_range=(0.25, 0.5), noise_method="logmexp"):
-    """[summary]
+    """
+    Estimates the periodic components in the noise by estimating the power spectral density within the user-defined noise range (noise_range). Noise_range should be set by the user to include the most obvious sources of periodic artifacts (e.g. motion due to heart beat, respiration, etc..). The function is constrained to compute only the non-negative frequency terms of signal (numpy.fft.rfft).
 
     Args:
-        px ([type]): [description]
-        noise_range (tuple, optional): [description]. Defaults to (0.25, 0.5).
-        noise_method (str, optional): [description]. Defaults to 'logmexp'.
+        px (type): input data
+        noise_range (tuple, optional): Defaults to (0.25, 0.5).
+        noise_method (str, optional): Defaults to 'logmexp'.
 
     Returns:
-        [type]: [description]
+        type: noise spectrum
+
     """
     _T = len(px)
     nr = np.around(np.array(noise_range) * _T).astype(int)
@@ -92,15 +96,17 @@ def get_noise_welch(
 
 
 def noise_welch(y, noise_range, noise_method):
-    """[summary]
+    """
+    Alternative (w.r.t. FFT) formulation to estimate the spectral density of a signal, it assumes the noise in the signal to be a stochastic process (unlike FFT) and attenuates noise by windowing the original signal into segments and averaging over them.
 
     Args:
-        y ([type]): [description]
-        noise_range ([type]): [description]
-        noise_method ([type]): [description]
+        y (type): input
+        noise_range (type): noise range
+        noise_method (type): method for estimating the principal harmonic in the noise range
 
     Returns:
-        [type]: [description]
+        [type]: [noise spectrum]
+
     """
     ff, Pxx = welch(y)
     mask0, mask1 = ff > noise_range[0], ff < noise_range[1]
@@ -128,24 +134,28 @@ def update_spatial(
     size_thres=(9, None),
     in_memory=False,
 ):
-    """[summary]
+    """
+    This function recursively uses the spatial noise and seed parameters to calculate the signal dynamics across the pixels.
 
     Args:
-        Y ([type]): [description]
-        A ([type]): [description]
-        b ([type]): [description]
-        C ([type]): [description]
-        f ([type]): [description]
-        sn ([type]): [description]
-        dl_wnd (int, optional): [description]. Defaults to 5.
-        sparse_penal (float, optional): [description]. Defaults to 0.5.
-        update_background (bool, optional): [description]. Defaults to True.
-        normalize (bool, optional): [description]. Defaults to True.
-        size_thres (str, optional): [description]. Defaults to '(9, None)'.
-        in_memory (bool, optional): [description]. Defaults to False.
+        Y (xarray.DataArray): input data
+        A (xarray.DataArray): spatial footprint of the initial seeds
+        b (xarray.DataArray): spatial footprint of the background
+        C (xarray.DataArray): temporal dynamics of cells’ activity
+        f (xarray.DataArray): temporal dynamics of the background
+        sn (float): spectral density of noise
+        gs_sigma (int, optional): Defaults to 6.
+        dl_wnd (int, optional): window size that set the maximum dilation of A_init. Defaults to 5.
+        sparse_penal (float, optional): sparseness penalty, it provides balance between fidelity to cells’ shape and sparsity of identified cells. Defaults to 0.5.
+        update_background (bool, optional): True or False, determines whether the background is updated. Defaults to True.
+        post_scal (bool, optional): deprecated.
+        normalize (bool, optional): Whether to normalize the resulting spatial footprints so that the sum of coefficients in each footprint is 1. Defaults to True.
+        zero_thres (str, optional): The threshold below which the values in the spatial footprints will be set to zero. Defaults to 'eps', which will be interpreted as the machine epsilon of the datatype.
+        sched (str, optional): deprecated
 
     Returns:
-        [type]: [description]
+        List(xarray.DataArray):
+
     """
     _T = Y.sizes["frame"]
     intpath = os.environ["MINIAN_INTERMEDIATE"]
@@ -256,18 +266,6 @@ def update_spatial(
 
 
 def update_spatial_perpx(y, alpha, sub, C_store, f):
-    """[summary]
-
-    Args:
-        y ([type]): [description]
-        alpha ([type]): [description]
-        sub ([type]): [description]
-        C ([type]): [description]
-        f ([type]): [description]
-
-    Returns:
-        [type]: [description]
-    """
     if f is not None:
         idx = sub[:-1].nonzero()[0]
     else:
@@ -310,19 +308,6 @@ def update_spatial_block(y, alpha, sub, **kwargs):
 
 
 def compute_trace(Y, A, b, C, f, noise_freq=None):
-    """[summary]
-
-    Args:
-        Y ([type]): [description]
-        A ([type]): [description]
-        b ([type]): [description]
-        C ([type]): [description]
-        f ([type]): [description]
-        noise_freq ([type], optional): [description]. Defaults to None.
-
-    Returns:
-        [type]: [description]
-    """
     fms = Y.coords["frame"]
     uid = A.coords["unit_id"]
     Y = Y.data
@@ -386,32 +371,6 @@ def update_temporal(
     scs_fallback=False,
     concurrent_update=False,
 ):
-    """[summary]
-
-    Args:
-        A ([type]): [description]
-        C ([type]): [description]
-        b ([type]): [description]
-        f ([type]): [description]
-        Y ([type]): [description]
-        YrA ([type]): [description]
-        noise_freq (float, optional): [description]. Defaults to 0.25.
-        p ([type], optional): [description]. Defaults to 2.
-        add_lag (str, optional): [description]. Defaults to 'p'.
-        jac_thres (float, optional): [description]. Defaults to 0.1.
-        bseg (str, optional): [description]. Defaults to None.
-        zero_thres ([type], optional): [description]. Defaults to 1e-8.
-        max_iters (int, optional): [description]. Defaults to 200.
-        use_smooth (bool, optional): [description]. Defaults to True.
-        normalize (bool, optional): [description]. Defaults to True.
-        warm_start (bool, optional): [description]. Defaults to False.
-        post_scal (bool, optional): [description]. Defaults to True.
-        scs_fallback (bool, optional): [description]. Defaults to False.
-        concurrent_update (bool, optional): [description]. Defaults to False.
-
-    Returns:
-        [type]: [description]
-    """
     if YrA is None:
         YrA = compute_trace(Y, A, b, C, f).persist()
     Ymask = (YrA > 0).any("frame").compute()
@@ -605,18 +564,6 @@ def lstsq_vec(a, b):
 
 
 def get_ar_coef(y, sn, p, add_lag, pad=None):
-    """[summary]
-
-    Args:
-        y ([type]): [description]
-        sn ([type]): [description]
-        p ([type]): [description]
-        add_lag ([type]): [description]
-        pad ([type], optional): [description]. Defaults to None.
-
-    Returns:
-        [type]: [description]
-    """
     if add_lag == "p":
         max_lag = p * 2
     else:
@@ -633,14 +580,6 @@ def get_ar_coef(y, sn, p, add_lag, pad=None):
 
 
 def get_p(y):
-    """[summary]
-
-    Args:
-        y ([type]): [description]
-
-    Returns:
-        [type]: [description]
-    """
     dif = np.append(np.diff(y), 0)
     rising = dif > 0
     prd_ris, num_ris = label(rising)
@@ -657,30 +596,6 @@ def get_p(y):
     output_dtypes=(float, float, float, float),
 )
 def update_temporal_cvxpy(y, g, sn, A=None, bseg=None, **kwargs):
-    """[summary]
-
-    spatial:
-    (d, f), (u, p), (d), (d, u)
-    (d, f), (p), (d), (d)
-    trace:
-    (u, f), (u, p), (u)
-    (f), (p), ()
-
-    Args:
-        y ([type]): [description]
-        g ([type]): [description]
-        sn ([type]): [description]
-        A ([type], optional): [description]. Defaults to None.
-        bseg ([type], optional): [description]. Defaults to None
-
-    Raises:
-        ValueError: [description]
-        ValueError: [description]
-        ValueError: [description]
-
-    Returns:
-        [type]: [description]
-    """
     # get_parameters
     sparse_penal = kwargs.get("sparse_penal")
     max_iters = kwargs.get("max_iters")
@@ -811,17 +726,6 @@ def update_temporal_cvxpy(y, g, sn, A=None, bseg=None, **kwargs):
 
 
 def unit_merge(A, C, add_list=None, thres_corr=0.9):
-    """[summary]
-
-    Args:
-        A ([type]): [description]
-        C ([type]): [description]
-        add_list ([type], optional): [description]. Defaults to None.
-        thres_corr (float, optional): [description]. Defaults to 0.9.
-
-    Returns:
-        [type]: [description]
-    """
     print("computing spatial overlap")
     A_sps = (A.data.map_blocks(sparse.COO) > 0).rechunk(-1).persist()
     A_inter = sparse.tril(
@@ -888,15 +792,6 @@ def unit_merge(A, C, add_list=None, thres_corr=0.9):
 
 
 def label_connected(adj, only_connected=False):
-    """[summary]
-
-    Args:
-        adj ([type]): [description]
-        only_connected (bool, optional): [description]. Defaults to False.
-
-    Returns:
-        [type]: [description]
-    """
     try:
         np.fill_diagonal(adj, 0)
         adj = np.triu(adj)
@@ -914,17 +809,6 @@ def label_connected(adj, only_connected=False):
 
 
 def smooth_sig(sig, freq, method="fft", btype="low"):
-    """[summary]
-
-    Args:
-        sig ([type]): [description]
-        freq ([type]): [description]
-        method ([type]): [description]. Defaults to 'fft'
-        btype (str, optional): [description]. Defaults to 'low'.
-
-    Returns:
-        [type]: [description]
-    """
     if method == "fft":
         _T = sig.sizes["frame"]
         if btype == "low":
