@@ -194,7 +194,7 @@ def open_minian_mf(
                 warnings.warn("multiple dataset found: {}".format(flist))
             fname = flist[-1]
             print("opening {}".format(fname))
-            minian = open_minian(nextdir, fname=fname, **kwargs)
+            minian = open_minian(dpath=os.path.join(nextdir, fname), **kwargs)
             key = tuple([np.array_str(minian[d].values) for d in index_dims])
             minian_dict[key] = minian
             print(["{}: {}".format(d, v) for d, v in zip(index_dims, key)])
