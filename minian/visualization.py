@@ -4,7 +4,6 @@ import os
 from collections import OrderedDict
 from uuid import uuid4
 
-import av
 import colorcet as cc
 import cv2
 import dask
@@ -15,11 +14,12 @@ import numpy as np
 import pandas as pd
 import panel as pn
 import param
+import skvideo.io
 import xarray as xr
 from bokeh.palettes import Category10_10, Viridis256
 from dask.diagnostics import ProgressBar
 from datashader import count_cat
-from holoviews.operation.datashader import datashade, dynspread, regrid
+from holoviews.operation.datashader import datashade, dynspread
 from holoviews.streams import (
     BoxEdit,
     DoubleTap,
@@ -36,11 +36,27 @@ from scipy import linalg
 from scipy.ndimage.measurements import center_of_mass
 from scipy.spatial import cKDTree
 
+from .cnmf import compute_AtC
 from .motion_correction import apply_shifts
 from .utilities import rechunk_like
 
 
 class VArrayViewer:
+    """
+    This function creates an interactive figure where the data array is displayed as a movie. In the interactive figure, the user can draw an arbitrary box in the field of view and record this box as a mask using the "save mask" button 
+        Args:
+            varr (xarray.DataArray): xarray.DataArray a labeled 3-d array representation of the videos with dimensions: frame, height and width.
+            framerate (int, optional): Acquisition frame rate. Defaults to 30.
+            rerange (dict, optional): the range by which the array will be color-mapped. Useful if the movie is visually too dim. Defaults to None. which would use the full range of the array.
+            summary (list, optional): [operation to perform on the data]. Defaults to ["mean"].
+            meta_dims (list, optional): List of metadata dimensions that defines each array if a list of arrays is passed in as `varr`. Defaults to None.
+            datashading (bool, optional): Use datashading yes or no. Defaults to True (yes).
+            layout (bool, optional): If set the output image will be boxed. Defaults to False.
+
+        Raises:
+            NotImplementedError
+    """
+
     def __init__(
         self,
         varr,
@@ -121,6 +137,7 @@ class VArrayViewer:
         self.pnplot = pn.panel(self.get_hvobj())
 
     def get_hvobj(self):
+
         def get_im_ovly(meta):
             def img(f, ds):
                 return hv.Image(ds.sel(frame=f).compute(), kdims=["width", "height"])
@@ -130,7 +147,7 @@ class VArrayViewer:
             except ValueError:
                 curds = self.ds_sub
             fim = fct.partial(img, ds=curds)
-            im = regrid(hv.DynamicMap(fim, streams=[self.strm_f])).opts(
+            im = hv.DynamicMap(fim, streams=[self.strm_f]).opts(
                 frame_width=500, aspect=self._w / self._h, cmap="Viridis"
             )
             if self.rerange:
@@ -197,6 +214,12 @@ class VArrayViewer:
         return hvobj
 
     def show(self):
+        """
+        Refreshes viewer content with the new frame
+
+        Returns:
+            panel.layout.Column
+        """
         return pn.layout.Column(self.widgets, self.pnplot)
 
     def _widgets(self):
@@ -253,6 +276,18 @@ class VArrayViewer:
 
 
 class CNMFViewer:
+    """
+    This class creates a figure to visualize the results of the CNMF
+
+    Args:
+        minian (string, optional): folder under which the actual code of minian (.py files) reside. Defaults to None.
+        A (xarray.DataArray, optional): spatial footprint of each unit. Defaults to None.
+        C (xarray.DataArray, optional): temporal activity of a unit, i.e. neuron. Defaults to None.
+        S (xarray.DataArray, optional): . Defaults to None.
+        org (xarray.DataArray, optional): raw video after pre-processing and motion correction. Defaults to None.
+        sortNN (bool, optional): whether to sort cells based on nearest neighbor, so that cells that are spatially together will likely be displayed together. Defaults to True.
+    """
+
     def __init__(self, minian=None, A=None, C=None, S=None, org=None, sortNN=True):
         self._A = A if A is not None else minian["A"]
         self._C = C if C is not None else minian["C"]
@@ -720,9 +755,7 @@ class CNMFViewer:
 
     def _spatial_all(self):
         metas = self.metas
-        Asum = regrid(
-            hv.Image(self.Asum.sel(**metas), ["width", "height"]), precompute=True
-        ).opts(
+        Asum = hv.Image(self.Asum.sel(**metas), ["width", "height"]).opts(
             plot=dict(frame_height=len(self._h), frame_width=len(self._w)),
             style=dict(cmap="Viridis"),
         )
@@ -747,11 +780,11 @@ class CNMFViewer:
         )
         self.strm_uid.source = cents
         fim = fct.partial(hv.Image, kdims=["width", "height"])
-        AC = regrid(hv.DynamicMap(fim, streams=[self.pipAC]), precompute=True).opts(
+        AC = hv.DynamicMap(fim, streams=[self.pipAC]).opts(
             plot=dict(frame_height=len(self._h), frame_width=len(self._w)),
             style=dict(cmap="Viridis"),
         )
-        mov = regrid(hv.DynamicMap(fim, streams=[self.pipmov]), precompute=True).opts(
+        mov = hv.DynamicMap(fim, streams=[self.pipmov]).opts(
             plot=dict(frame_height=len(self._h), frame_width=len(self._w)),
             style=dict(cmap="Viridis"),
         )
@@ -928,90 +961,103 @@ def write_vid_blk(arr, vpath, options):
     uid = uuid4()
     vname = "{}.mp4".format(uid)
     fpath = os.path.join(vpath, vname)
-    arr = np.clip(arr, 0, 255).astype(np.uint8)
-    container = av.open(fpath, mode="w")
-    stream = container.add_stream("libx264", rate=30)
-    stream.width = arr.shape[2]
-    stream.height = arr.shape[1]
-    stream.pix_fmt = "yuv420p"
-    stream.options = options
+    if len(arr.shape) == 2:
+        arr = np.expand_dims(arr, axis=0)
+    writer = skvideo.io.FFmpegWriter(
+        fpath, outputdict={"-" + k: v for k, v in options.items()}
+    )
     for fm in arr:
-        fm = cv2.cvtColor(fm, cv2.COLOR_GRAY2RGB)
-        fmav = av.VideoFrame.from_ndarray(fm, format="rgb24")
-        for p in stream.encode(fmav):
-            container.mux(p)
-    for p in stream.encode():
-        container.mux(p)
-    container.close()
+        writer.writeFrame(fm)
+    writer.close()
     return fpath
 
 
 def write_video(
-    arr, vname=None, vpath=".", options={"crf": "18", "preset": "ultrafast"}
+    arr, vname=None, vpath=".", norm=True, options={"crf": "18", "preset": "ultrafast"}
 ):
+    """
+    This function writes video to disk
+
+    Args:
+        arr (xarray.DataArray): data
+        vname (str, optional): name of the video. Defaults to None.
+        vpath (str, optional): path to the target location. Defaults to ".".
+        options (dict, optional): saving options. Defaults to {'crf': '18', 'preset': 'ultrafast'}.
+
+    Returns:
+        string: absolute path to the file
+    """
     if not vname:
         vname = "{}.mp4".format(uuid4())
     fname = os.path.join(vpath, vname)
+    if norm:
+        arr = arr.astype(np.float32)
+        arr_max = arr.max().compute().values
+        arr_min = arr.min().compute().values
+        den = arr_max - arr_min
+        arr -= arr_min
+        arr /= den
+        arr *= 255
+    arr = arr.clip(0, 255).astype(np.uint8)
     paths = [
         dask.delayed(write_vid_blk)(np.asscalar(a), vpath, options)
         for a in arr.data.to_delayed()
     ]
-    with dask.config.set(scheduler="processes"):
-        paths = dask.compute(paths)[0]
-    streams = [ffmpeg.input(p) for p in paths]
-    (ffmpeg.concat(*streams).output(fname).run(overwrite_output=True))
-    for vp in paths:
+    paths = dask.compute(paths)[0]
+    return concat_video_recursive(paths, vname=fname)
+
+
+def concat_video_recursive(vlist, vname=None):
+    if not len(vlist) > 1:
+        return vlist[0]
+    if len(vlist) > 256:
+        vlist = np.array_split(vlist, 256)
+        vlist = [concat_video_recursive(list(v)) for v in vlist]
+    vpath = os.path.dirname(vlist[0])
+    streams = [ffmpeg.input(p) for p in vlist]
+    if vname is None:
+        vname = "{}.mp4".format(uuid4())
+    fpath = os.path.join(vpath, vname)
+    ffmpeg.concat(*streams).output(fpath).run(overwrite_output=True)
+    for vp in vlist:
         os.remove(vp)
-    return fname
+    return fpath
 
 
 def generate_videos(
-    minian,
     varr,
+    Y,
+    A=None,
+    C=None,
+    AC=None,
     vpath=".",
     vname="minian.mp4",
-    scale="auto",
     options={"crf": "18", "preset": "ultrafast"},
 ):
-    print("generating traces")
-    A = minian["A"].compute().transpose("unit_id", "height", "width")
-    C = minian["C"].chunk(dict(unit_id=-1)).transpose("frame", "unit_id")
-    Y = (
-        minian["Y"]
-        .chunk(dict(height=-1, width=-1))
-        .transpose("frame", "height", "width")
-    )
-    org = varr
-    try:
-        bl = minian["bl"].chunk(dict(unit_id=-1))
-    except KeyError:
-        print("cannot find background term")
-        bl = 0
-    C = C + bl
-    AC = xr.apply_ufunc(
-        da.tensordot,
-        C,
-        A,
-        input_core_dims=[["frame", "unit_id"], ["unit_id", "height", "width"]],
-        output_core_dims=[["frame", "height", "width"]],
-        dask="allowed",
-        kwargs=dict(axes=(1, 0)),
-        output_dtypes=[A.dtype],
-    )
-    org_norm = org
-    if scale == "auto":
-        Y_max = Y.max().compute()
-        Y_norm = Y * (255 / Y_max)
-        AC_norm = AC * (255 / Y_max)
-    else:
-        Y_norm = Y * scale
-        AC_norm = AC * scale
-    res_norm = Y_norm - AC_norm
+    """
+    This function outputs a video that can help us quickly visualize the results of the CNMF. The resulting video will have six quadrants: Top Left: spatial footprints of all cells (projection of the sum); Top Middle: if UseAC, shows the dot product of A (spatial footprint) and C (temporal activities) matrix of selected neurons, if UseAC is False shows the spatial footprints of selected neurons (a sum projection); Top Right shows the raw video after pre-processing and motion correction, which is the movie that's fed in as org to CNMFViewer; Bottom Left Controller Panel has several features: Load Data (loads the data into memory), Refresh (refreshes the data when you switch to a new group of units), UseAC check box (controls the option of the top middle panel), Normalize (normalizes the bottom middle trace and spike plot for each unit to itself), ShowC (shows calcium traces for each unit across time in the bottom middle plot), ShowS (shows spikes for each unit across time in the bottom middle plot), Previous and Next Group buttons (allows to go backward/forward to another group of units), Video Play Panel (allows to play the top middle and right panel in real time); Bottom Middle Panel contains plots of units along the time axis; Bottom Right contains a labeling tool for the user to manually exclude unwanted units by labelling them (they will be demarcated with a -1).
+    Args:
+        minian (xarray.DataArray): input data
+        varr (xarray.DataArray): input data
+        vpath (str, optional): path to the video. Defaults to ".".
+        vname (str, optional): video name. Defaults to "minian.mp4".
+        scale (str, optional): scale dimensions. Defaults to "auto".
+        options (dict, optional): export options. Defaults to {'crf': '18', 'preset': 'ultrafast'}.
+
+    Returns:
+        string: absolute path to the generated video
+    """
+    if AC is None:
+        print("generating traces")
+        AC = compute_AtC(A, C)
+    Y = Y * 255 / Y.max().compute().values
+    AC = AC * 255 / AC.max().compute().values
+    res = Y - AC
     print("writing videos")
-    path_org = write_video(org_norm, vpath=vpath, options=options)
-    path_Y = write_video(Y_norm, vpath=vpath, options=options)
-    path_AC = write_video(AC_norm, vpath=vpath, options=options)
-    path_res = write_video(res_norm, vpath=vpath, options=options)
+    path_org = write_video(varr, vpath=vpath, options=options)
+    path_Y = write_video(Y, vpath=vpath, norm=False, options=options)
+    path_AC = write_video(AC, vpath=vpath, norm=False, options=options)
+    path_res = write_video(res, vpath=vpath, norm=False, options=options)
     print("concatenating results")
     str_org = ffmpeg.input(path_org)
     str_Y = ffmpeg.input(path_Y)
@@ -1132,6 +1178,17 @@ def centroid(A, verbose=False):
 
 
 def visualize_preprocess(fm, fn=None, include_org=True, **kwargs):
+    """
+    This function allows the visualization of preprocessed data
+
+    Args:
+        fm (xarray.DataArray): input data
+        fn (tuple, optional): the function to apply to each frame (i.e. the function whose parameters needs exploration). Defaults to None.
+        include_org (bool, optional): Whether to include the original frame. Defaults to True.
+
+    Returns:
+        image
+    """
     fh, fw = fm.sizes["height"], fm.sizes["width"]
     asp = fw / fh
     opts_im = {
@@ -1171,15 +1228,13 @@ def visualize_preprocess(fm, fn=None, include_org=True, **kwargs):
             )
             im_dict[p_str] = cur_im
             cnt_dict[p_str] = cur_cnt
-        hv_im = regrid(hv.HoloMap(im_dict, kdims=list(pkey)), precompute=True).opts(
-            **opts_im
-        )
+        hv_im = Dynamic(hv.HoloMap(im_dict, kdims=list(pkey)).opts(**opts_im))
         hv_cnt = datashade(
             hv.HoloMap(cnt_dict, kdims=list(pkey)), precompute=True, cmap=Viridis256
         ).opts(**opts_cnt)
         if include_org:
             im, cnt = _vis(fm)
-            im = regrid(im, precompute=True).relabel("Before").opts(**opts_im)
+            im = im.relabel("Before").opts(**opts_im)
             cnt = (
                 datashade(cnt, precompute=True, cmap=Viridis256)
                 .relabel("Before")
@@ -1193,7 +1248,19 @@ def visualize_preprocess(fm, fn=None, include_org=True, **kwargs):
         return im + cnt
 
 
-def visualize_seeds(max_proj, seeds, mask=None, datashade=False):
+def visualize_seeds(max_proj, seeds, mask=None):
+    """
+    This function allows the overlay of the seeds’ centroids over the maximum intensity projection
+
+    Args:
+        max_proj (array): maximum intensity projection
+        seeds (dict): seeds
+        mask (array, optional): spatial mask of the Region of Interest. Defaults to None.
+        datashade (bool, optional): Use datashading yes o no. Defaults to False (no).
+
+    Returns:
+        holoviews.core.overlay.Overlay: visualization object
+    """
     h, w = max_proj.sizes["height"], max_proj.sizes["width"]
     asp = w / h
     pt_cmap = {True: "white", False: "red"}
@@ -1209,18 +1276,28 @@ def visualize_seeds(max_proj, seeds, mask=None, datashade=False):
         style=dict(fill_alpha=0.8, line_alpha=0, cmap=pt_cmap),
     )
     if mask:
-        vdims = ["index", "seeds", mask]
+        vdims = ["seeds", mask]
     else:
-        vdims = ["index", "seeds"]
+        vdims = ["seeds"]
         opts_pts["style"]["color"] = "white"
     im = hv.Image(max_proj, kdims=["width", "height"])
     pts = hv.Points(seeds, kdims=["width", "height"], vdims=vdims)
-    if datashade:
-        im = regrid(im)
     return im.opts(**opts_im) * pts.opts(**opts_pts)
 
 
 def visualize_gmm_fit(values, gmm, bins):
+    """
+    This function allows the visualization of the Gaussian mixture model fit
+
+    Args:
+        values (array): peak to noise ratio
+        gmm (dict): gaussian model fit
+        bins (tuple): number of bins
+
+    Returns:
+        holoviews.core.overlay.Overlay: visualization object
+    """
+
     def gaussian(x, mu, sig):
         return np.exp(-np.power(x - mu, 2.0) / (2 * np.power(sig, 2.0)))
 
@@ -1238,6 +1315,19 @@ def visualize_gmm_fit(values, gmm, bins):
 
 
 def visualize_spatial_update(A_dict, C_dict, kdims=None, norm=True, datashading=True):
+    """
+    This function launches the visualizer to explore the parameters of the spatial noise estimation. This step precedes the CNMF and is used to estimate the noise introduced by motion. 
+
+    Args:
+        A_dict (dict): input spatial footprints
+        C_dict (dict): temporal activity of each unit
+        kdims (tuple, optional): dimension of the footprints (e.g. 'width', 'height'). Defaults to None.
+        norm (bool, optional): normalization (True/False). Defaults to True.
+        datashading (bool, optional): Use datashading yes or no. Defaults to True (yes).
+
+    Returns:
+        holoviews.core.layout.Layout
+    """
     if not kdims:
         A_dict = dict(dummy=A_dict)
         C_dict = dict(dummy=C_dict)
@@ -1270,9 +1360,9 @@ def visualize_spatial_update(A_dict, C_dict, kdims=None, norm=True, datashading=
             (A > 0).sum("unit_id").rename("A_bin"), kdims=["width", "height"]
         )
         hv_C_dict[key] = hv.Dataset(C.rename("C")).to(hv.Curve, kdims="frame")
-    hv_pts = hv.HoloMap(hv_pts_dict, kdims=kdims)
-    hv_A = hv.HoloMap(hv_A_dict, kdims=kdims)
-    hv_Ab = hv.HoloMap(hv_Ab_dict, kdims=kdims)
+    hv_pts = Dynamic(hv.HoloMap(hv_pts_dict, kdims=kdims))
+    hv_A = Dynamic(hv.HoloMap(hv_A_dict, kdims=kdims))
+    hv_Ab = Dynamic(hv.HoloMap(hv_Ab_dict, kdims=kdims))
     hv_C = (
         hv.HoloMap(hv_C_dict, kdims=kdims)
         .collate()
@@ -1280,9 +1370,9 @@ def visualize_spatial_update(A_dict, C_dict, kdims=None, norm=True, datashading=
         .add_dimension("time", 0, 0)
     )
     if datashading:
-        hv_A = regrid(hv_A)
-        hv_Ab = regrid(hv_Ab)
         hv_C = datashade(hv_C)
+    else:
+        hv_C = Dynamic(hv_C)
     hv_A = hv_A.opts(frame_width=400, aspect=w / h, colorbar=True, cmap="viridis")
     hv_Ab = hv_Ab.opts(frame_width=400, aspect=w / h, colorbar=True, cmap="viridis")
     hv_C = hv_C.map(
@@ -1309,6 +1399,22 @@ def visualize_temporal_update(
     norm=True,
     datashading=True,
 ):
+    """This function launches the visualizer for the exploration of the fluorescence time series
+
+    Args:
+        YA_dict (dict): spatial footprints
+        C_dict (dict): temporal activity of each unit
+        S_dict ([type]): [the dictionary containing the resulting `S` from runs with different parameters]
+        g_dict ([type]): [description]
+        sig_dict ([type]): [description]
+        A_dict ([type]): [description]
+        kdims (list, optional): [description]. Defaults to None.
+        norm (bool, optional): Normalize yes or no. Defaults to True (yes).
+        datashading (bool, optional): Use datashading yes or no. Defaults to True (yes).
+
+    Returns:
+        holoviews.core.layout.Layout
+    """
     inputs = [YA_dict, C_dict, S_dict, sig_dict, g_dict]
     if not kdims:
         inputs = [dict(dummy=i) for i in inputs]
@@ -1387,13 +1493,11 @@ def visualize_temporal_update(
     hv_pul = {"Simulated Calcium": hvobjs[4], "Simulated Spike": hvobjs[5]}
     hv_unit = hv.HoloMap(hv_unit, kdims="traces").collate().overlay("traces")
     hv_pul = hv.HoloMap(hv_pul, kdims="traces").collate().overlay("traces")
-    hv_A = hvobjs[6]
+    hv_A = Dynamic(hvobjs[6])
     if datashading:
         hv_unit = datashade_ndcurve(hv_unit, "traces")
-        hv_A = regrid(hv_A)
     else:
         hv_unit = Dynamic(hv_unit)
-        hv_A = Dynamic(hv_A)
     hv_pul = Dynamic(hv_pul)
     hv_unit = hv_unit.map(
         lambda p: p.opts(plot=dict(frame_height=400, frame_width=1000))
