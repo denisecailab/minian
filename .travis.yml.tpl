@@ -50,7 +50,7 @@ script:
   - travis_fold end "Black-check code quality"
 
   - travis_fold start "pytest"
-  - travis-wait-enhanced --interval=2m --timeout=100m -- pytest -v --color=yes --cov=minian --pyargs minian
+  - travis_wait pytest -v --color=yes --cov=minian --pyargs minian
   - travis_fold end "pytest"
 
 after_success:
