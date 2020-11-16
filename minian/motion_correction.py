@@ -10,6 +10,19 @@ from .utilities import xrconcat_recursive
 
 
 def estimate_shifts(varr, max_sh, dim="frame", npart=3, local=False):
+    """
+    Estimate the frame shifts
+
+    Args:
+        varr (xarray.DataArray): xarray.DataArray a labeled 3-d array representation of the videos with dimensions: frame, height and width.
+        max_sh (integer): maximum shift
+        dim (str, optional): name of the z-dimension, defaults to "frame".
+        npart (integer, optional): [the number of partitions of the divide-and-conquer algorithm]. Defaults to 3.
+        local (boolean, optional): [in case where there are multiple local maximum of the cross-correlogram, setting this to `True` will constraint the shift to be the one that’s closest to zero shift. i.e. this assumes the shifts are always small and local regardless of the correlation value]. Defaults to False.
+
+    Returns:
+        xarray.DataArray: the estimated shifts
+    """
     varr = varr.transpose(..., dim, "height", "width")
     loop_dims = list(set(varr.dims) - set(["height", "width", dim]))
     if loop_dims:
@@ -41,6 +54,19 @@ def estimate_shifts(varr, max_sh, dim="frame", npart=3, local=False):
 
 
 def est_sh_part(varr, max_sh, npart, local, n_jobs=1, parallel=False):
+    """
+    Estimate the shift per frame
+
+    Args:
+        varr (xarray.DataArray): xarray.DataArray a labeled 3-d array representation of the videos with dimensions: frame, height and width.
+        max_sh (integer): maximum shift
+        npart (integer): [the number of partitions of the divide-and-conquer algorithm].
+        local (boolean): [in case where there are multiple local maximum of the cross-correlogram, setting this to `True` will constraint the shift to be the one that’s closest to zero shift. i.e. this assumes the shifts are always small and local regardless of the correlation value].
+
+    Returns:
+        xarray.DataArray: the max shift per frame
+        xarray.DataArray: the shift per frame
+    """
     if varr.shape[0] <= 1:
         return varr.squeeze(), np.array([[0, 0]])
     if not parallel:
@@ -100,6 +126,20 @@ def est_sh_part(varr, max_sh, npart, local, n_jobs=1, parallel=False):
 
 
 def match_temp(src, dst, max_sh, local, subpixel=False):
+    """
+    Match template.
+    For more information on template matching: https://opencv-python-tutroals.readthedocs.io/en/latest/py_tutorials/py_imgproc/py_template_matching/py_template_matching.html
+
+    Args:
+        src (array): source frame
+        dst (array): template
+        max_sh (integer): maximum shift
+        local (boolean): [in case where there are multiple local maximum of the cross-correlogram, setting this to `True` will constraint the shift to be the one that’s closest to zero shift. i.e. this assumes the shifts are always small and local regardless of the correlation value].
+        subpixel (boolean, optional): [whether to estimate shifts to sub-pixel level using polynomial fitting of cross-correlogram]. Defaults to False.
+
+    Returns:
+        [array]: array (x,y) of the shift (match)
+    """
     src = np.pad(src, max_sh)
     cor = cv2.matchTemplate(
         src.astype(np.float32), dst.astype(np.float32), cv2.TM_CCOEFF_NORMED
@@ -132,6 +172,16 @@ def match_temp(src, dst, max_sh, local, subpixel=False):
 
 
 def apply_shifts(varr, shifts, fill=np.nan):
+    """
+    Apply the shifts to the input frames
+
+    Args:
+        varr (xarray.DataArray): xarray.DataArray a labeled 3-d array representation of the videos with dimensions: frame, height and width.
+        shifts (xarray.DataArray): xarray.DataArray a labeled 3-d array representation of the shifts with dimensions: frame, height and width.
+
+    Returns:
+        (xarray.DataArray): xarray.DataArray of the shifted input frames (varr)
+    """
     sh_dim = shifts.coords["variable"].values.tolist()
     varr_sh = xr.apply_ufunc(
         shift_perframe,
@@ -148,6 +198,16 @@ def apply_shifts(varr, shifts, fill=np.nan):
 
 
 def shift_perframe(fm, sh, fill=np.nan):
+    """
+    Determine the shift per frame
+
+    Args:
+        fm (array): array with the pixels of the frame
+        sh (array): (x,y) shift
+
+    Returns:
+        array: frame
+    """
     if np.isnan(fm).all():
         return fm
     sh = np.around(sh).astype(int)

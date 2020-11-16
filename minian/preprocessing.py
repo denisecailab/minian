@@ -6,6 +6,17 @@ from skimage.morphology import disk
 
 
 def remove_background(varr, method, wnd):
+    """
+    Remove background from a video.
+
+    Args:
+        varr (xarray.DataArray): xarray.DataArray a labeled 3-d array representation of the videos with dimensions: frame, height and width.
+        method (string): ‘uniform‘ or ‘tophat’
+        wnd (int): size of the disk shaped kernel to use for filtering (in pixels)
+
+    Returns:
+        xarray.DataArray: xarray.DataArray a labeled 3-d array with name <name>_substracted
+    """
     selem = disk(wnd)
     res = xr.apply_ufunc(
         remove_background_perframe,
@@ -22,6 +33,18 @@ def remove_background(varr, method, wnd):
 
 
 def remove_background_perframe(fm, method, wnd, selem):
+    """
+    Remove background per frame by applying the filtering method
+
+    Args:
+        fm (uint8[]): frame, array of unsigned int 8 (bytes)
+        method (string): ‘uniform‘ or ‘tophat’
+        wnd (int): size of the disk shaped kernel to use for filtering (in pixels)
+        selem (uint8[]): kernel (mask) for filtering, array of unsigned int 8 (bytes)
+
+    Returns:
+        uint8[]: frame, array of unsigned int 8 (bytes)
+    """
     if method == "uniform":
         return fm - uniform_filter(fm, wnd)
     elif method == "tophat":

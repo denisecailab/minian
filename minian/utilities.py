@@ -31,8 +31,7 @@ def load_videos(
     downsample_strategy="subset",
     post_process=None,
 ):
-    """Load videos from a folder.
-
+    """
     Load videos from the folder specified in `vpath` and according to the regex
     `pattern`, then concatenate them together across time and return a
     `xarray.DataArray` representation of the concatenated videos. The default
@@ -54,7 +53,6 @@ def load_videos(
         The labeled 3-d array representation of the videos with dimensions:
         ``frame``, ``height`` and ``width``. Returns ``None`` if no data was
         found in the specified folder.
-
     """
     vpath = os.path.normpath(vpath)
     ssname = os.path.basename(vpath)
@@ -153,6 +151,17 @@ def load_avi_perframe(fname, fid):
 
 
 def open_minian(dpath, post_process=None, return_dict=False):
+    """
+    Opens a file previously saved in minian handling the proper data format and chunks
+
+    Args:
+        dpath ([string]): contains the normalized absolutized version of the pathname path,which is the path to minian folder;
+        Post_process (function): post processing function, parameters: dataset (xarray.DataArray), mpath (string, path to the raw backend files)
+        return_dict ([boolean]): default False
+
+    Returns:
+        xarray.DataArray: [loaded data]
+    """
     dslist = [
         xr.open_zarr(pjoin(dpath, d)) for d in listdir(dpath) if isdir(pjoin(dpath, d))
     ]
@@ -212,6 +221,22 @@ def open_minian_mf(
 def save_minian(
     var, dpath, meta_dict=None, overwrite=False, chunks=None, mem_limit="200MB"
 ):
+    """
+    Saves the data (var) in the format specified by the backend variable, in the location specified by dpath under the name ‘minian’, if overwrite True
+    Args:
+        var (xarray.DataArray): data to be saved
+        dpath (str): path where to save the data
+        fname (str, optional): output file name. Defaults to 'minian'.
+        backend (str, optional): file storage format. Defaults to 'netcdf'.
+        meta_dict (dict, optional): metadata for example {‘animal’: -3, ‘session’: -2, ‘session_id’: -1}. Key value pair. Defaults to None.
+        overwrite (bool, optional): if true overwrites a file in the same location with the same name. Defaults to False.
+
+    Raises:
+        NotImplementedError
+
+    Returns:
+        xarray.DataArray: the saved var xarray.DataArray
+    """
     dpath = os.path.normpath(dpath)
     Path(dpath).mkdir(parents=True, exist_ok=True)
     ds = var.to_dataset()
@@ -308,6 +333,16 @@ def get_chk(arr):
 
 
 def rechunk_like(x, y):
+    """
+    Resizes chunks based on the new input dimensions
+
+    Args:
+        x (array): the array to be rechunked. i.e. destination of rechunking
+        y (array): the array where chunk information are extracted. i.e. the source of rechunking
+
+    Returns:
+        dict: data with new dimensions as specified in the input
+    """
     try:
         dst_chk = get_chk(y)
         comm_dim = set(x.dims).intersection(set(dst_chk.keys()))
@@ -318,6 +353,19 @@ def rechunk_like(x, y):
 
 
 def get_optimal_chk(ref, arr=None, dim_grp=None, ncores="auto", mem_limit="auto"):
+    """
+    Estimates the chunk of video (i.e. video sizes and number of frames) that optimizes computer memory use when the script is run parallel over multiple cores.
+
+    Args:
+        ref (xarray.DataArray): xarray.DataArray a labeled 3-d array representation of the videos with dimensions: frame, height and width.
+        arr (xarray.DataArray): xarray.DataArray a labeled 3-d array representation of the videos with dimensions: frame, height and width. Defaults to None.
+        dim_grp (array, optional): provide labels for the dimension of the data. Defaults to None.
+        ncores (str, optional): number of CPU cores. Defaults to 'auto'.
+        mem_limit (str, optional): max available memory that can be given to a process without the system going into swap. Defaults to 'auto'.
+
+    Returns:
+        dict: sizes of the chunks that optimize memory usage in parallel computing the key is the dimension, the value is the max chunk size
+    """
     if arr is None:
         arr = ref
     szs = ref.sizes

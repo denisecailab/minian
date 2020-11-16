@@ -25,6 +25,18 @@ from .utilities import rechunk_like, save_minian
 
 
 def get_noise_fft(varr, noise_range=(0.25, 0.5), noise_method="logmexp"):
+    """
+    Estimates the power spectral density of the noise within the range specified by the input argument noise_range
+
+    Args:
+        varr (type): input data
+        noise_range (tuple, optional): noise range. Defaults to (0.25, 0.5).
+        noise_method (str, optional): methods for the identification of the principal harmonic in the noise spectrum. Defaults to 'logmexp'.
+
+    Returns:
+        type: spectral density of the noise
+
+    """
     sn = xr.apply_ufunc(
         _noise_fft,
         varr,
@@ -39,6 +51,18 @@ def get_noise_fft(varr, noise_range=(0.25, 0.5), noise_method="logmexp"):
 
 
 def _noise_fft(px, noise_range=(0.25, 0.5), noise_method="logmexp"):
+    """
+    Estimates the periodic components in the noise by estimating the power spectral density within the user-defined noise range (noise_range). Noise_range should be set by the user to include the most obvious sources of periodic artifacts (e.g. motion due to heart beat, respiration, etc..). The function is constrained to compute only the non-negative frequency terms of signal (numpy.fft.rfft).
+
+    Args:
+        px (type): input data
+        noise_range (tuple, optional): Defaults to (0.25, 0.5).
+        noise_method (str, optional): Defaults to 'logmexp'.
+
+    Returns:
+        type: noise spectrum
+
+    """
     _T = len(px)
     nr = np.around(np.array(noise_range) * _T).astype(int)
     px_band = (1 / _T * np.abs(numpy_fft.rfft(px)) ** 2)[nr[0] : nr[1]]
@@ -72,6 +96,18 @@ def get_noise_welch(
 
 
 def noise_welch(y, noise_range, noise_method):
+    """
+    Alternative (w.r.t. FFT) formulation to estimate the spectral density of a signal, it assumes the noise in the signal to be a stochastic process (unlike FFT) and attenuates noise by windowing the original signal into segments and averaging over them.
+
+    Args:
+        y (type): input
+        noise_range (type): noise range
+        noise_method (type): method for estimating the principal harmonic in the noise range
+
+    Returns:
+        [type]: [noise spectrum]
+
+    """
     ff, Pxx = welch(y)
     mask0, mask1 = ff > noise_range[0], ff < noise_range[1]
     mask = np.logical_and(mask0, mask1)
@@ -98,6 +134,29 @@ def update_spatial(
     size_thres=(9, None),
     in_memory=False,
 ):
+    """
+    This function recursively uses the spatial noise and seed parameters to calculate the signal dynamics across the pixels.
+
+    Args:
+        Y (xarray.DataArray): input data
+        A (xarray.DataArray): spatial footprint of the initial seeds
+        b (xarray.DataArray): spatial footprint of the background
+        C (xarray.DataArray): temporal dynamics of cells’ activity
+        f (xarray.DataArray): temporal dynamics of the background
+        sn (float): spectral density of noise
+        gs_sigma (int, optional): Defaults to 6.
+        dl_wnd (int, optional): window size that set the maximum dilation of A_init. Defaults to 5.
+        sparse_penal (float, optional): sparseness penalty, it provides balance between fidelity to cells’ shape and sparsity of identified cells. Defaults to 0.5.
+        update_background (bool, optional): True or False, determines whether the background is updated. Defaults to True.
+        post_scal (bool, optional): deprecated.
+        normalize (bool, optional): Whether to normalize the resulting spatial footprints so that the sum of coefficients in each footprint is 1. Defaults to True.
+        zero_thres (str, optional): The threshold below which the values in the spatial footprints will be set to zero. Defaults to 'eps', which will be interpreted as the machine epsilon of the datatype.
+        sched (str, optional): deprecated
+
+    Returns:
+        List(xarray.DataArray):
+
+    """
     _T = Y.sizes["frame"]
     intpath = os.environ["MINIAN_INTERMEDIATE"]
     if in_memory:
@@ -537,14 +596,13 @@ def get_p(y):
     output_dtypes=(float, float, float, float),
 )
 def update_temporal_cvxpy(y, g, sn, A=None, bseg=None, **kwargs):
-    """
-    spatial:
-    (d, f), (u, p), (d), (d, u)
-    (d, f), (p), (d), (d)
-    trace:
-    (u, f), (u, p), (u)
-    (f), (p), ()
-    """
+    # spatial:
+    # (d, f), (u, p), (d), (d, u)
+    # (d, f), (p), (d), (d)
+    # trace:
+    # (u, f), (u, p), (u)
+    # (f), (p), ()
+
     # get_parameters
     sparse_penal = kwargs.get("sparse_penal")
     max_iters = kwargs.get("max_iters")
