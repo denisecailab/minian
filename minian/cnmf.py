@@ -596,11 +596,11 @@ def get_p(y):
     output_dtypes=(float, float, float, float),
 )
 def update_temporal_cvxpy(y, g, sn, A=None, bseg=None, **kwargs):
-    # spatial:	
-    # (d, f), (u, p), (d), (d, u)	
-    # (d, f), (p), (d), (d)	
-    # trace:	
-    # (u, f), (u, p), (u)	
+    # spatial:
+    # (d, f), (u, p), (d), (d, u)
+    # (d, f), (p), (d), (d)
+    # trace:
+    # (u, f), (u, p), (u)
     # (f), (p), ()
 
     # get_parameters
