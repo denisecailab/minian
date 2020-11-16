@@ -156,7 +156,7 @@ def open_minian(dpath, post_process=None, return_dict=False):
 
     Args:
         dpath ([string]): contains the normalized absolutized version of the pathname path,which is the path to minian folder;
-        Post_process (function): post processing function, parameters: dataset (xarray.DataArray), mpath (string, path to the raw backend files)  
+        Post_process (function): post processing function, parameters: dataset (xarray.DataArray), mpath (string, path to the raw backend files)
         return_dict ([boolean]): default False
 
     Returns:
