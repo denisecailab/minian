@@ -233,8 +233,8 @@ def pnr_perseed(a, freq, q):
     ptp = ptp_q(a, q)
     but_b, but_a = butter(2, freq, btype="high", analog=False)
     a = lfilter(but_b, but_a, a).real
-    return ptp / ptp_noise
     ptp_noise = ptp_q(a, q)
+    return ptp / ptp_noise
 
 
 def med_baseline(a, wnd):
