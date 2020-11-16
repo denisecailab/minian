@@ -115,7 +115,6 @@ def local_max(fm, k, diff=0):
     fm_max = (fm == fm_max).astype(np.uint8)
     return cv2.bitwise_and(fm_max, fm_diff).astype(np.uint8)
 
-
 def gmm_refine(
     varr, seeds, q=(0.1, 99.9), n_components=2, valid_components=1, mean_mask=True
 ):
@@ -446,12 +445,4 @@ def initbf(varr, A, C):
 
 @da.as_gufunc(signature="(h, w)->(h, w)", output_dtypes=int, allow_rechunk=True)
 def da_label(im):
-    """[summary]
-
-    Args:
-        im ([type]): [description]
-
-    Returns:
-        [type]: [description]
-    """
     return label(im)[0]

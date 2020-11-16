@@ -1,5 +1,6 @@
 import cv2
 import xarray as xr
+from medpy.filter.smoothing import anisotropic_diffusion
 from scipy.ndimage import uniform_filter
 from skimage.morphology import disk
 
@@ -64,28 +65,11 @@ def stripe_correction(varr, reduce_dim="height", on="mean"):
     return varr_sc.rename(varr.name + "_Stripe_Corrected")
 
 
-def gaussian_blur(varray, ksize=(3, 3), sigmaX=0):
-    return varray.groupby("frame").apply(
-        lambda fm: cv2.GaussianBlur(fm.values, ksize, sigmaX)
-    )
-
-
 def denoise(varr, method, **kwargs):
-    """
-    Remove noise from a video
-
-    Args:
-        varr (xarray.DataArray): xarray.DataArray a labeled 3-d array representation of the videos with dimensions: frame, height and width.
-        method (string): "gaussian", "anisotropic", "median" or "bilateral"
-
-    Raises:
-        NotImplementedError: raised when the method is not one of "gaussian", "anisotropic", "median" or "bilateral"
-
-    Returns:
-        xarray.DataArray: xarray.DataArray a labeled 3-d array with name <name>_denoised
-    """
     if method == "gaussian":
         func = cv2.GaussianBlur
+    elif method == "anisotropic":
+        func = anisotropic_diffusion
     elif method == "median":
         func = cv2.medianBlur
     elif method == "bilateral":

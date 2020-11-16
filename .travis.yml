@@ -1,0 +1,56 @@
+language: bash
+
+os:
+  - windows
+  - linux
+
+# jobs:
+#   include:
+#     - os: linux
+#       python: 3.8.1
+
+branches:
+  only:
+  - master
+  - dev
+  - "/^pull.$"
+  - "/^hotfix-.+$/"
+
+before_install:
+  - . scripts/travis/before_install_nix_win.sh
+
+install:
+    # Install miniconda
+  - . scripts/travis/install_nix_win.sh
+
+  - source $MINICONDA_PATH/etc/profile.d/conda.sh;
+  - hash -r
+
+  # Setting up conda env and install deps
+  - conda env create -q -n minian -f environment.yml
+  - conda activate minian
+  - conda list
+  - conda install -c conda-forge -y jupyterlab
+  - jupyter labextension install @pyviz/jupyterlab_pyviz
+  - conda env export
+  - conda install -y pytest
+  - conda install -y pytest-cov
+  - conda install -c anaconda -y black
+  - pip install opencv-python-headless
+
+script:
+  # The test/check scripts go here
+  - travis_fold start "Black-check code quality"
+  - black --check minian
+  - travis_fold end "Black-check code quality"
+
+  - travis_fold start "pytest"
+  - pytest -v --color=yes --cov=minian --pyargs minian
+  - travis_fold end "pytest"
+
+  # - travis_fold start "Jupyter notebook pipeline"
+  # - papermill pipeline.ipynb pipeline_output.ipynb
+  # - travis_fold end "Jupyter notebook pipeline"
+
+after_success:
+  - bash <(curl -s https://codecov.io/bash)

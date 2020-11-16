@@ -150,22 +150,29 @@ def load_avi_perframe(fname, fid):
         return np.zeros((h, w))
 
 
-def open_minian(dpath, var_name, return_dict=False):
+def open_minian(dpath, post_process=None, return_dict=False):
     """
     Opens a file previously saved in minian handling the proper data format and chunks
 
     Args:
         dpath ([string]): contains the normalized absolutized version of the pathname path,which is the path to minian folder;
-        Fname ([string]): points to the parameters and metadata file;
-        Backend ([string]):  specify the format for data storage, defaults to “netcdf”
         Post_process (function): post processing function, parameters: dataset (xarray.DataArray), mpath (string, path to the raw backend files)  
+        return_dict ([boolean]): default False
 
     Returns:
         xarray.DataArray: [loaded data]
     """
-    dpath = os.path.normpath(dpath)
-    fp = os.path.join(dpath, var_name + ".zarr")
-    return xr.open_zarr(fp)[var_name]
+    dslist = [
+        xr.open_zarr(pjoin(dpath, d)) for d in listdir(dpath) if isdir(pjoin(dpath, d))
+    ]
+    if return_dict:
+        dslist = [list(d.values())[0] for d in dslist]
+        ds = {d.name: d for d in dslist}
+    else:
+        ds = xr.merge(dslist, compat="no_conflicts")
+    if (not return_dict) and post_process:
+        ds = post_process(ds, dpath)
+    return ds
 
 
 def open_minian_mf(
@@ -196,7 +203,7 @@ def open_minian_mf(
                 warnings.warn("multiple dataset found: {}".format(flist))
             fname = flist[-1]
             print("opening {}".format(fname))
-            minian = open_minian(nextdir, fname=fname, **kwargs)
+            minian = open_minian(dpath=os.path.join(nextdir, fname), **kwargs)
             key = tuple([np.array_str(minian[d].values) for d in index_dims])
             minian_dict[key] = minian
             print(["{}: {}".format(d, v) for d, v in zip(index_dims, key)])
@@ -265,7 +272,7 @@ def save_minian(
         for f in os.listdir(dst_path):
             os.rename(os.path.join(dst_path, f), os.path.join(arr_path, f))
         os.rmdir(dst_path)
-    return open_minian(dpath, var.name)
+    return xr.open_zarr(fp)[var.name]
 
 
 def xrconcat_recursive(var, dims):
