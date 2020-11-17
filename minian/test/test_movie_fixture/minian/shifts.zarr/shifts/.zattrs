@@ -3,5 +3,5 @@
         "frame",
         "variable"
     ],
-    "coordinates": "session session_id animal"
+    "coordinates": "session_id animal session"
 }

@@ -4,5 +4,5 @@
         "height",
         "width"
     ],
-    "coordinates": "session session_id unit_labels animal"
+    "coordinates": "unit_labels session session_id animal"
 }
