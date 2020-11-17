@@ -1,6 +1,5 @@
 import cv2
 import xarray as xr
-from medpy.filter.smoothing import anisotropic_diffusion
 from scipy.ndimage import uniform_filter
 from skimage.morphology import disk
 
@@ -68,8 +67,6 @@ def stripe_correction(varr, reduce_dim="height", on="mean"):
 def denoise(varr, method, **kwargs):
     if method == "gaussian":
         func = cv2.GaussianBlur
-    elif method == "anisotropic":
-        func = anisotropic_diffusion
     elif method == "median":
         func = cv2.medianBlur
     elif method == "bilateral":
