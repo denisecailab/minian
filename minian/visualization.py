@@ -43,7 +43,7 @@ from .utilities import rechunk_like
 
 class VArrayViewer:
     """
-    This function creates an interactive figure where the data array is displayed as a movie. In the interactive figure, the user can draw an arbitrary box in the field of view and record this box as a mask using the "save mask" button 
+    This function creates an interactive figure where the data array is displayed as a movie. In the interactive figure, the user can draw an arbitrary box in the field of view and record this box as a mask using the "save mask" button
         Args:
             varr (xarray.DataArray): xarray.DataArray a labeled 3-d array representation of the videos with dimensions: frame, height and width.
             framerate (int, optional): Acquisition frame rate. Defaults to 30.
@@ -1316,7 +1316,7 @@ def visualize_gmm_fit(values, gmm, bins):
 
 def visualize_spatial_update(A_dict, C_dict, kdims=None, norm=True, datashading=True):
     """
-    This function launches the visualizer to explore the parameters of the spatial noise estimation. This step precedes the CNMF and is used to estimate the noise introduced by motion. 
+    This function launches the visualizer to explore the parameters of the spatial noise estimation. This step precedes the CNMF and is used to estimate the noise introduced by motion.
 
     Args:
         A_dict (dict): input spatial footprints
