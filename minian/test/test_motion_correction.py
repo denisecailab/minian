@@ -5,7 +5,7 @@ import holoviews as hv
 from ..utilities import load_videos
 from ..motion_correction import *
 
-dpath = "./minian/test/test_movie"
+dpath = "./demo_movies"
 
 param_load_videos = {
     "pattern": "msCam[0-9].avi",

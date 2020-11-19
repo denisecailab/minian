@@ -16,10 +16,10 @@ from IPython.core.display import display
 
 # Set up Initial Basic Parameters#
 minian_path = "."
-dpath = "./minian/test/test_movie"
+dpath = "./demo_movies"
 dpath_fixture = "./minian/test/test_movie_fixture"
 minian_ds_path = os.path.join(dpath, "minian")
-intpath = "./minian/test/minian_intermediate"
+intpath = os.path.join(dpath, "minian_intermediate")
 subset = dict(frame=slice(0, None))
 subset_mc = None
 interactive = True
