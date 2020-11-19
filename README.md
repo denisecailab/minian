@@ -106,7 +106,7 @@ First fork the minian-feedstock to your accounts and clone it to your computer `
 Now you have a fork of the minian-feedstock on your computer. We use this fork to create pull requests against the conda-forge/minian-feedstock
 repository.
 
-steps for syncing your repo with the conda-forge/minian-feedstock repo 
+steps for syncing your repo with the conda-forge/minian-feedstock repo (https://github.com/conda-forge/minian-feedstock)
 ```
 git remote add upstream git@github.com:conda-forge/minian-feedstock.git
 git fetch upstream
