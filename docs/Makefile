@@ -21,6 +21,8 @@ convert_noted:
 	cd .. && \
 	jupyter nbconvert --to rst pipeline_noted.ipynb && \
 	mv pipeline_noted.rst docs/source && \
+	jupyter nbconvert --to rst cross-registration.ipynb && \
+	mv cross-registration.rst docs/source && \
 	cd -
 
 copy_images:
