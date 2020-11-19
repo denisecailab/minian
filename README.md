@@ -7,6 +7,7 @@
 # About MiniAn
 
 MiniAn is an analysis pipeline and visualization tool inspired by both [CaImAn](https://github.com/flatironinstitute/CaImAn) and [MIN1PIPE](https://github.com/JinghaoLu/MIN1PIPE) package specifically for [Miniscope](http://miniscope.org/index.php/Main_Page) data.
+We also included in this repo the pipeline cross-registration that allows the user to register the outcomes of the MiniAn pipeline across multiple experimental sessions. This script is not necessary to analyze the data, but it is a useful add-on to deal with longitudinal experiments. 
 
 # Quick Start Guide
 
