@@ -235,7 +235,7 @@ def test_pipeline():
         shifts.rename("shifts").chunk({"frame": 20}), **param_save_minian
     )
 
-    test_shifts = open_minian(os.path.join(dpath_fixture, "minian"), "shifts")
+    test_shifts = open_minian(os.path.join(dpath_fixture, "minian"))["shifts"]
     assert shifts.all() == test_shifts.all(), "Test Fail: arrays are not the same"
 
     hv.output(size=output_size)
@@ -325,7 +325,7 @@ def test_pipeline():
         Y_hw_chk.max("frame").rename("max_proj"), **param_save_minian
     ).compute()
 
-    test_max_proj = open_minian(os.path.join(dpath_fixture, "minian"), "max_proj")
+    test_max_proj = open_minian(os.path.join(dpath_fixture, "minian"))["max_proj"]
     assert max_proj.all() == test_max_proj.all(), "Test Fail: arrays are not the same"
 
     seeds = seeds_init(Y_fm_chk, **param_seeds_init)
@@ -1016,37 +1016,37 @@ def test_pipeline():
         c0 = c0.assign_coords(unit_labels=("unit_id", cnmfviewer.unit_labels))
         b0 = b0.assign_coords(unit_labels=("unit_id", cnmfviewer.unit_labels))
 
-    test_A = open_minian(os.path.join(dpath_fixture, "minian"), "A")
+    test_A = open_minian(os.path.join(dpath_fixture, "minian"))["A"]
     assert (
         A.all() == test_A.all()
     ), "Test Fail: A does not match results in fixture folder"
 
-    test_C = open_minian(os.path.join(dpath_fixture, "minian"), "C")
+    test_C = open_minian(os.path.join(dpath_fixture, "minian"))["C"]
     assert (
         C.all() == test_C.all()
     ), "Test Fail: C does not match results in fixture folder"
 
-    test_S = open_minian(os.path.join(dpath_fixture, "minian"), "S")
+    test_S = open_minian(os.path.join(dpath_fixture, "minian"))["S"]
     assert (
         S.all() == test_S.all()
     ), "Test Fail: S does not match results in fixture folder"
 
-    test_c0 = open_minian(os.path.join(dpath_fixture, "minian"), "c0")
+    test_c0 = open_minian(os.path.join(dpath_fixture, "minian"))["c0"]
     assert (
         c0.all() == test_c0.all()
     ), "Test Fail: c0 does not match results in fixture folder"
 
-    test_b0 = open_minian(os.path.join(dpath_fixture, "minian"), "b0")
+    test_b0 = open_minian(os.path.join(dpath_fixture, "minian"))["b0"]
     assert (
         b0.all() == test_b0.all()
     ), "Test Fail: b0 does not match results in fixture folder"
 
-    test_b = open_minian(os.path.join(dpath_fixture, "minian"), "b")
+    test_b = open_minian(os.path.join(dpath_fixture, "minian"))["b"]
     assert (
         b.all() == test_b.all()
     ), "Test Fail: b does not match results in fixture folder"
 
-    test_f = open_minian(os.path.join(dpath_fixture, "minian"), "f")
+    test_f = open_minian(os.path.join(dpath_fixture, "minian"))["f"]
     assert (
         f.all() == test_f.all()
     ), "Test Fail: f does not match results in fixture folder"

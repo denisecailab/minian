@@ -1,0 +1,7 @@
+{
+    "_ARRAY_DIMENSIONS": [
+        "unit_id",
+        "frame"
+    ],
+    "coordinates": "unit_labels session session_id animal"
+}
