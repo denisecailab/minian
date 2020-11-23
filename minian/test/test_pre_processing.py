@@ -5,7 +5,7 @@ import holoviews as hv
 from ..utilities import load_videos
 from ..preprocessing import denoise, remove_background, stripe_correction
 
-dpath = "./minian/test/test_movie"
+dpath = "./demo_movies"
 
 param_load_videos = {
     "pattern": "msCam[0-9].avi",
@@ -25,7 +25,7 @@ def varr():
 
 
 def test_can_load_videos(varr):
-    assert varr.shape[0] == 400  # frames
+    assert varr.shape[0] == 900  # frames
     assert varr.shape[1] == 480  # height
     assert varr.shape[2] == 752  # width
     return varr
