@@ -5,4 +5,5 @@ User Guide
    :maxdepth: 4
    :caption: Contents:
 
-   pipeline_noted
+   userguide_pipeline
+   userguide_crossregistration
