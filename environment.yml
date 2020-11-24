@@ -47,4 +47,5 @@ dependencies:
   - zarr=2.4.0
   - sparse=0.9.1
   - pip:
+      - medpy==0.4.0
       - rechunker==0.2.0
