@@ -867,8 +867,6 @@ Recall the parameters for ``save_minian``:
 
    param_save_minian = {
        'dpath': dpath,
-       'fname': 'minian',
-       'backend': 'zarr',
        'meta_dict': dict(session_id=-1, session=-2, animal=-3),
        'overwrite': True}
 
