@@ -755,9 +755,7 @@ Three methods are supported: ``'gaussian'``, ``'median'`` and
 `GaussianBlur <https://www.docs.opencv.org/3.3.0/d4/d86/group__imgproc__filter.html#gaabe8c836e97159a9193fb0b11ac52cf1>`__
 from the ``OpenCV`` package. For\ ``method='median'`` it calls
 `MedianBlur <https://docs.opencv.org/3.4.3/d4/d86/group__imgproc__filter.html#ga564869aa33e58769b4469101aac458f9>`__
-from the ``OpenCV`` package. For ``method='anisotropic'`` it calls
-`anisotropic_diffusion <http://loli.github.io/medpy/generated/medpy.filter.smoothing.anisotropic_diffusion.html>`__
-from the ``medpy`` package. All additional `keyword
+from the ``OpenCV`` package. All additional `keyword
 arguments <https://docs.python.org/3.7/tutorial/controlflow.html#keyword-arguments>`__
 passed into ``denoise`` are directly passed into one of those two
 denoising functions under the hood.
