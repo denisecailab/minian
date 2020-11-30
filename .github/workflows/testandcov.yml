@@ -23,6 +23,8 @@ jobs:
       uses: actions/setup-python@v2
       with:
         python-version: ${{ matrix.python-version }}
+    - name: Install ffmpeg
+      run: sudo apt-get install ffmpeg
     - name: Install dependencies
       run: |
         # $CONDA is an environment variable pointing to the root of the miniconda directory
@@ -34,5 +36,5 @@ jobs:
         $CONDA/bin/black --check minian
     - name: Test with pytest
       run: |
-        conda install pytest
+        conda install pytest pytest-cov
         $CONDA/bin/pytest -v --color=yes --cov=minian --pyargs minian
