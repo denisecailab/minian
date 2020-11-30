@@ -518,8 +518,7 @@ def test_pipeline():
         .opts(**opts)
         .relabel("Spatial Footprints First Update")
         + hv.Image(
-            (A_new > 0).sum("unit_id").compute().rename("A"),
-            kdims=["width", "height"],
+            (A_new > 0).sum("unit_id").compute().rename("A"), kdims=["width", "height"],
         )
         .opts(**opts)
         .relabel("Binary Spatial Footprints First Update")
@@ -688,12 +687,7 @@ def test_pipeline():
         sig = C_new + b0_new + c0_new
         display(
             visualize_temporal_update(
-                YrA.sel(unit_id=mask),
-                C_new,
-                S_new,
-                g,
-                sig,
-                A.sel(unit_id=mask),
+                YrA.sel(unit_id=mask), C_new, S_new, g, sig, A.sel(unit_id=mask),
             )
         )
 
@@ -793,8 +787,7 @@ def test_pipeline():
         .opts(**opts)
         .relabel("Spatial Footprints New")
         + hv.Image(
-            (A_new > 0).sum("unit_id").compute().rename("A"),
-            kdims=["width", "height"],
+            (A_new > 0).sum("unit_id").compute().rename("A"), kdims=["width", "height"],
         )
         .opts(**opts)
         .relabel("Binary Spatial Footprints New")
@@ -965,12 +958,7 @@ def test_pipeline():
         sig = C_new + b0_new + c0_new
         display(
             visualize_temporal_update(
-                YrA.sel(unit_id=mask),
-                C_new,
-                S_new,
-                g,
-                sig,
-                A.sel(unit_id=mask),
+                YrA.sel(unit_id=mask), C_new, S_new, g, sig, A.sel(unit_id=mask),
             )
         )
 

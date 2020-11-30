@@ -340,9 +340,7 @@ def compute_trace(Y, A, b, C, f, noise_freq=None):
         YrA_ls[i : i + 100] = da.compute(YrA_ls[i : i + 100])[0]
     YrA = darr.array(np.concatenate(YrA_ls, axis=0)).rechunk((-1, 1))
     YrA = xr.DataArray(
-        YrA,
-        dims=["frame", "unit_id"],
-        coords={"frame": fms, "unit_id": uid},
+        YrA, dims=["frame", "unit_id"], coords={"frame": fms, "unit_id": uid},
     )
     if noise_freq:
         YrA = smooth_sig(YrA, noise_freq)
@@ -522,34 +520,22 @@ def update_temporal(
     C_new = xr.DataArray(
         C_new.map_blocks(lambda a: a.todense(), dtype=float),
         dims=["unit_id", "frame"],
-        coords={
-            "unit_id": uids_new_ma,
-            "frame": YrA_new.coords["frame"],
-        },
+        coords={"unit_id": uids_new_ma, "frame": YrA_new.coords["frame"],},
     )
     S_new = xr.DataArray(
         S_new.map_blocks(lambda a: a.todense(), dtype=float),
         dims=["unit_id", "frame"],
-        coords={
-            "unit_id": uids_new_ma,
-            "frame": YrA_new.coords["frame"].values,
-        },
+        coords={"unit_id": uids_new_ma, "frame": YrA_new.coords["frame"].values,},
     )
     b0_new = xr.DataArray(
         b0_new.map_blocks(lambda a: a.todense(), dtype=float),
         dims=["unit_id", "frame"],
-        coords={
-            "unit_id": uids_new_ma,
-            "frame": YrA_new.coords["frame"].values,
-        },
+        coords={"unit_id": uids_new_ma, "frame": YrA_new.coords["frame"].values,},
     )
     c0_new = xr.DataArray(
         c0_new.map_blocks(lambda a: a.todense(), dtype=float),
         dims=["unit_id", "frame"],
-        coords={
-            "unit_id": uids_new_ma,
-            "frame": YrA_new.coords["frame"].values,
-        },
+        coords={"unit_id": uids_new_ma, "frame": YrA_new.coords["frame"].values,},
     )
     mask = xr.DataArray(
         mask, dims=["unit_id"], coords={"unit_id": uids_new}
