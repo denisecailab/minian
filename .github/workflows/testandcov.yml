@@ -1,0 +1,38 @@
+name: Test-and-Coverage
+
+# Run this workflow every time a new commit pushed to your repository
+on: push
+
+jobs:
+  # Set the job key. The key is displayed as the job name
+  # when a job name is not provided
+  test-and-coverage:
+    # Name the Job
+    name: Run tests and upload coverage
+    # Set the type of machine to run on
+    runs-on: ubuntu-latest
+    strategy:
+      max-parallel: 5
+      matrix:
+        python-version: [3.8]
+
+    steps:
+      # Checks out a copy of your repository on the ubuntu-latest machine
+    - uses: actions/checkout@v2
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v2
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Install dependencies
+      run: |
+        # $CONDA is an environment variable pointing to the root of the miniconda directory
+        $CONDA/bin/conda env update --file environment.yml --name base
+    - name: Lint with black
+      run: |
+        $CONDA/bin/conda install black
+        # stop the build if there are Python syntax errors or undefined names
+        $CONDA/bin/black --check minian
+    - name: Test with pytest
+      run: |
+        conda install pytest
+        $CONDA/bin/pytest -v --color=yes --cov=minian --pyargs minian
