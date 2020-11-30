@@ -406,9 +406,7 @@ def initA_perseed(varr, std, h, w, wnd, thres_corr):
     corr = da.where(corr > thres_corr, corr, 0)
     crds = np.array(list(itt.product(h_sur, w_sur))).T
     corr = delayed(sparse.COO)(
-        crds,
-        corr,
-        shape=(varr.sizes["height"], varr.sizes["width"]),
+        crds, corr, shape=(varr.sizes["height"], varr.sizes["width"]),
     )
     corr = da.from_delayed(
         corr, shape=(varr.sizes["height"], varr.sizes["width"]), dtype=float

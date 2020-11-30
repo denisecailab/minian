@@ -34,10 +34,7 @@ def estimate_shifts(varr, max_sh, dim="frame", npart=3, local=False):
             sh = xr.DataArray(
                 sh,
                 dims=[dim, "variable"],
-                coords={
-                    dim: va.coords[dim].values,
-                    "variable": ["height", "width"],
-                },
+                coords={dim: va.coords[dim].values, "variable": ["height", "width"],},
             )
             res_dict[lab] = sh.assign_coords(**{k: v for k, v in zip(loop_dims, lab)})
         sh = xrconcat_recursive(res_dict, loop_dims)
@@ -46,10 +43,7 @@ def estimate_shifts(varr, max_sh, dim="frame", npart=3, local=False):
         sh = xr.DataArray(
             sh,
             dims=[dim, "variable"],
-            coords={
-                dim: varr.coords[dim].values,
-                "variable": ["height", "width"],
-            },
+            coords={dim: varr.coords[dim].values, "variable": ["height", "width"],},
         )
     return sh
 
@@ -90,9 +84,7 @@ def est_sh_part(varr, max_sh, npart, local, n_jobs=1, parallel=False):
             output_sizes={"s": 2},
         )
         shift_func = darr.gufunc(
-            shift_perframe,
-            signature="(h,w),(s)->(h,w)",
-            output_dtypes=float,
+            shift_perframe, signature="(h,w),(s)->(h,w)", output_dtypes=float,
         )
     else:
         match_func = match_temp

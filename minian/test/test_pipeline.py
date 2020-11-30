@@ -299,7 +299,7 @@ def test_pipeline():
             os.path.getsize(os.path.join(dpath, "minian_mc.mp4"))
             - os.path.getsize(os.path.join(dpath_fixture, "minian_mc.mp4"))
         )
-        < 5000
+        < 110000
     )
 
     probe = ffmpeg.probe(os.path.join(dpath, "minian_mc.mp4"))
@@ -334,7 +334,7 @@ def test_pipeline():
     visualize_seeds(max_proj, seeds)
 
     if interactive:
-        noise_freq_list = [0.005, 0.01, 0.02, 0.06, 0.1, 0.2, 0.3, 0.45, 0.6, 0.8]
+        noise_freq_list = [0.2]
         example_seeds = seeds.sample(6, axis="rows")
         example_trace = (
             Y_hw_chk.stack(spatial=["height", "width"])
@@ -449,7 +449,7 @@ def test_pipeline():
     except NameError:
         pass
     cluster = LocalCluster(
-        n_workers=4, threads_per_worker=1, memory_limit="2GB", resources={"task": 1}
+        n_workers=2, threads_per_worker=1, memory_limit="4GB", resources={"task": 1}
     )
     client = Client(cluster)
 
@@ -469,7 +469,7 @@ def test_pipeline():
         C_sub = C.sel(unit_id=units).persist()
 
     if interactive:
-        sprs_ls = [0.005, 0.01, 0.05]
+        sprs_ls = [0.01]
         A_dict = dict()
         C_dict = dict()
         for cur_sprs in sprs_ls:
@@ -518,8 +518,7 @@ def test_pipeline():
         .opts(**opts)
         .relabel("Spatial Footprints First Update")
         + hv.Image(
-            (A_new > 0).sum("unit_id").compute().rename("A"),
-            kdims=["width", "height"],
+            (A_new > 0).sum("unit_id").compute().rename("A"), kdims=["width", "height"],
         )
         .opts(**opts)
         .relabel("Binary Spatial Footprints First Update")
@@ -565,7 +564,7 @@ def test_pipeline():
 
     if interactive:
         p_ls = [1]
-        sprs_ls = [0.1, 0.5, 1, 2]
+        sprs_ls = [0.5]
         add_ls = [20]
         noise_ls = [0.06]
         YA_dict, C_dict, S_dict, g_dict, sig_dict, A_dict = [dict() for _ in range(6)]
@@ -688,12 +687,7 @@ def test_pipeline():
         sig = C_new + b0_new + c0_new
         display(
             visualize_temporal_update(
-                YrA.sel(unit_id=mask),
-                C_new,
-                S_new,
-                g,
-                sig,
-                A.sel(unit_id=mask),
+                YrA.sel(unit_id=mask), C_new, S_new, g, sig, A.sel(unit_id=mask),
             )
         )
 
@@ -744,7 +738,7 @@ def test_pipeline():
         C_sub = sig.sel(unit_id=units).persist()
 
     if interactive:
-        sprs_ls = [5e-3, 1e-2, 5e-2]
+        sprs_ls = [1e-2]
         A_dict = dict()
         C_dict = dict()
         for cur_sprs in sprs_ls:
@@ -793,8 +787,7 @@ def test_pipeline():
         .opts(**opts)
         .relabel("Spatial Footprints New")
         + hv.Image(
-            (A_new > 0).sum("unit_id").compute().rename("A"),
-            kdims=["width", "height"],
+            (A_new > 0).sum("unit_id").compute().rename("A"), kdims=["width", "height"],
         )
         .opts(**opts)
         .relabel("Binary Spatial Footprints New")
@@ -840,7 +833,7 @@ def test_pipeline():
 
     if interactive:
         p_ls = [1]
-        sprs_ls = [0.1, 0.5, 1, 2]
+        sprs_ls = [0.5]
         add_ls = [20]
         noise_ls = [0.06]
         YA_dict, C_dict, S_dict, g_dict, sig_dict, A_dict = [dict() for _ in range(6)]
@@ -965,12 +958,7 @@ def test_pipeline():
         sig = C_new + b0_new + c0_new
         display(
             visualize_temporal_update(
-                YrA.sel(unit_id=mask),
-                C_new,
-                S_new,
-                g,
-                sig,
-                A.sel(unit_id=mask),
+                YrA.sel(unit_id=mask), C_new, S_new, g, sig, A.sel(unit_id=mask),
             )
         )
 
