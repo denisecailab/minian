@@ -1,7 +1,16 @@
 name: Test-and-Coverage
 
-# Run this workflow every time a new commit pushed to your repository
-on: push
+# Run this workflow every time for pull requests and pushes to master and dev branch
+on:
+  push:
+    branches:
+      - master
+      - dev
+      - zs
+  pull_request:
+    branches:
+      - master
+      - dev
 
 jobs:
   # Set the job key. The key is displayed as the job name
@@ -23,10 +32,16 @@ jobs:
       uses: actions/setup-python@v2
       with:
         python-version: ${{ matrix.python-version }}
-    - name: Update ubuntu-latest
-      run: sudo apt-get update
-    - name: Install ffmpeg
-      run: sudo apt-get install ffmpeg
+    - name: Cleanup pre-installed tools
+      run: |
+        sudo rm -rf /usr/share/dotnet
+        sudo rm -rf /opt/ghc
+        sudo rm -rf "/usr/local/share/boost"
+        sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+    - name: Update ubuntu-latest and install ffmpeg
+      run: |
+        sudo apt-get update
+        sudo apt-get install ffmpeg
     - name: Install dependencies
       run: |
         # $CONDA is an environment variable pointing to the root of the miniconda directory
@@ -36,7 +51,10 @@ jobs:
         $CONDA/bin/conda install -c conda-forge black==19.10b0
         # stop the build if there are Python syntax errors or undefined names
         $CONDA/bin/black --check minian
-    - name: Test with pytest
+    - name: Run tests and collect coverage
       run: |
         conda install pytest pytest-cov
         $CONDA/bin/pytest -v --color=yes --cov=minian --pyargs minian
+    - name: Upload coverage to codecov.io
+      run: |
+        bash <(curl -s https://codecov.io/bash)
