@@ -34,7 +34,7 @@ jobs:
       if: steps.git-check.outputs.modified == 'true'
       run: |
           git config --global user.name 'DeniseCaiLab'
-          git config --global user.email 'denisecai@gmail.com'
+          git config --global user.email 'denisecailab@gmail.com'
           git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/$GITHUB_REPOSITORY
           git checkout `basename $GITHUB_REF`
           git commit -am "Automated changes, black formatter"
