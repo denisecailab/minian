@@ -118,14 +118,3 @@ dask-worker-space
 
 # history
 .history
-*.pyc
-
-build_artifacts
-# conda smithy ci-skeleton start
-*.pyc
-
-build_artifacts
-# conda smithy ci-skeleton end
-
-# minian intermediate
-minian_intermediate

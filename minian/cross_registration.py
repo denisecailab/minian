@@ -167,7 +167,7 @@ def fill_mapping(mappings, cents):
             cur_ss_grp = cur_grp["session"][cur_ss].dropna()
             cur_ss_all = cur_cent[cur_cent["session"] == cur_ss]["unit_id"].dropna()
             cur_fill_set = set(cur_ss_all.unique()) - set(cur_ss_grp.unique())
-            cur_fill_df = pd.DataFrame({("session", cur_ss): list(cur_fill_set)})
+            cur_fill_df = pd.DataFrame({("session", cur_ss): list(cur_fill_set),})
             cur_fill_df[("group", "group")] = [(cur_ss,)] * len(cur_fill_df)
             fill_ls.append(cur_fill_df)
         return pd.concat(fill_ls, ignore_index=True)
