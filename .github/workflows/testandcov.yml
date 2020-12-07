@@ -1,0 +1,59 @@
+name: Test-and-Coverage
+
+# Run this workflow every time for pull requests and pushes to master and dev branch
+on:
+  push:
+    branches:
+      - master
+      - dev
+  pull_request:
+    branches:
+      - master
+      - dev
+
+jobs:
+  # Set the job key. The key is displayed as the job name
+  # when a job name is not provided
+  test-and-coverage:
+    # Name the Job
+    name: Run tests and upload coverage
+    # Set the type of machine to run on
+    runs-on: ubuntu-latest
+    strategy:
+      max-parallel: 5
+      matrix:
+        python-version: [3.8]
+
+    steps:
+      # Checks out a copy of your repository on the ubuntu-latest machine
+    - uses: actions/checkout@v2
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v2
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Cleanup pre-installed tools
+      run: |
+        sudo rm -rf /usr/share/dotnet
+        sudo rm -rf /opt/ghc
+        sudo rm -rf "/usr/local/share/boost"
+        sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+    - name: Update ubuntu-latest and install ffmpeg
+      run: |
+        sudo apt-get update
+        sudo apt-get install ffmpeg
+    - name: Install dependencies
+      run: |
+        # $CONDA is an environment variable pointing to the root of the miniconda directory
+        $CONDA/bin/conda env update --file environment.yml --name base
+    - name: Lint with black
+      run: |
+        $CONDA/bin/conda install -c conda-forge black==19.10b0
+        # stop the build if there are Python syntax errors or undefined names
+        $CONDA/bin/black --check minian
+    - name: Run tests and collect coverage
+      run: |
+        conda install pytest pytest-cov
+        $CONDA/bin/pytest -v --color=yes --cov=minian --pyargs minian
+    - name: Upload coverage to codecov.io
+      run: |
+        bash <(curl -s https://codecov.io/bash)

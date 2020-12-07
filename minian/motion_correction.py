@@ -1,32 +1,99 @@
+import functools as fct
+import itertools as itt
+
 import cv2
 import dask.array as darr
 import numpy as np
 import xarray as xr
-from dask import delayed
+
+from .utilities import xrconcat_recursive
 
 
 def estimate_shifts(varr, max_sh, dim="frame", npart=3, local=False):
-    varr = varr.chunk({"height": -1, "width": -1})
-    vmax, sh = xr.apply_ufunc(
-        est_sh_part,
-        varr,
-        input_core_dims=[[dim, "height", "width"]],
-        output_core_dims=[["height", "width"], [dim, "variable"]],
-        vectorize=True,
-        dask="allowed",
-        kwargs={"max_sh": max_sh, "npart": npart, "local": local},
-    )
-    return sh.assign_coords(variable=["height", "width"])
+    """
+    Estimate the frame shifts
+
+    Args:
+        varr (xarray.DataArray): xarray.DataArray a labeled 3-d array representation of the videos with dimensions: frame, height and width.
+        max_sh (integer): maximum shift
+        dim (str, optional): name of the z-dimension, defaults to "frame".
+        npart (integer, optional): [the number of partitions of the divide-and-conquer algorithm]. Defaults to 3.
+        local (boolean, optional): [in case where there are multiple local maximum of the cross-correlogram, setting this to `True` will constraint the shift to be the one that’s closest to zero shift. i.e. this assumes the shifts are always small and local regardless of the correlation value]. Defaults to False.
+
+    Returns:
+        xarray.DataArray: the estimated shifts
+    """
+    varr = varr.transpose(..., dim, "height", "width")
+    loop_dims = list(set(varr.dims) - set(["height", "width", dim]))
+    if loop_dims:
+        loop_labs = [varr.coords[d].values for d in loop_dims]
+        res_dict = dict()
+        for lab in itt.product(*loop_labs):
+            va = varr.sel({loop_dims[i]: lab[i] for i in range(len(loop_dims))})
+            vmax, sh = est_sh_part(va.data, max_sh, npart, local, parallel=True)
+            sh = xr.DataArray(
+                sh,
+                dims=[dim, "variable"],
+                coords={dim: va.coords[dim].values, "variable": ["height", "width"],},
+            )
+            res_dict[lab] = sh.assign_coords(**{k: v for k, v in zip(loop_dims, lab)})
+        sh = xrconcat_recursive(res_dict, loop_dims)
+    else:
+        vmax, sh = est_sh_part(varr.data, max_sh, npart, local, parallel=True)
+        sh = xr.DataArray(
+            sh,
+            dims=[dim, "variable"],
+            coords={dim: varr.coords[dim].values, "variable": ["height", "width"],},
+        )
+    return sh
 
 
-def est_sh_part(varr, max_sh, npart, local):
+def est_sh_part(varr, max_sh, npart, local, n_jobs=1, parallel=False):
+    """
+    Estimate the shift per frame
+
+    Args:
+        varr (xarray.DataArray): xarray.DataArray a labeled 3-d array representation of the videos with dimensions: frame, height and width.
+        max_sh (integer): maximum shift
+        npart (integer): [the number of partitions of the divide-and-conquer algorithm].
+        local (boolean): [in case where there are multiple local maximum of the cross-correlogram, setting this to `True` will constraint the shift to be the one that’s closest to zero shift. i.e. this assumes the shifts are always small and local regardless of the correlation value].
+
+    Returns:
+        xarray.DataArray: the max shift per frame
+        xarray.DataArray: the shift per frame
+    """
     if varr.shape[0] <= 1:
         return varr.squeeze(), np.array([[0, 0]])
+    if not parallel:
+        part_func = est_sh_part
+    elif n_jobs * npart < 1000:
+        part_func = fct.partial(est_sh_part, parallel=True)
+    else:
+        part_func = darr.gufunc(
+            est_sh_part,
+            signature="(f,h,w),(),(),(),()->(h,w),(f,s)",
+            output_dtypes=[float, float],
+            output_sizes={"s": 2},
+            allow_rechunk=True,
+        )
+    if parallel:
+        match_func = darr.gufunc(
+            match_temp,
+            signature="(h,w),(h,w),(),()->(s)",
+            output_dtypes=float,
+            output_sizes={"s": 2},
+        )
+        shift_func = darr.gufunc(
+            shift_perframe, signature="(h,w),(s)->(h,w)", output_dtypes=float,
+        )
+    else:
+        match_func = match_temp
+        shift_func = shift_perframe
     idx_spt = np.array_split(np.arange(varr.shape[0]), npart)
     fm_ls, sh_ls = [], []
     for idx in idx_spt:
         if len(idx) > 0:
-            fm, sh = est_sh_part(varr[idx, :, :], max_sh, npart, local)
+            fm, sh = part_func(varr[idx, :, :], max_sh, npart, local, n_jobs * npart)
             fm_ls.append(fm)
             sh_ls.append(sh)
     mid = int(len(sh_ls) / 2)
@@ -40,22 +107,32 @@ def est_sh_part(varr, max_sh, npart, local):
             sh_idx = np.arange(i, len(sh_ls))
         else:
             continue
-        sh_add = darr.from_delayed(
-            delayed(match_temp)(fm, temp, max_sh, local), (2,), float
-        )
+        sh_add = match_func(fm, temp, max_sh, local)
         for j in sh_idx:
             sh_ls[j] = sh_ls[j] + sh_add.reshape((1, -1))
             sh_add_ls[j] = sh_add_ls[j] + sh_add
     for i, (fm, sh) in enumerate(zip(fm_ls, sh_add_ls)):
-        fm_ls[i] = darr.nan_to_num(
-            darr.from_delayed(delayed(shift_perframe)(fm, sh), fm.shape, fm.dtype)
-        )
+        fm_ls[i] = darr.nan_to_num(shift_func(fm, sh))
     sh_ret = darr.concatenate(sh_ls)
     fm_ret = darr.stack(fm_ls)
     return fm_ret.max(axis=0), sh_ret
 
 
 def match_temp(src, dst, max_sh, local, subpixel=False):
+    """
+    Match template.
+    For more information on template matching: https://opencv-python-tutroals.readthedocs.io/en/latest/py_tutorials/py_imgproc/py_template_matching/py_template_matching.html
+
+    Args:
+        src (array): source frame
+        dst (array): template
+        max_sh (integer): maximum shift
+        local (boolean): [in case where there are multiple local maximum of the cross-correlogram, setting this to `True` will constraint the shift to be the one that’s closest to zero shift. i.e. this assumes the shifts are always small and local regardless of the correlation value].
+        subpixel (boolean, optional): [whether to estimate shifts to sub-pixel level using polynomial fitting of cross-correlogram]. Defaults to False.
+
+    Returns:
+        [array]: array (x,y) of the shift (match)
+    """
     src = np.pad(src, max_sh)
     cor = cv2.matchTemplate(
         src.astype(np.float32), dst.astype(np.float32), cv2.TM_CCOEFF_NORMED
@@ -88,6 +165,16 @@ def match_temp(src, dst, max_sh, local, subpixel=False):
 
 
 def apply_shifts(varr, shifts, fill=np.nan):
+    """
+    Apply the shifts to the input frames
+
+    Args:
+        varr (xarray.DataArray): xarray.DataArray a labeled 3-d array representation of the videos with dimensions: frame, height and width.
+        shifts (xarray.DataArray): xarray.DataArray a labeled 3-d array representation of the shifts with dimensions: frame, height and width.
+
+    Returns:
+        (xarray.DataArray): xarray.DataArray of the shifted input frames (varr)
+    """
     sh_dim = shifts.coords["variable"].values.tolist()
     varr_sh = xr.apply_ufunc(
         shift_perframe,
@@ -104,6 +191,16 @@ def apply_shifts(varr, shifts, fill=np.nan):
 
 
 def shift_perframe(fm, sh, fill=np.nan):
+    """
+    Determine the shift per frame
+
+    Args:
+        fm (array): array with the pixels of the frame
+        sh (array): (x,y) shift
+
+    Returns:
+        array: frame
+    """
     if np.isnan(fm).all():
         return fm
     sh = np.around(sh).astype(int)
