@@ -1,13 +1,11 @@
 import os
 import re
-import shutil
 import warnings
 from copy import deepcopy
 from os import listdir
 from os.path import isdir
 from os.path import join as pjoin
 from pathlib import Path
-from uuid import uuid4
 
 import cv2
 import dask as da
@@ -15,9 +13,7 @@ import dask.array as darr
 import numpy as np
 import pandas as pd
 import psutil
-import rechunker
 import xarray as xr
-import zarr as zr
 from natsort import natsorted
 from tifffile import TiffFile, imread
 
@@ -31,7 +27,8 @@ def load_videos(
     downsample_strategy="subset",
     post_process=None,
 ):
-    """
+    """Load videos from a folder.
+
     Load videos from the folder specified in `vpath` and according to the regex
     `pattern`, then concatenate them together across time and return a
     `xarray.DataArray` representation of the concatenated videos. The default
@@ -53,6 +50,7 @@ def load_videos(
         The labeled 3-d array representation of the videos with dimensions:
         ``frame``, ``height`` and ``width``. Returns ``None`` if no data was
         found in the specified folder.
+
     """
     vpath = os.path.normpath(vpath)
     ssname = os.path.basename(vpath)
@@ -150,29 +148,37 @@ def load_avi_perframe(fname, fid):
         return np.zeros((h, w))
 
 
-def open_minian(dpath, post_process=None, return_dict=False):
-    """
-    Opens a file previously saved in minian handling the proper data format and chunks
+def open_minian(
+    dpath, fname="minian", backend="netcdf", chunks=None, post_process=None
+):
+    if backend == "netcdf":
+        fname = fname + ".nc"
+        if chunks == "auto":
+            chunks = dict([(d, "auto") for d in ds.dims])
+        mpath = pjoin(dpath, fname)
+        with xr.open_dataset(mpath) as ds:
+            dims = ds.dims
+        chunks = dict([(d, "auto") for d in dims])
+        ds = xr.open_dataset(os.path.join(dpath, fname), chunks=chunks)
+        if post_process:
+            ds = post_process(ds, mpath)
+        return ds
+    elif backend == "zarr":
+        mpath = pjoin(dpath, fname)
+        dslist = [
+            xr.open_zarr(pjoin(mpath, d))
+            for d in listdir(mpath)
+            if isdir(pjoin(mpath, d))
+        ]
+        ds = xr.merge(dslist)
 
-    Args:
-        dpath ([string]): contains the normalized absolutized version of the pathname path,which is the path to minian folder;
-        Post_process (function): post processing function, parameters: dataset (xarray.DataArray), mpath (string, path to the raw backend files)
-        return_dict ([boolean]): default False
-
-    Returns:
-        xarray.DataArray: [loaded data]
-    """
-    dslist = [
-        xr.open_zarr(pjoin(dpath, d)) for d in listdir(dpath) if isdir(pjoin(dpath, d))
-    ]
-    if return_dict:
-        dslist = [list(d.values())[0] for d in dslist]
-        ds = {d.name: d for d in dslist}
+        if chunks == "auto":
+            chunks = dict([(d, "auto") for d in ds.dims])
+        if post_process:
+            ds = post_process(ds, mpath)
+        return ds.chunk(chunks)
     else:
-        ds = xr.merge(dslist, compat="no_conflicts")
-    if (not return_dict) and post_process:
-        ds = post_process(ds, dpath)
-    return ds
+        raise NotImplementedError("backend {} not supported".format(backend))
 
 
 def open_minian_mf(
@@ -203,7 +209,7 @@ def open_minian_mf(
                 warnings.warn("multiple dataset found: {}".format(flist))
             fname = flist[-1]
             print("opening {}".format(fname))
-            minian = open_minian(dpath=os.path.join(nextdir, fname), **kwargs)
+            minian = open_minian(nextdir, fname=fname, **kwargs)
             key = tuple([np.array_str(minian[d].values) for d in index_dims])
             minian_dict[key] = minian
             print(["{}: {}".format(d, v) for d, v in zip(index_dims, key)])
@@ -219,60 +225,29 @@ def open_minian_mf(
 
 
 def save_minian(
-    var, dpath, meta_dict=None, overwrite=False, chunks=None, mem_limit="200MB"
+    var, dpath, fname="minian", backend="netcdf", meta_dict=None, overwrite=False
 ):
-    """
-    Saves the data (var) in the format specified by the backend variable, in the location specified by dpath under the name ‘minian’, if overwrite True
-    Args:
-        var (xarray.DataArray): data to be saved
-        dpath (str): path where to save the data
-        fname (str, optional): output file name. Defaults to 'minian'.
-        backend (str, optional): file storage format. Defaults to 'netcdf'.
-        meta_dict (dict, optional): metadata for example {‘animal’: -3, ‘session’: -2, ‘session_id’: -1}. Key value pair. Defaults to None.
-        overwrite (bool, optional): if true overwrites a file in the same location with the same name. Defaults to False.
-
-    Raises:
-        NotImplementedError
-
-    Returns:
-        xarray.DataArray: the saved var xarray.DataArray
-    """
     dpath = os.path.normpath(dpath)
-    Path(dpath).mkdir(parents=True, exist_ok=True)
     ds = var.to_dataset()
     if meta_dict is not None:
         pathlist = os.path.abspath(dpath).split(os.sep)
         ds = ds.assign_coords(
             **dict([(dn, pathlist[di]) for dn, di in meta_dict.items()])
         )
-    md = {True: "a", False: "w-"}[overwrite]
-    fp = os.path.join(dpath, var.name + ".zarr")
-    if overwrite:
+    if backend == "netcdf":
         try:
-            shutil.rmtree(fp)
+            md = {True: "w", False: "a"}[overwrite]
+            ds.to_netcdf(os.path.join(dpath, fname + ".nc"), mode=md)
         except FileNotFoundError:
-            pass
-    ds.to_zarr(fp, mode=md)
-    if chunks is not None:
-        chunks = {d: var.sizes[d] if v <= 0 else v for d, v in chunks.items()}
-        dst_path = os.path.join(dpath, str(uuid4()))
-        temp_path = os.path.join(dpath, str(uuid4()))
-        zstore = zr.open(fp)
-        rechk = rechunker.rechunk(
-            zstore[var.name], chunks, mem_limit, dst_path, temp_store=temp_path
-        )
-        rechk.execute()
-        try:
-            shutil.rmtree(temp_path)
-        except FileNotFoundError:
-            pass
-        arr_path = os.path.join(fp, var.name)
-        for f in os.listdir(arr_path):
-            os.remove(os.path.join(arr_path, f))
-        for f in os.listdir(dst_path):
-            os.rename(os.path.join(dst_path, f), os.path.join(arr_path, f))
-        os.rmdir(dst_path)
-    return xr.open_zarr(fp)[var.name]
+            ds.to_netcdf(os.path.join(dpath, fname + ".nc"), mode=md)
+        return ds
+    elif backend == "zarr":
+        md = {True: "w", False: "w-"}[overwrite]
+        fp = os.path.join(dpath, fname, var.name + ".zarr")
+        ds.to_zarr(fp, mode=md)
+        return xr.open_zarr(fp)[var.name]
+    else:
+        raise NotImplementedError("backend {} not supported".format(backend))
 
 
 def xrconcat_recursive(var, dims):
@@ -333,16 +308,6 @@ def get_chk(arr):
 
 
 def rechunk_like(x, y):
-    """
-    Resizes chunks based on the new input dimensions
-
-    Args:
-        x (array): the array to be rechunked. i.e. destination of rechunking
-        y (array): the array where chunk information are extracted. i.e. the source of rechunking
-
-    Returns:
-        dict: data with new dimensions as specified in the input
-    """
     try:
         dst_chk = get_chk(y)
         comm_dim = set(x.dims).intersection(set(dst_chk.keys()))
@@ -353,19 +318,6 @@ def rechunk_like(x, y):
 
 
 def get_optimal_chk(ref, arr=None, dim_grp=None, ncores="auto", mem_limit="auto"):
-    """
-    Estimates the chunk of video (i.e. video sizes and number of frames) that optimizes computer memory use when the script is run parallel over multiple cores.
-
-    Args:
-        ref (xarray.DataArray): xarray.DataArray a labeled 3-d array representation of the videos with dimensions: frame, height and width.
-        arr (xarray.DataArray): xarray.DataArray a labeled 3-d array representation of the videos with dimensions: frame, height and width. Defaults to None.
-        dim_grp (array, optional): provide labels for the dimension of the data. Defaults to None.
-        ncores (str, optional): number of CPU cores. Defaults to 'auto'.
-        mem_limit (str, optional): max available memory that can be given to a process without the system going into swap. Defaults to 'auto'.
-
-    Returns:
-        dict: sizes of the chunks that optimize memory usage in parallel computing the key is the dimension, the value is the max chunk size
-    """
     if arr is None:
         arr = ref
     szs = ref.sizes
@@ -385,7 +337,6 @@ def get_optimal_chk(ref, arr=None, dim_grp=None, ncores="auto", mem_limit="auto"
             "estimated memory limit is smaller than 64MiB. Using 64MiB chunksize instead. "
         )
         csize = 64
-    csize = int(np.floor((mem_limit) / ncores))
     if csize > 512:
         warnings.warn(
             "estimated memory limit is bigger than 512MiB. Using 512MiB chunksize instead. "

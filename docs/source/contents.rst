@@ -1,4 +1,0 @@
-.. contents file
-
-Contents File
-==================================
