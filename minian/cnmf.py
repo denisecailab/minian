@@ -20,6 +20,7 @@ from skimage import morphology as moph
 from sklearn.linear_model import LassoLars
 from sklearn.utils import parallel_backend
 from statsmodels.tsa.stattools import acovf
+from scipy.signal import detrend
 
 from .utilities import rechunk_like, save_minian
 
@@ -368,9 +369,18 @@ def update_temporal(
     post_scal=True,
     scs_fallback=False,
     concurrent_update=False,
+    do_detrend=True
 ):
     if YrA is None:
         YrA = compute_trace(Y, A, b, C, f).persist()
+        
+    if do_detrend:
+        YrA = xr.apply_ufunc(
+            detrend_and_norm,
+            YrA,
+            output_dtypes=["float"],
+            ).chunk({"unit_id": 1, "frame":-1})
+        
     Ymask = (YrA > 0).any("frame").compute()
     A, C, YrA = A.sel(unit_id=Ymask), C.sel(unit_id=Ymask), YrA.sel(unit_id=Ymask)
     print("grouping overlaping units")
@@ -847,3 +857,25 @@ def compute_AtC(A, C):
         dims=["frame", "height", "width"],
         coords={"frame": fm, "height": h, "width": w},
     )
+
+def detrend_and_norm(x):
+    """
+    Detrend traces. 
+    
+    parameter:
+    x: array-like
+        Matrix to be detrended, default is detrend along last dimension (columns for YrA).
+    
+    return:
+    x: array-like, same dims as input
+        Detrended matrix. 
+    """
+    x = detrend(x)
+    
+    # CNMF doesn't like negatives, so scale everything up. 
+    mins = np.min(x, axis=1)
+    mins[mins > 0] = 0 
+    to_add = np.abs(np.broadcast_to(mins[:, np.newaxis], x.shape))
+    x += to_add
+            
+    return x
