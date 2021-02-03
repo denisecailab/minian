@@ -30,25 +30,31 @@ def estimate_shifts(varr, max_sh, dim="frame", npart=3, local=False):
         res_dict = dict()
         for lab in itt.product(*loop_labs):
             va = varr.sel({loop_dims[i]: lab[i] for i in range(len(loop_dims))})
-            vmax, sh = est_sh_part(va.data, max_sh, npart, local, parallel=True)
+            vmax, sh = est_sh_part(va.data, max_sh, npart, local)
             sh = xr.DataArray(
                 sh,
                 dims=[dim, "variable"],
-                coords={dim: va.coords[dim].values, "variable": ["height", "width"],},
+                coords={
+                    dim: va.coords[dim].values,
+                    "variable": ["height", "width"],
+                },
             )
             res_dict[lab] = sh.assign_coords(**{k: v for k, v in zip(loop_dims, lab)})
         sh = xrconcat_recursive(res_dict, loop_dims)
     else:
-        vmax, sh = est_sh_part(varr.data, max_sh, npart, local, parallel=True)
+        vmax, sh = est_sh_part(varr.data, max_sh, npart, local)
         sh = xr.DataArray(
             sh,
             dims=[dim, "variable"],
-            coords={dim: varr.coords[dim].values, "variable": ["height", "width"],},
+            coords={
+                dim: varr.coords[dim].values,
+                "variable": ["height", "width"],
+            },
         )
     return sh
 
 
-def est_sh_part(varr, max_sh, npart, local, n_jobs=1, parallel=False):
+def est_sh_part(varr, max_sh, npart, local, min_temp_fm=30):
     """
     Estimate the shift per frame
 
@@ -64,19 +70,7 @@ def est_sh_part(varr, max_sh, npart, local, n_jobs=1, parallel=False):
     """
     if varr.shape[0] <= 1:
         return varr.squeeze(), np.array([[0, 0]])
-    if not parallel:
-        part_func = est_sh_part
-    elif n_jobs * npart < 1000:
-        part_func = fct.partial(est_sh_part, parallel=True)
-    else:
-        part_func = darr.gufunc(
-            est_sh_part,
-            signature="(f,h,w),(),(),(),()->(h,w),(f,s)",
-            output_dtypes=[float, float],
-            output_sizes={"s": 2},
-            allow_rechunk=True,
-        )
-    if parallel:
+    elif varr.shape[0] > npart * min_temp_fm:
         match_func = darr.gufunc(
             match_temp,
             signature="(h,w),(h,w),(),()->(s)",
@@ -84,16 +78,30 @@ def est_sh_part(varr, max_sh, npart, local, n_jobs=1, parallel=False):
             output_sizes={"s": 2},
         )
         shift_func = darr.gufunc(
-            shift_perframe, signature="(h,w),(s)->(h,w)", output_dtypes=float,
+            shift_perframe,
+            signature="(h,w),(s)->(h,w)",
+            output_dtypes=float,
         )
+        if varr.shape[0] > npart ** 2 * min_temp_fm:
+            part_func = est_sh_part
+        else:
+            part_func = darr.gufunc(
+                est_sh_part,
+                signature="(f,h,w),(),(),(),()->(h,w),(f,s)",
+                output_dtypes=[float, float],
+                output_sizes={"s": 2},
+                allow_rechunk=True,
+            )
     else:
+        part_func = est_sh_part
         match_func = match_temp
         shift_func = shift_perframe
+        npart = varr.shape[0]
     idx_spt = np.array_split(np.arange(varr.shape[0]), npart)
     fm_ls, sh_ls = [], []
     for idx in idx_spt:
         if len(idx) > 0:
-            fm, sh = part_func(varr[idx, :, :], max_sh, npart, local, n_jobs * npart)
+            fm, sh = part_func(varr[idx, :, :], max_sh, npart, local, min_temp_fm)
             fm_ls.append(fm)
             sh_ls.append(sh)
     mid = int(len(sh_ls) / 2)
