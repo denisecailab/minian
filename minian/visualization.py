@@ -4,6 +4,7 @@ import os
 from collections import OrderedDict
 from uuid import uuid4
 
+import av
 import colorcet as cc
 import cv2
 import dask
@@ -998,12 +999,22 @@ def write_video(
         arr /= den
         arr *= 255
     arr = arr.clip(0, 255).astype(np.uint8)
-    paths = [
-        dask.delayed(write_vid_blk)(np.asscalar(a), vpath, options)
-        for a in arr.data.to_delayed()
-    ]
-    paths = dask.compute(paths)[0]
-    return concat_video_recursive(paths, vname=fname)
+    container = av.open(fname, mode="w")
+    stream = container.add_stream("libx264", rate=30)
+    stream.width = arr.shape[2]
+    stream.height = arr.shape[1]
+    stream.pix_fmt = "yuv420p"
+    stream.options = options
+    for blk in arr.data.blocks:
+        for fm in np.array(blk):
+            fm = cv2.cvtColor(fm, cv2.COLOR_GRAY2RGB)
+            fmav = av.VideoFrame.from_ndarray(fm, format="rgb24")
+            for p in stream.encode(fmav):
+                container.mux(p)
+    for p in stream.encode():
+        container.mux(p)
+    container.close()
+    return fname
 
 
 def concat_video_recursive(vlist, vname=None):
