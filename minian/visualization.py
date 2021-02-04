@@ -4,7 +4,6 @@ import os
 from collections import OrderedDict
 from uuid import uuid4
 
-import av
 import colorcet as cc
 import cv2
 import dask
@@ -999,21 +998,17 @@ def write_video(
         arr /= den
         arr *= 255
     arr = arr.clip(0, 255).astype(np.uint8)
-    container = av.open(fname, mode="w")
-    stream = container.add_stream("libx264", rate=30)
-    stream.width = arr.shape[2]
-    stream.height = arr.shape[1]
-    stream.pix_fmt = "yuv420p"
-    stream.options = options
+    w, h = arr.sizes["width"], arr.sizes["height"]
+    process = (
+        ffmpeg.input("pipe:", format="rawvideo", pix_fmt="gray", s="{}x{}".format(w, h))
+        .output(fname, pix_fmt="yuv420p", vcodec="libx264", r=30, **options)
+        .overwrite_output()
+        .run_async(pipe_stdin=True)
+    )
     for blk in arr.data.blocks:
-        for fm in np.array(blk):
-            fm = cv2.cvtColor(fm, cv2.COLOR_GRAY2RGB)
-            fmav = av.VideoFrame.from_ndarray(fm, format="rgb24")
-            for p in stream.encode(fmav):
-                container.mux(p)
-    for p in stream.encode():
-        container.mux(p)
-    container.close()
+        process.stdin.write(np.array(blk).tobytes())
+    process.stdin.close()
+    process.wait()
     return fname
 
 
