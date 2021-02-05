@@ -27,7 +27,6 @@ def load_videos(
     vpath,
     pattern=r"msCam[0-9]+\.avi$",
     dtype=np.float64,
-    in_memory=False,
     downsample=None,
     downsample_strategy="subset",
     post_process=None,
