@@ -89,17 +89,12 @@ def load_videos(
     if dtype:
         varr = varr.astype(dtype)
     if downsample:
-        bin_eg = {d: np.arange(0, varr.sizes[d], w) for d, w in downsample.items()}
         if downsample_strategy == "mean":
-            varr = (
-                varr.coarsen(**downsample, boundary="trim")
-                .mean()
-                .assign_coords(**bin_eg)
-            )
+            varr = varr.coarsen(**downsample, boundary="trim", coord_func="min").mean()
         elif downsample_strategy == "subset":
-            varr = varr.sel(**bin_eg)
+            varr = varr.isel(**{d: slice(None, None, w) for d, w in downsample.items()})
         else:
-            warnings.warn("unrecognized downsampling strategy", RuntimeWarning)
+            raise NotImplementedError("unrecognized downsampling strategy")
     varr = varr.rename("fluorescence")
     if post_process:
         varr = post_process(varr, vpath, ssname, vlist, varr_list)
