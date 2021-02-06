@@ -26,13 +26,13 @@ cryptography==3.1
 cvxpy==1.0.27
 cycler==0.10.0
 cytoolz==0.10.1
-dask==2.11.0
+dask==2021.1.1
 datashader==0.9
 datashape==0.5.2
 decorator==4.4.2
 defusedxml==0.6.0
 dill==0.3.2
-distributed==2.11.0
+distributed==2021.1.1
 docutils==0.16
 ecos==2.0.7.post1
 entrypoints==0.3
