@@ -1,5 +1,6 @@
 import numpy as np
 import nbformat
+import os
 from nbconvert.preprocessors import ExecutePreprocessor
 from ..utilities import open_minian
 
@@ -21,3 +22,7 @@ def test_pipeline_notebook():
     assert int(minian_ds["C"].sum().compute()) == 152918218
     assert int(minian_ds["S"].sum().compute()) == 1366809
     assert int(minian_ds["A"].sum().compute()) == 401
+    assert os.path.exists("./demo_movies/minian_mc.mp4")
+    assert os.path.getsize("./demo_movies/minian_mc.mp4") == 124291444
+    assert os.path.exists("./demo_movies/minian.mp4")
+    assert os.path.getsize("./demo_movies/minian.mp4") == 281574944
