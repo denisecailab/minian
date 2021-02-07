@@ -31,26 +31,14 @@ def test_can_load_videos(varr):
     return varr
 
 
-def test_can_init_holoviews():
-    hv.notebook_extension("bokeh")
-
-
-def test_subset_part_video(varr):
-    subset = dict(frame=slice(0, None))
-    varr_ref = varr.sel(subset)
-    assert varr_ref.all() == varr.all()
-
-
 def test_remove_background(varr):
     varr_ref = denoise(varr, **param_denoise)
     varr_ref_remove = remove_background(varr_ref, **param_background_removal)
-    assert (
-        varr_ref.all() != varr_ref_remove.all()
-    )  # when both are equal the denoise didn't do anything --> fail
+    # when both are equal the denoise didn't do anything --> fail
+    assert (varr_ref != varr_ref_remove).any()
 
 
 def test_denoise(varr):
     varr_ref = denoise(varr, **param_denoise)
-    assert (
-        varr_ref.all() != varr.all()
-    )  # when both are equal the denoise didn't do anything --> fail
+    # when both are equal the denoise didn't do anything --> fail
+    assert (varr_ref != varr).any()
