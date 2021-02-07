@@ -54,6 +54,7 @@ jobs:
       run: |
         conda install pytest pytest-cov
         $CONDA/bin/pytest -v --color=yes --cov=minian --pyargs minian
-    - name: Upload coverage to codecov.io
-      run: |
-        bash <(curl -s https://codecov.io/bash)
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v1
+      with:
+        fail_ci_if_error: true
