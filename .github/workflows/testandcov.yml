@@ -28,7 +28,7 @@ jobs:
       # Checks out a copy of your repository on the ubuntu-latest machine
     - uses: actions/checkout@v2
       with:
-        fetch-depth: 2
+        fetch-depth: 0
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v2
       with:
