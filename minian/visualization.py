@@ -998,12 +998,18 @@ def write_video(
         arr /= den
         arr *= 255
     arr = arr.clip(0, 255).astype(np.uint8)
-    paths = [
-        dask.delayed(write_vid_blk)(np.asscalar(a), vpath, options)
-        for a in arr.data.to_delayed()
-    ]
-    paths = dask.compute(paths)[0]
-    return concat_video_recursive(paths, vname=fname)
+    w, h = arr.sizes["width"], arr.sizes["height"]
+    process = (
+        ffmpeg.input("pipe:", format="rawvideo", pix_fmt="gray", s="{}x{}".format(w, h))
+        .output(fname, pix_fmt="yuv420p", vcodec="libx264", r=30, **options)
+        .overwrite_output()
+        .run_async(pipe_stdin=True)
+    )
+    for blk in arr.data.blocks:
+        process.stdin.write(np.array(blk).tobytes())
+    process.stdin.close()
+    process.wait()
+    return fname
 
 
 def concat_video_recursive(vlist, vname=None):
@@ -1053,23 +1059,15 @@ def generate_videos(
     AC = AC * 255 / AC.max().compute().values
     res = Y - AC
     print("writing videos")
-    path_org = write_video(varr, vpath=vpath, options=options)
-    path_Y = write_video(Y, vpath=vpath, norm=False, options=options)
-    path_AC = write_video(AC, vpath=vpath, norm=False, options=options)
-    path_res = write_video(res, vpath=vpath, norm=False, options=options)
-    print("concatenating results")
-    str_org = ffmpeg.input(path_org)
-    str_Y = ffmpeg.input(path_Y)
-    str_AC = ffmpeg.input(path_AC)
-    str_res = ffmpeg.input(path_res)
-    vtop = ffmpeg.filter([str_org, str_Y], "hstack")
-    vbot = ffmpeg.filter([str_res, str_AC], "hstack")
-    vid = ffmpeg.filter([vtop, vbot], "vstack")
-    fname = os.path.join(vpath, vname)
-    vid.output(fname).overwrite_output().run()
-    for p in [path_res, path_AC, path_Y, path_org]:
-        os.remove(p)
-    return fname
+    vid = xr.concat(
+        [
+            xr.concat([varr, Y], "width", coords="minimal"),
+            xr.concat([res, AC], "width", coords="minimal"),
+        ],
+        "height",
+        coords="minimal",
+    )
+    return write_video(vid, vname, vpath, norm=False, options=options)
 
 
 def datashade_ndcurve(ovly, kdim=None, spread=False):

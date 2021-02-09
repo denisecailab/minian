@@ -1,4 +1,4 @@
-name: Python-format
+name: format
 
 # Run this workflow every time on push
 on: push

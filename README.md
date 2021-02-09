@@ -1,7 +1,7 @@
-[![Build Status](https://img.shields.io/travis/DeniseCaiLab/minian/master.svg?style=flat&label=master%20build)](https://travis-ci.org/DeniseCaiLab/minian)
+[![master status](https://github.com/denisecailab/minian/workflows/pytest/badge.svg?branch=master)](https://github.com/DeniseCaiLab/minian/actions?query=workflow%3Apytest)
 [![codecov](https://codecov.io/gh/DeniseCaiLab/minian/branch/master/graph/badge.svg)](https://codecov.io/gh/DeniseCaiLab/minian)
 &emsp;&emsp;
-[![Build Status](https://img.shields.io/travis/DeniseCaiLab/minian/dev.svg?style=flat&label=dev%20build)](https://travis-ci.org/DeniseCaiLab/minian)
+[![dev status](https://github.com/denisecailab/minian/workflows/pytest/badge.svg?branch=dev)](https://github.com/DeniseCaiLab/minian/actions?query=workflow%3Apytest)
 [![codecov](https://codecov.io/gh/DeniseCaiLab/minian/branch/dev/graph/badge.svg)](https://codecov.io/gh/DeniseCaiLab/minian)
 
 # About MiniAn

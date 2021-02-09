@@ -1,4 +1,4 @@
-name: Test-and-Coverage
+name: pytest
 
 # Run this workflow every time for pull requests and pushes to master and dev branch
 on:
@@ -27,6 +27,8 @@ jobs:
     steps:
       # Checks out a copy of your repository on the ubuntu-latest machine
     - uses: actions/checkout@v2
+      with:
+        fetch-depth: 0
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v2
       with:
@@ -53,7 +55,8 @@ jobs:
     - name: Run tests and collect coverage
       run: |
         conda install pytest pytest-cov
-        $CONDA/bin/pytest -v --color=yes --cov=minian --pyargs minian
-    - name: Upload coverage to codecov.io
-      run: |
-        bash <(curl -s https://codecov.io/bash)
+        $CONDA/bin/pytest -v --color=yes --cov=minian --pyargs --cov-report=xml minian
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v1
+      with:
+        fail_ci_if_error: true

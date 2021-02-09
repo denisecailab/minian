@@ -9,6 +9,7 @@ from os.path import join as pjoin
 from pathlib import Path
 from uuid import uuid4
 
+import ffmpeg
 import cv2
 import dask as da
 import dask.array as darr
@@ -26,7 +27,6 @@ def load_videos(
     vpath,
     pattern=r"msCam[0-9]+\.avi$",
     dtype=np.float64,
-    in_memory=False,
     downsample=None,
     downsample_strategy="subset",
     post_process=None,
@@ -88,17 +88,12 @@ def load_videos(
     if dtype:
         varr = varr.astype(dtype)
     if downsample:
-        bin_eg = {d: np.arange(0, varr.sizes[d], w) for d, w in downsample.items()}
         if downsample_strategy == "mean":
-            varr = (
-                varr.coarsen(**downsample, boundary="trim")
-                .mean()
-                .assign_coords(**bin_eg)
-            )
+            varr = varr.coarsen(**downsample, boundary="trim", coord_func="min").mean()
         elif downsample_strategy == "subset":
-            varr = varr.sel(**bin_eg)
+            varr = varr.isel(**{d: slice(None, None, w) for d, w in downsample.items()})
         else:
-            warnings.warn("unrecognized downsampling strategy", RuntimeWarning)
+            raise NotImplementedError("unrecognized downsampling strategy")
     varr = varr.rename("fluorescence")
     if post_process:
         varr = post_process(varr, vpath, ssname, vlist, varr_list)
@@ -124,7 +119,7 @@ def load_tif_perframe(fname, fid):
     return imread(fname, key=fid)
 
 
-def load_avi_lazy(fname):
+def load_avi_lazy_framewise(fname):
     cap = cv2.VideoCapture(fname)
     f = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     fmread = da.delayed(load_avi_perframe)
@@ -135,6 +130,26 @@ def load_avi_lazy(fname):
         for fm in flist
     ]
     return da.array.stack(arr, axis=0)
+
+
+def load_avi_lazy(fname):
+    probe = ffmpeg.probe(fname)
+    video_info = next(s for s in probe["streams"] if s["codec_type"] == "video")
+    w = int(video_info["width"])
+    h = int(video_info["height"])
+    f = int(video_info["nb_frames"])
+    return da.array.from_delayed(
+        da.delayed(load_avi_ffmpeg)(fname, h, w, f), dtype=np.uint8, shape=(f, h, w)
+    )
+
+
+def load_avi_ffmpeg(fname, h, w, f):
+    out_bytes, err = (
+        ffmpeg.input(fname)
+        .video.output("pipe:", format="rawvideo", pix_fmt="gray")
+        .run(capture_stdout=True)
+    )
+    return np.frombuffer(out_bytes, np.uint8).reshape(f, h, w)
 
 
 def load_avi_perframe(fname, fid):
