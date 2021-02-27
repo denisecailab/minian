@@ -177,11 +177,16 @@ def open_minian(dpath, post_process=None, return_dict=False):
     Returns:
         xarray.DataArray: [loaded data]
     """
-    dslist = [
-        xr.open_zarr(pjoin(dpath, d)) for d in listdir(dpath) if isdir(pjoin(dpath, d))
-    ]
+    dslist = []
+    for d in listdir(dpath):
+        arr_path = pjoin(dpath, d)
+        if isdir(arr_path):
+            arr = list(xr.open_zarr(arr_path).values())[0]
+            arr.data = darr.from_zarr(
+                os.path.join(arr_path, arr.name), inline_array=True
+            )
+            dslist.append(arr)
     if return_dict:
-        dslist = [list(d.values())[0] for d in dslist]
         ds = {d.name: d for d in dslist}
     else:
         ds = xr.merge(dslist, compat="no_conflicts")
@@ -287,7 +292,9 @@ def save_minian(
         for f in os.listdir(dst_path):
             os.rename(os.path.join(dst_path, f), os.path.join(arr_path, f))
         os.rmdir(dst_path)
-    return xr.open_zarr(fp)[var.name]
+    arr = xr.open_zarr(fp)[var.name]
+    arr.data = darr.from_zarr(os.path.join(fp, var.name), inline_array=True)
+    return arr
 
 
 def xrconcat_recursive(var, dims):
