@@ -19,6 +19,8 @@ import psutil
 import rechunker
 import xarray as xr
 import zarr as zr
+from distributed.diagnostics.plugin import SchedulerPlugin
+from distributed.scheduler import SchedulerState, cast
 from natsort import natsorted
 from tifffile import TiffFile, imread
 
@@ -428,3 +430,28 @@ def get_optimal_chk(ref, arr=None, dim_grp=None, ncores="auto", mem_limit="auto"
         re_dict = {d: max(re_dict[d]) for d in dg}
         opt_chk.update(re_dict)
     return opt_chk
+
+
+class TaskAnnotation(SchedulerPlugin):
+    def __init__(self) -> None:
+        super().__init__()
+        self.annt_dict = {
+            "load_avi_ffmpeg": {"resources": {"MEM": 1}, "priority": -1},
+            "est_sh_part": {"resources": {"MEM": 1}, "priority": 10},
+        }
+
+    def update_graph(self, scheduler, client, tasks, **kwargs):
+        parent = cast(SchedulerState, scheduler)
+        # set_trace()
+        for tk in tasks.keys():
+            for pattern, annt in self.annt_dict.items():
+                if re.search(pattern, tk):
+                    ts = parent._tasks.get(tk)
+                    res = annt.get("resources", None)
+                    if res:
+                        ts._resource_restrictions = res
+                    pri = annt.get("priority", None)
+                    if pri:
+                        pri_org = list(ts._priority)
+                        pri_org[0] = -pri
+                        ts._priority = tuple(pri_org)
