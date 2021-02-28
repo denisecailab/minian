@@ -19,6 +19,7 @@ import psutil
 import rechunker
 import xarray as xr
 import zarr as zr
+from dask.optimization import inline_functions
 from distributed.diagnostics.plugin import SchedulerPlugin
 from distributed.scheduler import SchedulerState, cast
 from natsort import natsorted
@@ -437,7 +438,7 @@ class TaskAnnotation(SchedulerPlugin):
         super().__init__()
         self.annt_dict = {
             "load_avi_ffmpeg": {"resources": {"MEM": 1}, "priority": -1},
-            "est_sh_part": {"resources": {"MEM": 1}, "priority": 10},
+            "est_sh_chunk": {"resources": {"MEM": 0.5}},
         }
 
     def update_graph(self, scheduler, client, tasks, **kwargs):
@@ -455,3 +456,13 @@ class TaskAnnotation(SchedulerPlugin):
                         pri_org = list(ts._priority)
                         pri_org[0] = -pri
                         ts._priority = tuple(pri_org)
+
+
+def inline_zarr(dsk, keys):
+    dsk = inline_functions(
+        dsk,
+        [],
+        fast_functions=[darr.core.getter, zr.core.Array],
+        inline_constants=True,
+    )
+    return darr.optimization.optimize(dsk, keys)

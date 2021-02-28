@@ -2,14 +2,15 @@ import functools as fct
 import itertools as itt
 
 import cv2
+import dask as da
 import dask.array as darr
 import numpy as np
 import xarray as xr
 
-from .utilities import xrconcat_recursive
+from .utilities import xrconcat_recursive, inline_zarr
 
 
-def estimate_shifts(varr, max_sh, dim="frame", npart=3, local=False):
+def estimate_shifts(varr, max_sh, dim="frame", npart=None, local=False, temp_nfm=30):
     """
     Estimate the frame shifts
 
@@ -25,30 +26,40 @@ def estimate_shifts(varr, max_sh, dim="frame", npart=3, local=False):
     """
     varr = varr.transpose(..., dim, "height", "width")
     loop_dims = list(set(varr.dims) - set(["height", "width", dim]))
+    if npart is None:
+        # by default use a npart that result in three layers of recursion
+        npart = max(3, int(np.ceil((varr.sizes[dim] / temp_nfm) ** (1 / 3))))
+        print(npart)
     if loop_dims:
         loop_labs = [varr.coords[d].values for d in loop_dims]
         res_dict = dict()
         for lab in itt.product(*loop_labs):
             va = varr.sel({loop_dims[i]: lab[i] for i in range(len(loop_dims))})
-            vmax, sh = est_sh_part(va.data, max_sh, npart, local)
+            vmax, sh = est_sh_part(va.data, max_sh, npart, local, temp_nfm)
             sh = xr.DataArray(
                 sh,
                 dims=[dim, "variable"],
-                coords={dim: va.coords[dim].values, "variable": ["height", "width"],},
+                coords={
+                    dim: va.coords[dim].values,
+                    "variable": ["height", "width"],
+                },
             )
             res_dict[lab] = sh.assign_coords(**{k: v for k, v in zip(loop_dims, lab)})
         sh = xrconcat_recursive(res_dict, loop_dims)
     else:
-        vmax, sh = est_sh_part(varr.data, max_sh, npart, local)
+        vmax, sh = est_sh_part(varr.data, max_sh, npart, local, temp_nfm)
         sh = xr.DataArray(
             sh,
             dims=[dim, "variable"],
-            coords={dim: varr.coords[dim].values, "variable": ["height", "width"],},
+            coords={
+                dim: varr.coords[dim].values,
+                "variable": ["height", "width"],
+            },
         )
     return sh
 
 
-def est_sh_part(varr, max_sh, npart, local, min_temp_fm=30):
+def est_sh_part(varr, max_sh, npart, local, temp_nfm):
     """
     Estimate the shift per frame
 
@@ -62,60 +73,71 @@ def est_sh_part(varr, max_sh, npart, local, min_temp_fm=30):
         xarray.DataArray: the max shift per frame
         xarray.DataArray: the shift per frame
     """
-    if varr.shape[0] <= 1:
-        return varr.squeeze(), np.array([[0, 0]])
-    elif varr.shape[0] > npart * min_temp_fm:
-        match_func = darr.gufunc(
-            match_temp,
-            signature="(h,w),(h,w),(),()->(s)",
-            output_dtypes=float,
-            output_sizes={"s": 2},
-        )
-        shift_func = darr.gufunc(
-            shift_perframe, signature="(h,w),(s)->(h,w)", output_dtypes=float,
-        )
-        if varr.shape[0] > npart ** 2 * min_temp_fm:
-            part_func = est_sh_part
-        else:
-            part_func = darr.gufunc(
-                est_sh_part,
-                signature="(f,h,w),(),(),(),()->(h,w),(f,s)",
-                output_dtypes=[float, float],
-                output_sizes={"s": 2},
-                allow_rechunk=True,
+
+    def max_fm(a):
+        return np.max(a, axis=0, keepdims=True)
+
+    varr = varr.rechunk((temp_nfm, None, None))
+    gu_est_sh = darr.gufunc(
+        est_sh_chunk,
+        signature="(h,w)->(h,w),(s)",
+        output_dtypes=[np.uint8, np.float],
+        output_sizes={"s": 2},
+    )
+    temps, shifts = gu_est_sh(varr, sh_org=None, max_sh=max_sh, local=local)
+    # ref: https://github.com/dask/dask/issues/5105
+    with da.config.set(**{"optimization.fuse.ave-width": 4}):
+        shifts = da.optimize(shifts)[0]
+        temps = da.optimize(temps)[0]
+    # ref: https://github.com/dask/dask/issues/6668
+    with da.config.set(array_optimize=inline_zarr):
+        shifts = da.optimize(shifts)[0]
+        temps = da.optimize(temps)[0]
+    temps = darr.map_blocks(
+        max_fm,
+        temps,
+        dtype=temps.dtype,
+        chunks=(1, temps.chunksize[1], temps.chunksize[2]),
+    )
+    while temps.shape[0] > 1:
+        tmp_ls = []
+        sh_ls = []
+        for idx in np.arange(0, temps.numblocks[0], npart):
+            tmps = temps.blocks[idx : idx + npart]
+            sh_org = shifts.blocks[idx : idx + npart]
+            sh_org_ls = [sh_org.blocks[i] for i in range(sh_org.numblocks[0])]
+            res = da.delayed(est_sh_chunk)(tmps, sh_org_ls, max_sh=max_sh, local=local)
+            tmp = darr.from_delayed(res[0], shape=tmps.shape, dtype=tmps.dtype).max(
+                axis=0
             )
-    else:
-        part_func = est_sh_part
-        match_func = match_temp
-        shift_func = shift_perframe
-        npart = varr.shape[0]
-    idx_spt = np.array_split(np.arange(varr.shape[0]), npart)
-    fm_ls, sh_ls = [], []
-    for idx in idx_spt:
-        if len(idx) > 0:
-            fm, sh = part_func(varr[idx, :, :], max_sh, npart, local, min_temp_fm)
-            fm_ls.append(fm)
-            sh_ls.append(sh)
-    mid = int(len(sh_ls) / 2)
-    sh_add_ls = [np.array([0, 0])] * len(sh_ls)
-    for i, fm in enumerate(fm_ls):
+            sh_new = darr.from_delayed(res[1], shape=sh_org.shape, dtype=sh_org.dtype)
+            tmp_ls.append(tmp)
+            sh_ls.append(sh_new)
+        temps = darr.stack(tmp_ls, axis=0)
+        shifts = darr.concatenate(sh_ls, axis=0)
+    return temps, shifts
+
+
+def est_sh_chunk(varr, sh_org, max_sh, local):
+    mid = int(varr.shape[0] / 2)
+    shifts = np.zeros((varr.shape[0], 2))
+    arr = varr.copy()
+    for i, fm in enumerate(arr):
         if i < mid:
-            temp = fm_ls[i + 1]
-            sh_idx = np.arange(i + 1)
+            temp = arr[i + 1]
+            slc = slice(0, i + 1)
         elif i > mid:
-            temp = fm_ls[i - 1]
-            sh_idx = np.arange(i, len(sh_ls))
+            temp = arr[i - 1]
+            slc = slice(i, None)
         else:
             continue
-        sh_add = match_func(fm, temp, max_sh, local)
-        for j in sh_idx:
-            sh_ls[j] = sh_ls[j] + sh_add.reshape((1, -1))
-            sh_add_ls[j] = sh_add_ls[j] + sh_add
-    for i, (fm, sh) in enumerate(zip(fm_ls, sh_add_ls)):
-        fm_ls[i] = darr.nan_to_num(shift_func(fm, sh))
-    sh_ret = darr.concatenate(sh_ls)
-    fm_ret = darr.stack(fm_ls)
-    return fm_ret.max(axis=0), sh_ret
+        sh = match_temp(fm, temp, max_sh, local)
+        shifts[slc] = shifts[slc] + sh
+    for i, sh in enumerate(shifts):
+        arr[i] = shift_perframe(arr[i], sh, 0)
+    if sh_org is not None:
+        shifts = np.concatenate([shifts[i] + sh for i, sh in enumerate(sh_org)], axis=0)
+    return arr, shifts
 
 
 def match_temp(src, dst, max_sh, local, subpixel=False):
