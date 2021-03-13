@@ -257,7 +257,7 @@ def save_minian(
     overwrite=False,
     chunks=None,
     compute=True,
-    mem_limit="200MB",
+    mem_limit="1GB",
 ):
     """
     Saves the data (var) in the format specified by the backend variable, in the location specified by dpath under the name ‘minian’, if overwrite True
@@ -452,7 +452,7 @@ def factors(x):
 
 
 ANNOTATIONS = {
-    "from-zarr-store": {"resources": {"MEM": 0.5}},
+    "from-zarr-store": {"resources": {"MEM": 1}},
     "load_avi_ffmpeg": {"resources": {"MEM": 1}},
     "est_sh_chunk": {"resources": {"MEM": 0.5}},
     "shift_perframe": {"resources": {"MEM": 0.5}},
