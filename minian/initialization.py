@@ -1,25 +1,25 @@
+import functools as fct
 import itertools as itt
 import os
 
 import cv2
 import dask as da
 import dask.array as darr
+import networkx as nx
 import numpy as np
 import pandas as pd
-import scipy.sparse
 import sparse
 import xarray as xr
-from dask.delayed import delayed
 from scipy.ndimage.filters import median_filter
 from scipy.ndimage.measurements import label
 from scipy.signal import butter, lfilter
 from scipy.stats import kstest, zscore
 from skimage.morphology import disk
 from sklearn.mixture import GaussianMixture
-from sklearn.neighbors import kneighbors_graph
+from sklearn.neighbors import KDTree, radius_neighbors_graph
 
-from .cnmf import label_connected, smooth_sig
-from .utilities import save_minian
+from .cnmf import adj_corr, graph_optimize_corr, label_connected
+from .utilities import custom_arr_optimize, save_minian
 
 
 def seeds_init(
@@ -184,10 +184,16 @@ def pnr_refine(varr, seeds, noise_freq=0.25, thres=1.5, q=(0.1, 99.9), med_wnd=N
 
     """
     print("selecting seeds")
-    varr_sub = xr.concat(
-        [varr.sel(height=h, width=w) for h, w in seeds[["height", "width"]].values],
-        "index",
-    ).assign_coords({"index": seeds.index.values})
+    # vectorized indexing on dask arrays produce a single chunk.
+    # to memory issue, split seeds into 128 chunks, with chunk size no greater than 100
+    chk_size = min(int(len(seeds) / 128), 100)
+    vsub_ls = []
+    for _, seed_sub in seeds.groupby(np.arange(len(seeds)) // chk_size):
+        vsub = varr.sel(
+            height=seed_sub["height"].to_xarray(), width=seed_sub["width"].to_xarray()
+        )
+        vsub_ls.append(vsub)
+    varr_sub = xr.concat(vsub_ls, "index")
     if med_wnd:
         print("removing baseline")
         varr = xr.apply_ufunc(
@@ -275,10 +281,16 @@ def ks_refine(varr, seeds, sig=0.01):
         dict: seeds
     """
     print("selecting seeds")
-    varr_sub = xr.concat(
-        [varr.sel(height=h, width=w) for h, w in seeds[["height", "width"]].values],
-        "index",
-    ).assign_coords({"index": seeds.index.values})
+    # vectorized indexing on dask arrays produce a single chunk.
+    # to memory issue, split seeds into 128 chunks, with chunk size no greater than 100
+    chk_size = min(int(len(seeds) / 128), 100)
+    vsub_ls = []
+    for _, seed_sub in seeds.groupby(np.arange(len(seeds)) // chk_size):
+        vsub = varr.sel(
+            height=seed_sub["height"].to_xarray(), width=seed_sub["width"].to_xarray()
+        )
+        vsub_ls.append(vsub)
+    varr_sub = xr.concat(vsub_ls, "index")
     print("performing KS test")
     ks = xr.apply_ufunc(
         ks_perseed,
@@ -313,40 +325,13 @@ def seeds_merge(varr, max_proj, seeds, thres_dist=5, thres_corr=0.6, noise_freq=
     Returns:
         dict: seeds
     """
-    if noise_freq:
-        varr = smooth_sig(varr, noise_freq)
     print("computing distance")
-    dist = kneighbors_graph(seeds[["height", "width"]], n_neighbors=1, mode="distance")
+    seeds = seeds.sort_values(["height", "width"])
+    nng = radius_neighbors_graph(seeds[["height", "width"]], thres_dist)
     print("computing correlations")
-    corr_ls = []
-    row_idx = []
-    col_idx = []
-    varr = varr - varr.mean("frame")
-    std = np.sqrt((varr ** 2).sum("frame"))
-    for i, j in zip(*dist.nonzero()):
-        if dist[i, j] < thres_dist:
-            hi, hj, wi, wj = (
-                seeds.iloc[i]["height"],
-                seeds.iloc[j]["height"],
-                seeds.iloc[i]["width"],
-                seeds.iloc[j]["width"],
-            )
-            varr_i, varr_j, std_i, std_j = (
-                varr.sel(height=hi, width=wi),
-                varr.sel(height=hj, width=wj),
-                std.sel(height=hi, width=wi),
-                std.sel(height=hj, width=wj),
-            )
-            corr = (varr_i * varr_j).sum() / (std_i * std_j)
-            corr_ls.append(corr)
-            row_idx.append(i)
-            col_idx.append(j)
-    corr_ls = dask.compute(corr_ls)[0]
+    adj = adj_corr(varr, nng, seeds[["height", "width"]], noise_freq)
     print("merging seeds")
-    adj = (
-        scipy.sparse.csr_matrix((corr_ls, (row_idx, col_idx)), shape=dist.shape)
-        > thres_corr
-    )
+    adj = adj > thres_corr
     adj = adj + adj.T
     labels = label_connected(adj, only_connected=True)
     iso = np.where(labels < 0)[0]
@@ -371,54 +356,71 @@ def seeds_merge(varr, max_proj, seeds, thres_dist=5, thres_corr=0.6, noise_freq=
 
 
 def initA(varr, seeds, thres_corr=0.8, wnd=10, noise_freq=None):
-    seeds = seeds.sort_values(["height", "width"])
-    if noise_freq:
-        print("smoothing signal")
-        varr = smooth_sig(varr, noise_freq)
-    print("computing correlations")
-    varr = varr - varr.mean("frame")
-    std = np.sqrt((varr ** 2).sum("frame"))
-    res_ls = [
-        initA_perseed(varr, std, h, w, wnd, thres_corr)
-        for h, w in zip(seeds["height"].values, seeds["width"].values)
-    ]
+    print("optimizing computation graph")
+    nod_df = pd.DataFrame(
+        np.array(
+            list(
+                itt.product(
+                    np.arange(varr.sizes["height"]), np.arange(varr.sizes["width"])
+                )
+            )
+        ),
+        columns=["height", "width"],
+    ).merge(seeds.reset_index(), how="outer", on=["height", "width"])
+    seed_df = nod_df[nod_df["index"].notnull()]
+    nn_tree = KDTree(nod_df[["height", "width"]], leaf_size=(2 * wnd) ** 2)
+    nns_arr = nn_tree.query_radius(seed_df[["height", "width"]], r=wnd)
+    sdg = nx.Graph()
+    sdg.add_nodes_from(
+        [
+            (i, d)
+            for i, d in enumerate(
+                nod_df[["height", "width", "index"]].to_dict("records")
+            )
+        ]
+    )
+    for isd, nns in enumerate(nns_arr):
+        cur_sd = seed_df.index[isd]
+        sdg.add_edges_from([(cur_sd, n) for n in nns if n != cur_sd])
+    sdg.remove_nodes_from(list(nx.isolates(sdg)))
+    sdg = nx.convert_node_labels_to_integers(sdg)
+    corr_df = graph_optimize_corr(varr, sdg, noise_freq)
+    print("building spatial matrix")
+    corr_df = corr_df[corr_df["corr"] > thres_corr]
+    nod_df = pd.DataFrame.from_dict(dict(sdg.nodes(data=True)), orient="index")
+    seed_df = nod_df[nod_df["index"].notnull()].astype({"index": int})
     A_ls = []
-    for i in range(0, len(res_ls), 50):
-        cur_ls = dask.compute(res_ls[i : i + 50])[0]
-        A_ls.extend([a.chunk() for a in cur_ls])
-    A = xr.concat(A_ls, "unit_id")
-    A = A.assign_coords(unit_id=np.arange(A.sizes["unit_id"]))
-    A.data = A.data.map_blocks(lambda a: a.todense(), dtype=float)
-    return A
-
-
-def initA_perseed(varr, std, h, w, wnd, thres_corr):
-    ih = np.where(varr.coords["height"] == h)[0][0]
-    iw = np.where(varr.coords["width"] == w)[0][0]
-    h_sur, w_sur = (
-        np.arange(max(ih - wnd, 0), min(ih + wnd, varr.sizes["height"])),
-        np.arange(max(iw - wnd, 0), min(iw + wnd, varr.sizes["width"])),
-    )
-    sur = varr.isel(height=h_sur, width=w_sur)
-    corr = (
-        varr.isel(height=ih, width=iw).dot(sur) / std.isel(height=ih, width=iw) / std
-    ).data.reshape(-1)
-    corr = da.where(corr > thres_corr, corr, 0)
-    crds = np.array(list(itt.product(h_sur, w_sur))).T
-    corr = delayed(sparse.COO)(
-        crds, corr, shape=(varr.sizes["height"], varr.sizes["width"]),
-    )
-    corr = da.from_delayed(
-        corr, shape=(varr.sizes["height"], varr.sizes["width"]), dtype=float
-    )
-    return xr.DataArray(
-        corr,
-        dims=["height", "width"],
+    Ashape = (varr.sizes["height"], varr.sizes["width"])
+    for seed_id, sd in seed_df.iterrows():
+        src_corr = corr_df[corr_df["target"] == seed_id].copy()
+        src_nods = nod_df.loc[src_corr["source"]]
+        src_corr["height"], src_corr["width"] = (
+            src_nods["height"].values,
+            src_nods["width"].values,
+        )
+        tgt_corr = corr_df[corr_df["source"] == seed_id].copy()
+        tgt_nods = nod_df.loc[tgt_corr["target"]]
+        tgt_corr["height"], tgt_corr["width"] = (
+            tgt_nods["height"].values,
+            tgt_nods["width"].values,
+        )
+        cur_corr = pd.concat([src_corr, tgt_corr]).append(
+            {"corr": 1, "height": sd["height"], "width": sd["width"]}, ignore_index=True
+        )
+        cur_A = darr.array(
+            sparse.COO(cur_corr[["height", "width"]].T, cur_corr["corr"], shape=Ashape)
+        )
+        A_ls.append(cur_A)
+    A = xr.DataArray(
+        darr.stack(A_ls).map_blocks(lambda a: a.todense(), dtype=float),
+        dims=["unit_id", "height", "width"],
         coords={
+            "unit_id": seed_df["index"].values,
             "height": varr.coords["height"].values,
             "width": varr.coords["width"].values,
         },
     )
+    return A
 
 
 def initC(varr, A):

@@ -1,3 +1,4 @@
+import functools as fct
 import os
 import warnings
 
@@ -6,8 +7,11 @@ import cvxpy as cvx
 import dask as da
 import dask.array as darr
 import networkx as nx
+import numba as nb
 import numpy as np
+import pandas as pd
 import pyfftw.interfaces.numpy_fft as numpy_fft
+import pymetis
 import scipy.sparse
 import sparse
 import xarray as xr
@@ -18,10 +22,15 @@ from scipy.signal import butter, lfilter, welch
 from scipy.sparse import dia_matrix
 from skimage import morphology as moph
 from sklearn.linear_model import LassoLars
-from sklearn.utils import parallel_backend
 from statsmodels.tsa.stattools import acovf
 
-from .utilities import rechunk_like, save_minian
+from .utilities import (
+    custom_arr_optimize,
+    custom_delay_optimize,
+    open_minian,
+    rechunk_like,
+    save_minian,
+)
 
 
 def get_noise_fft(varr, noise_range=(0.25, 0.5), noise_method="logmexp"):
@@ -718,38 +727,26 @@ def update_temporal_cvxpy(y, g, sn, A=None, bseg=None, **kwargs):
     return sparse.COO(c), sparse.COO(s), sparse.COO(b), sparse.COO(c0)
 
 
-def unit_merge(A, C, add_list=None, thres_corr=0.9):
+def unit_merge(A, C, add_list=None, thres_corr=0.9, noise_freq=None):
     print("computing spatial overlap")
-    A_sps = (A.data.map_blocks(sparse.COO) > 0).rechunk(-1).persist()
-    A_inter = sparse.tril(
-        darr.tensordot(
-            A_sps.astype(np.float32), A_sps.astype(np.float32), axes=[(1, 2), (1, 2)]
-        ).compute(),
-        k=-1,
-    )
-    print("computing temporal correlation")
-    corr_ls = []
-    row_idx = []
-    col_idx = []
-    C = C - C.mean("frame")
-    std = np.sqrt((C ** 2).sum("frame"))
-    for i, j in zip(*A_inter.nonzero()):
-        C_i, C_j, std_i, std_j = (
-            C.isel(unit_id=i),
-            C.isel(unit_id=j),
-            std.isel(unit_id=i),
-            std.isel(unit_id=j),
+    with da.config.set(
+        array_optimize=darr.optimization.optimize,
+        **{"optimization.fuse.subgraphs": False}
+    ):
+        A_sps = (A.data.map_blocks(sparse.COO) > 0).rechunk(-1).persist()
+        A_inter = sparse.tril(
+            darr.tensordot(
+                A_sps.astype(np.float32),
+                A_sps.astype(np.float32),
+                axes=[(1, 2), (1, 2)],
+            ).compute(),
+            k=-1,
         )
-        corr = (C_i * C_j).sum() / (std_i * std_j)
-        corr_ls.append(corr)
-        row_idx.append(i)
-        col_idx.append(j)
-    corr_ls = da.compute(corr_ls)[0]
+    print("computing temporal correlation")
+    nod_df = pd.DataFrame({"unit_id": A.coords["unit_id"].values})
+    adj = adj_corr(C, A_inter, nod_df, freq=noise_freq)
     print("labeling units to be merged")
-    adj = (
-        scipy.sparse.csr_matrix((corr_ls, (row_idx, col_idx)), shape=A_inter.shape)
-        > thres_corr
-    )
+    adj = adj > thres_corr
     adj = adj + adj.T
     unit_labels = xr.apply_ufunc(
         label_connected,
@@ -802,22 +799,9 @@ def label_connected(adj, only_connected=False):
 
 
 def smooth_sig(sig, freq, method="fft", btype="low"):
-    if method == "fft":
-        _T = sig.sizes["frame"]
-        if btype == "low":
-            zero_range = slice(int(freq * _T), None)
-        elif btype == "high":
-            zero_range = slice(None, int(freq * _T))
-
-        def filt_func(x):
-            xfft = np.fft.rfft(x)
-            xfft[zero_range] = 0
-            return np.fft.irfft(xfft, len(x))
-
-    elif method == "butter":
-        but_b, but_a = butter(2, freq * 2, btype=btype, analog=False)
-        filt_func = lambda x: lfilter(but_b, but_a, x)
-    else:
+    try:
+        filt_func = {"fft": filt_fft, "butter": filt_butter}[method]
+    except KeyError:
         raise NotImplementedError(method)
     sig_smth = xr.apply_ufunc(
         filt_func,
@@ -825,10 +809,33 @@ def smooth_sig(sig, freq, method="fft", btype="low"):
         input_core_dims=[["frame"]],
         output_core_dims=[["frame"]],
         vectorize=True,
+        kwargs={"btype": btype, "freq": freq},
         dask="parallelized",
         output_dtypes=[sig.dtype],
     )
     return sig_smth
+
+
+def filt_fft(x, freq, btype):
+    _T = len(x)
+    if btype == "low":
+        zero_range = slice(int(freq * _T), None)
+    elif btype == "high":
+        zero_range = slice(None, int(freq * _T))
+    xfft = numpy_fft.rfft(x)
+    xfft[zero_range] = 0
+    return numpy_fft.irfft(xfft, len(x))
+
+
+def filt_butter(x, freq, btype):
+    but_b, but_a = butter(2, freq * 2, btype=btype, analog=False)
+    return lfilter(but_b, but_a, x)
+
+
+def filt_fft_vec(x, freq, btype):
+    for ix, xx in enumerate(x):
+        x[ix, :] = filt_fft(xx, freq, btype)
+    return x
 
 
 def compute_AtC(A, C):
@@ -837,7 +844,9 @@ def compute_AtC(A, C):
         A.coords["height"].values,
         A.coords["width"].values,
     )
-    A = A.data.map_blocks(sparse.COO, dtype=A.dtype).rechunk(-1)
+    A = darr.from_array(
+        A.data.map_blocks(sparse.COO, dtype=A.dtype).compute(), chunks=-1
+    )
     C = C.transpose("frame", "unit_id").data.map_blocks(sparse.COO, dtype=C.dtype)
     AtC = darr.tensordot(C, A, axes=(1, 0)).map_blocks(
         lambda a: a.todense(), dtype=A.dtype
@@ -847,3 +856,103 @@ def compute_AtC(A, C):
         dims=["frame", "height", "width"],
         coords={"frame": fm, "height": h, "width": w},
     )
+
+
+def graph_optimize_corr(
+    varr, G, freq, idx_dims=["height", "width"], chunk=600, step_size=50
+):
+    # a heuristic to make number of partitions scale with nodes
+    n_cuts, membership = pymetis.part_graph(
+        int(G.number_of_nodes() / chunk), adjacency=adj_list(G)
+    )
+    nx.set_node_attributes(
+        G, {k: {"part": v} for k, v in zip(sorted(G.nodes), membership)}
+    )
+    eg_df = nx.to_pandas_edgelist(G)
+    part_map = nx.get_node_attributes(G, "part")
+    eg_df["part_src"] = eg_df["source"].map(part_map)
+    eg_df["part_tgt"] = eg_df["target"].map(part_map)
+    eg_df["part_diff"] = (eg_df["part_src"] - eg_df["part_tgt"]).astype(bool)
+    corr_ls = []
+    idx_ls = []
+    npxs = []
+    egd_same, egd_diff = eg_df[~eg_df["part_diff"]], eg_df[eg_df["part_diff"]]
+    idx_dict = {d: nx.get_node_attributes(G, d) for d in idx_dims}
+
+    def construct_comput(edf, pxs):
+        px_map = {k: v for v, k in enumerate(pxs)}
+        ridx = edf["source"].map(px_map).values
+        cidx = edf["target"].map(px_map).values
+        idx_arr = {
+            d: xr.DataArray([dd[p] for p in pxs], dims="pixels")
+            for d, dd in idx_dict.items()
+        }
+        vsub = varr.sel(**idx_arr).data
+        if len(idx_arr) > 1:  # vectorized indexing
+            vsub = vsub.T
+        else:
+            vsub = vsub.rechunk(-1)
+        with da.config.set(**{"optimization.fuse.ave-width": vsub.shape[0]}):
+            return da.optimize(smooth_corr(vsub, ridx, cidx, freq=freq))[0]
+
+    for _, eg_sub in egd_same.groupby("part_src"):
+        pixels = list(set(eg_sub["source"]) | set(eg_sub["target"]))
+        corr_ls.append(construct_comput(eg_sub, pixels))
+        idx_ls.append(eg_sub.index)
+        npxs.append(len(pixels))
+    pixels = set()
+    eg_ls = []
+    for _, eg_sub in egd_diff.sort_values("source").groupby(
+        np.arange(len(egd_diff)) // step_size
+    ):
+        pixels = pixels | set(eg_sub["source"]) | set(eg_sub["target"])
+        eg_ls.append(eg_sub)
+        if len(pixels) > chunk - step_size / 2:
+            pixels = list(pixels)
+            edf = pd.concat(eg_ls)
+            corr_ls.append(construct_comput(edf, pixels))
+            idx_ls.append(edf.index)
+            npxs.append(len(pixels))
+            pixels = set()
+            eg_ls = []
+    print("pixel recompute ratio: {}".format(sum(npxs) / G.number_of_nodes()))
+    print("computing correlations")
+    corr_ls = da.compute(corr_ls)[0]
+    corr = pd.Series(np.concatenate(corr_ls), index=np.concatenate(idx_ls), name="corr")
+    eg_df["corr"] = corr
+    return eg_df
+
+
+def adj_corr(varr, adj, nod_df, freq):
+    G = nx.Graph()
+    G.add_nodes_from([(i, d) for i, d in enumerate(nod_df.to_dict("records"))])
+    G.add_edges_from([(s, t) for s, t in zip(*adj.nonzero())])
+    corr_df = graph_optimize_corr(varr, G, freq, idx_dims=nod_df.columns)
+    adj = scipy.sparse.csr_matrix(
+        (corr_df["corr"], (corr_df["source"], corr_df["target"])), shape=adj.shape
+    )
+    return adj
+
+
+def adj_list(G):
+    gdict = nx.to_dict_of_dicts(G)
+    return [np.array(list(gdict[k].keys())) for k in sorted(gdict.keys())]
+
+
+@darr.as_gufunc(signature="(p,f),(i),(i)->(i)", output_dtypes=[float])
+def smooth_corr(X, ridx, cidx, freq):
+    if freq:
+        X = filt_fft_vec(X, freq, "low")
+    return idx_corr(X, ridx, cidx)
+
+
+@nb.jit(nopython=True, nogil=True, cache=True)
+def idx_corr(X, ridx, cidx):
+    res = np.zeros(ridx.shape[0])
+    std = np.zeros(X.shape[0])
+    for i in range(X.shape[0]):
+        X[i, :] -= X[i, :].mean()
+        std[i] = np.sqrt((X[i, :] ** 2).sum())
+    for i, (r, c) in enumerate(zip(ridx, cidx)):
+        res[i] = (X[r, :] * X[c, :]).sum() / (std[r] * std[c])
+    return res
