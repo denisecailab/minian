@@ -1376,10 +1376,13 @@ def visualize_spatial_update(A_dict, C_dict, kdims=None, norm=True, datashading=
         lambda cr: cr.opts(frame_width=500, frame_height=50),
         hv.RGB if datashading else hv.Curve,
     )
-    return hv.NdLayout(
-        {"pseudo-color": (hv_pts * hv_A), "binary": (hv_pts * hv_Ab)},
-        kdims="Spatial Matrix",
-    ).cols(1) + hv_C.relabel("Temporal Components")
+    return (
+        hv.NdLayout(
+            {"pseudo-color": (hv_pts * hv_A), "binary": (hv_pts * hv_Ab)},
+            kdims="Spatial Matrix",
+        ).cols(1)
+        + hv_C.relabel("Temporal Components")
+    )
 
 
 def visualize_temporal_update(
