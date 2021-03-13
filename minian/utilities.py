@@ -215,7 +215,7 @@ def open_minian_mf(
     pattern=r"minian\.[0-9]+$",
     sub_dirs=[],
     exclude=True,
-    **kwargs
+    **kwargs,
 ):
     minian_dict = dict()
     for nextdir, dirlist, filelist in os.walk(dpath, topdown=False):
