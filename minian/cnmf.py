@@ -405,147 +405,160 @@ def update_temporal(
     scs_fallback=False,
     concurrent_update=False,
 ):
+    intpath = os.environ["MINIAN_INTERMEDIATE"]
     if YrA is None:
         YrA = compute_trace(Y, A, b, C, f).persist()
     Ymask = (YrA > 0).any("frame").compute()
     A, C, YrA = A.sel(unit_id=Ymask), C.sel(unit_id=Ymask), YrA.sel(unit_id=Ymask)
     print("grouping overlaping units")
-    A_sps = (A.data.map_blocks(sparse.COO) > 0).rechunk(-1).persist()
-    A_inter = darr.tensordot(
-        A_sps.astype(np.float32), A_sps.astype(np.float32), axes=[(1, 2), (1, 2)]
-    ).compute()
-    A_usum = np.tile(A_sps.sum(axis=(1, 2)).compute().todense(), (A_sps.shape[0], 1))
+    A_sps = (A.data.map_blocks(sparse.COO) > 0).compute().astype(np.float32)
+    A_inter = sparse.tensordot(A_sps, A_sps, axes=[(1, 2), (1, 2)])
+    A_usum = np.tile(A_sps.sum(axis=(1, 2)).todense(), (A_sps.shape[0], 1))
     A_usum = A_usum + A_usum.T
     jac = scipy.sparse.csc_matrix(A_inter / (A_usum - A_inter) > jac_thres)
     unit_labels = label_connected(jac)
     YrA = YrA.assign_coords(unit_labels=("unit_id", unit_labels))
-    if normalize:
-        print("normalizing traces")
-        YrA_norm = (
-            YrA.groupby("unit_labels").apply(lambda a: a / a.sum(axis=1).mean())
-            * YrA.sizes["frame"]
-        )
-    else:
-        YrA_norm = YrA
-    tn = (
-        get_noise_fft(YrA_norm, noise_range=(noise_freq, 1))
-        .compute()
-        .chunk({"unit_id": 1})
-    )
-    if use_smooth:
-        print("smoothing traces")
-        YrA_smth = smooth_sig(YrA_norm, noise_freq)
-        tn_smth = get_noise_fft(YrA_smth, noise_range=(noise_freq, 1))
-    else:
-        YrA_smth = YrA
-        tn_smth = tn
-    if p is None:
-        print("estimating order p for each neuron")
-        p = xr.apply_ufunc(
-            get_p,
-            YrA_smth,
-            input_core_dims=[["frame"]],
-            vectorize=True,
-            dask="parallelized",
-            output_dtypes=[int],
-        ).clip(1)
-        p = p.compute()
-        p_max = p.max().values
-    else:
-        p_max = p
-    print("estimating AR coefficients")
-    g = (
-        xr.apply_ufunc(
-            get_ar_coef,
-            YrA_smth,
-            tn_smth,
-            p,
-            input_core_dims=[["frame"], [], []],
-            output_core_dims=[["lag"]],
-            kwargs=dict(pad=p_max, add_lag=add_lag),
-            vectorize=True,
-            dask="parallelized",
-            output_dtypes=[float],
-            output_sizes=dict(lag=p_max),
-        )
-        .assign_coords(lag=np.arange(1, p_max + 1))
-        .compute()
-        .chunk({"unit_id": 1})
-    )
     print("updating temporal components")
-    res_ls = []
+    c_ls = []
+    s_ls = []
+    b_ls = []
+    c0_ls = []
+    g_ls = []
     uid_ls = []
-    if concurrent_update:
-        grp_dim = "unit_labels"
-        C = C.assign_coords(unit_labels=("unit_id", unit_labels))
-    else:
-        grp_dim = "unit_id"
+    grp_dim = "unit_labels"
+    C = C.assign_coords(unit_labels=("unit_id", unit_labels))
     if warm_start:
         C.data = C.data.map_blocks(scipy.sparse.csr_matrix)
-    for cur_YrA, cur_g, cur_tn, cur_C in zip(
-        YrA_norm.groupby(grp_dim),
-        g.groupby(grp_dim),
-        tn.groupby(grp_dim),
-        C.groupby(grp_dim),
-    ):
+    inline_opt = fct.partial(
+        custom_delay_optimize,
+        inline_patterns=["getitem", "rechunk-merge"],
+    )
+    for cur_YrA, cur_C in zip(YrA.groupby(grp_dim), C.groupby(grp_dim)):
         uid_ls.append(cur_YrA[1].coords["unit_id"].values.reshape(-1))
-        cur_YrA, cur_g, cur_tn, cur_C = (
-            cur_YrA[1].data.rechunk(-1),
-            cur_g[1].data.rechunk(-1),
-            cur_tn[1].data.rechunk(-1),
-            cur_C[1].data.rechunk(-1),
-        )
-        if not concurrent_update:
-            cur_YrA, cur_g, cur_tn, cur_C = (
-                cur_YrA.reshape((1, -1)),
-                cur_g.reshape((1, -1)),
-                cur_tn.reshape(1),
-                cur_C.reshape((1, -1)),
-            )
-        if cur_YrA.shape[0] > 50:
+        cur_YrA, cur_C = cur_YrA[1].data.rechunk(-1), cur_C[1].data.rechunk(-1)
+        # memory demand for cvxpy is roughly 500 times input
+        mem_demand = cur_YrA.nbytes / 1e6 * 500
+        # issue a warning if expected memory demand is larger than 1G
+        if concurrent_update and (mem_demand > 1e3):
             warnings.warn(
-                "{} units are scheduled to update together, "
+                "{} MB of memory is expected for concurrent update, "
                 "which might be too demanding. "
                 "Consider merging the units "
                 "or changing jaccard threshold".format(cur_YrA.shape[0])
             )
         if not warm_start:
             cur_C = None
-        res = update_temporal_cvxpy(
-            cur_YrA,
-            cur_g,
-            cur_tn,
-            c_last=cur_C,
-            bseg=bseg,
-            sparse_penal=sparse_penal,
-            max_iters=max_iters,
-            scs_fallback=scs_fallback,
-            zero_thres=zero_thres,
+        if cur_YrA.shape[0] > 1:
+            dl_opt = inline_opt
+        else:
+            dl_opt = custom_delay_optimize
+        # explicitly using delay (rather than gufunc) seem to promote the
+        # depth-first behavior of dask
+        with da.config.set(delayed_optimize=dl_opt):
+            res = da.optimize(
+                da.delayed(update_temporal_block)(
+                    cur_YrA,
+                    noise_freq=noise_freq,
+                    p=p,
+                    add_lag=add_lag,
+                    normalize=normalize,
+                    concurrent=concurrent_update,
+                    use_smooth=use_smooth,
+                    c_last=cur_C,
+                    bseg=bseg,
+                    sparse_penal=sparse_penal,
+                    max_iters=max_iters,
+                    scs_fallback=scs_fallback,
+                    zero_thres=zero_thres,
+                )
+            )[0]
+        c_ls.append(darr.from_delayed(res[0], shape=cur_YrA.shape, dtype=cur_YrA.dtype))
+        s_ls.append(darr.from_delayed(res[1], shape=cur_YrA.shape, dtype=cur_YrA.dtype))
+        b_ls.append(darr.from_delayed(res[2], shape=cur_YrA.shape, dtype=cur_YrA.dtype))
+        c0_ls.append(
+            darr.from_delayed(res[3], shape=cur_YrA.shape, dtype=cur_YrA.dtype)
         )
-        res_ls.append(res)
+        g_ls.append(
+            darr.from_delayed(res[4], shape=(cur_YrA.shape[0], p), dtype=cur_YrA.dtype)
+        )
     uids_new = np.concatenate(uid_ls)
-    res_ls = da.compute(res_ls)[0]
-    C_new = darr.concatenate([darr.array(r[0]) for r in res_ls], axis=0)
-    S_new = darr.concatenate([darr.array(r[1]) for r in res_ls], axis=0)
-    b0_new = darr.concatenate([darr.array(r[2]) for r in res_ls], axis=0)
-    c0_new = darr.concatenate([darr.array(r[3]) for r in res_ls], axis=0)
-    mask = (S_new.sum(axis=1) > 0).compute()
-    print("{} out of {} units dropped".format(mask.size - mask.nnz, len(Ymask)))
-    mask = mask.todense()
-    C_new, S_new, b0_new, c0_new, g, uids_new_ma = (
-        C_new[mask, :],
-        S_new[mask, :],
-        b0_new[mask, :],
-        c0_new[mask, :],
-        g[mask, :],
-        uids_new[mask],
+    C_new = xr.DataArray(
+        darr.concatenate(c_ls, axis=0),
+        dims=["unit_id", "frame"],
+        coords={
+            "unit_id": uids_new,
+            "frame": YrA.coords["frame"],
+        },
+        name="C_new",
+    )
+    S_new = xr.DataArray(
+        darr.concatenate(s_ls, axis=0),
+        dims=["unit_id", "frame"],
+        coords={
+            "unit_id": uids_new,
+            "frame": YrA.coords["frame"].values,
+        },
+        name="S_new",
+    )
+    b0_new = xr.DataArray(
+        darr.concatenate(b_ls, axis=0),
+        dims=["unit_id", "frame"],
+        coords={
+            "unit_id": uids_new,
+            "frame": YrA.coords["frame"].values,
+        },
+        name="b0_new",
+    )
+    c0_new = xr.DataArray(
+        darr.concatenate(c0_ls, axis=0),
+        dims=["unit_id", "frame"],
+        coords={
+            "unit_id": uids_new,
+            "frame": YrA.coords["frame"].values,
+        },
+        name="c0_new",
+    )
+    g = xr.DataArray(
+        darr.concatenate(g_ls, axis=0),
+        dims=["unit_id", "lag"],
+        coords={"unit_id": uids_new, "lag": np.arange(p)},
+        name="g",
+    )
+    arr_opt = fct.partial(custom_arr_optimize, keep_patterns=["^update_temporal_block"])
+    with da.config.set(array_optimize=arr_opt):
+        da.compute(
+            [
+                save_minian(
+                    var.chunk({"unit_id": 1}), intpath, compute=False, overwrite=True
+                )
+                for var in [C_new, S_new, b0_new, c0_new, g]
+            ]
+        )
+    int_ds = open_minian(intpath, return_dict=True)
+    C_new, S_new, b0_new, c0_new, g = (
+        int_ds["C_new"],
+        int_ds["S_new"],
+        int_ds["b0_new"],
+        int_ds["c0_new"],
+        int_ds["g"],
+    )
+    mask = (S_new.sum("frame") > 0).compute()
+    print("{} out of {} units dropped".format((~mask).sum().values, len(Ymask)))
+    C_new, S_new, b0_new, c0_new, g = (
+        C_new[mask],
+        S_new[mask],
+        b0_new[mask],
+        c0_new[mask],
+        g[mask],
     )
     sig_new = C_new + b0_new + c0_new
-    YrA_new = YrA[mask, :]
+    YrA_new = YrA.sel(unit_id=mask)
     if post_scal and len(sig_new) > 0:
         print("post-hoc scaling")
         scal = (
-            lstsq_vec(sig_new.rechunk((1, -1)), YrA_new.data).compute().reshape((-1, 1))
+            lstsq_vec(sig_new.data.rechunk((1, -1)), YrA_new.data)
+            .compute()
+            .reshape((-1, 1))
         )
         C_new, S_new, b0_new, c0_new = (
             C_new * scal,
@@ -553,35 +566,12 @@ def update_temporal(
             b0_new * scal,
             c0_new * scal,
         )
-    C_new = xr.DataArray(
-        C_new.map_blocks(lambda a: a.todense(), dtype=float),
-        dims=["unit_id", "frame"],
-        coords={"unit_id": uids_new_ma, "frame": YrA_new.coords["frame"],},
-    )
-    S_new = xr.DataArray(
-        S_new.map_blocks(lambda a: a.todense(), dtype=float),
-        dims=["unit_id", "frame"],
-        coords={"unit_id": uids_new_ma, "frame": YrA_new.coords["frame"].values,},
-    )
-    b0_new = xr.DataArray(
-        b0_new.map_blocks(lambda a: a.todense(), dtype=float),
-        dims=["unit_id", "frame"],
-        coords={"unit_id": uids_new_ma, "frame": YrA_new.coords["frame"].values,},
-    )
-    c0_new = xr.DataArray(
-        c0_new.map_blocks(lambda a: a.todense(), dtype=float),
-        dims=["unit_id", "frame"],
-        coords={"unit_id": uids_new_ma, "frame": YrA_new.coords["frame"].values,},
-    )
-    mask = xr.DataArray(
-        mask, dims=["unit_id"], coords={"unit_id": uids_new}
-    ).reindex_like(Ymask, fill_value=False)
     return C_new, S_new, b0_new, c0_new, g, mask
 
 
 @darr.as_gufunc(signature="(f),(f)->()", output_dtypes=float)
 def lstsq_vec(a, b):
-    a = a.reshape((-1, 1)).todense()
+    a = a.reshape((-1, 1))
     return np.linalg.lstsq(a, b.squeeze(), rcond=-1)[0]
 
 
@@ -613,10 +603,60 @@ def get_p(y):
     return np.sum(rising[prd_ris == id_max_prd + 1])
 
 
-@darr.as_gufunc(
-    signature="(u,f),(u,p),(u)->(u,f),(u,f),(u,f),(u,f)",
-    output_dtypes=(float, float, float, float),
-)
+def update_temporal_block(
+    YrA,
+    noise_freq,
+    p=None,
+    add_lag="p",
+    normalize=True,
+    use_smooth=True,
+    concurrent=False,
+    **kwargs
+):
+    vec_get_noise = np.vectorize(
+        _noise_fft,
+        otypes=[float],
+        excluded=["noise_range", "noise_method"],
+        signature="(f)->()",
+    )
+    vec_get_p = np.vectorize(get_p, otypes=[int], signature="(f)->()")
+    vec_get_ar_coef = np.vectorize(
+        get_ar_coef,
+        otypes=[float],
+        excluded=["pad", "add_lag"],
+        signature="(f),(),()->(l)",
+    )
+    if normalize:
+        amean = YrA.sum(axis=1).mean()
+        YrA /= amean
+        YrA *= YrA.shape[1]
+    tn = vec_get_noise(YrA, noise_range=(noise_freq, 1))
+    if use_smooth:
+        YrA_ar = filt_fft_vec(YrA, noise_freq, "low")
+        tn_ar = vec_get_noise(YrA_ar, noise_range=(noise_freq, 1))
+    else:
+        YrA_ar, tn_ar = YrA, tn
+    # auto estimation of p is disabled since it's never used and makes it
+    # impossible to pre-determine the shape of output
+    # if p is None:
+    #     p = np.clip(vec_get_p(YrA_ar), 1, None)
+    pmax = np.max(p)
+    g = vec_get_ar_coef(YrA_ar, tn_ar, p, pad=pmax, add_lag=add_lag)
+    del YrA_ar, tn_ar
+    if concurrent:
+        c, s, b, c0 = update_temporal_cvxpy(YrA, g, tn, **kwargs)
+    else:
+        res_ls = []
+        for cur_yra, cur_g, cur_tn in zip(YrA, g, tn):
+            res = update_temporal_cvxpy(cur_yra, cur_g, cur_tn, **kwargs)
+            res_ls.append(res)
+        c = np.concatenate([r[0] for r in res_ls], axis=0)
+        s = np.concatenate([r[1] for r in res_ls], axis=0)
+        b = np.concatenate([r[2] for r in res_ls], axis=0)
+        c0 = np.concatenate([r[3] for r in res_ls], axis=0)
+    return c, s, b, c0, g
+
+
 def update_temporal_cvxpy(y, g, sn, A=None, bseg=None, **kwargs):
     # spatial:
     # (d, f), (u, p), (d), (d, u)
@@ -743,7 +783,7 @@ def update_temporal_cvxpy(y, g, sn, A=None, bseg=None, **kwargs):
                     "problem status is {}, returning zero".format(prob.status),
                     RuntimeWarning,
                 )
-                return [sparse.zeros(c.shape, dtype=float)] * 4
+                return [np.zeros(c.shape, dtype=float)] * 4
     if not (prob.status == "optimal"):
         warnings.warn("problem solved sub-optimally", RuntimeWarning)
     c = np.where(c.value > zero_thres, c.value, 0)
@@ -751,7 +791,7 @@ def update_temporal_cvxpy(y, g, sn, A=None, bseg=None, **kwargs):
     b = np.where(b.value > zero_thres, b.value, 0)
     c0 = c0.value.reshape((-1, 1)) * dc_vec
     c0 = np.where(c0 > zero_thres, c0, 0)
-    return sparse.COO(c), sparse.COO(s), sparse.COO(b), sparse.COO(c0)
+    return c, s, b, c0
 
 
 def unit_merge(A, C, add_list=None, thres_corr=0.9, noise_freq=None):
