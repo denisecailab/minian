@@ -2,8 +2,8 @@ import itertools as itt
 import os
 
 import cv2
-import dask
-import dask.array as da
+import dask as da
+import dask.array as darr
 import numpy as np
 import pandas as pd
 import scipy.sparse
@@ -424,8 +424,8 @@ def initA_perseed(varr, std, h, w, wnd, thres_corr):
 def initC(varr, A):
     uids = A.coords["unit_id"]
     fms = varr.coords["frame"]
-    A = A.data.map_blocks(sparse.COO).map_blocks(lambda a: a / a.sum()).rechunk(-1)
-    C = da.tensordot(A, varr, axes=[(1, 2), (1, 2)])
+    A = A.data.map_blocks(sparse.COO).map_blocks(lambda a: a / a.sum()).compute()
+    C = darr.tensordot(A, varr, axes=[(1, 2), (1, 2)])
     C = xr.DataArray(
         C, dims=["unit_id", "frame"], coords={"unit_id": uids, "frame": fms}
     )
@@ -434,14 +434,20 @@ def initC(varr, A):
 
 def initbf(varr, A, C):
     A = A.data.map_blocks(sparse.COO).compute()
-    Yb = (varr - da.tensordot(C, A, axes=[(0,), (0,)])).clip(0)
-    intpath = os.environ["MINIAN_INTERMEDIATE"]
-    Yb = save_minian(Yb.rename("Yb"), intpath, overwrite=True)
+    Yb = (varr - darr.tensordot(C, A, axes=[(0,), (0,)])).clip(0)
     b = Yb.mean("frame")
     f = Yb.mean(["height", "width"])
+    arr_opt = fct.partial(
+        custom_arr_optimize,
+        rename_dict={"tensordot": "tensordot_restricted"},
+    )
+    with da.config.set(array_optimize=arr_opt):
+        b = da.optimize(b)[0]
+        f = da.optimize(f)[0]
+    b, f = da.compute([b, f])[0]
     return b, f
 
 
-@da.as_gufunc(signature="(h, w)->(h, w)", output_dtypes=int, allow_rechunk=True)
+@darr.as_gufunc(signature="(h, w)->(h, w)", output_dtypes=int, allow_rechunk=True)
 def da_label(im):
     return label(im)[0]
