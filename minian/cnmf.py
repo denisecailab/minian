@@ -340,20 +340,20 @@ def update_spatial_block(y, alpha, sub, **kwargs):
         return sparse.zeros(sub.shape)
 
 
-def compute_trace(Y, A, b, C, f, noise_freq=None):
+def compute_trace(Y, A, b, C, f):
     fms = Y.coords["frame"]
     uid = A.coords["unit_id"]
     Y = Y.data
-    A = A.data.map_blocks(sparse.COO).rechunk(-1).persist()
+    A = darr.from_array(A.data.map_blocks(sparse.COO).compute(), chunks=-1)
     C = C.data.map_blocks(sparse.COO).T
     b = (
         b.fillna(0)
         .data.map_blocks(sparse.COO)
         .reshape((1, Y.shape[1], Y.shape[2]))
-        .rechunk(-1)
+        .compute()
     )
     f = f.fillna(0).data.reshape((-1, 1))
-    AtA = darr.tensordot(A, A, axes=[(1, 2), (1, 2)])
+    AtA = darr.tensordot(A, A, axes=[(1, 2), (1, 2)]).compute()
     A_norm = (
         (1 / (A ** 2).sum(axis=(1, 2)))
         .map_blocks(
@@ -368,15 +368,18 @@ def compute_trace(Y, A, b, C, f, noise_freq=None):
     CtA = darr.dot(C, AtA)
     CtA = darr.dot(CtA, A_norm)
     YrA = (YtA - CtA + C).clip(0)
-    YrA_ls = YrA.to_delayed().squeeze().tolist()
-    for i in range(0, len(YrA_ls), 100):
-        YrA_ls[i : i + 100] = da.compute(YrA_ls[i : i + 100])[0]
-    YrA = darr.array(np.concatenate(YrA_ls, axis=0)).rechunk((-1, 1))
-    YrA = xr.DataArray(
-        YrA, dims=["frame", "unit_id"], coords={"frame": fms, "unit_id": uid},
+    arr_opt = fct.partial(
+        custom_arr_optimize,
+        inline_patterns=["from-getitem-transpose"],
+        rename_dict={"tensordot": "tensordot_restricted"},
     )
-    if noise_freq:
-        YrA = smooth_sig(YrA, noise_freq)
+    with da.config.set(array_optimize=arr_opt):
+        YrA = da.optimize(YrA)[0]
+    YrA = xr.DataArray(
+        YrA,
+        dims=["frame", "unit_id"],
+        coords={"frame": fms, "unit_id": uid},
+    )
     return YrA.transpose("unit_id", "frame")
 
 
