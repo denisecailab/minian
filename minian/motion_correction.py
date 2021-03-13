@@ -121,23 +121,22 @@ def est_sh_part(varr, max_sh, npart, local, temp_nfm):
 def est_sh_chunk(varr, sh_org, max_sh, local):
     mid = int(varr.shape[0] / 2)
     shifts = np.zeros((varr.shape[0], 2))
-    arr = varr.copy()
-    for i, fm in enumerate(arr):
+    for i, fm in enumerate(varr):
         if i < mid:
-            temp = arr[i + 1]
+            temp = varr[i + 1]
             slc = slice(0, i + 1)
         elif i > mid:
-            temp = arr[i - 1]
+            temp = varr[i - 1]
             slc = slice(i, None)
         else:
             continue
         sh = match_temp(fm, temp, max_sh, local)
         shifts[slc] = shifts[slc] + sh
     for i, sh in enumerate(shifts):
-        arr[i] = shift_perframe(arr[i], sh, 0)
+        varr[i] = shift_perframe(varr[i], sh, 0)
     if sh_org is not None:
         shifts = np.concatenate([shifts[i] + sh for i, sh in enumerate(sh_org)], axis=0)
-    return arr, shifts
+    return varr.max(axis=0), shifts
 
 
 def match_temp(src, dst, max_sh, local, subpixel=False):
