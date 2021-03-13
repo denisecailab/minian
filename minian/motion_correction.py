@@ -27,9 +27,8 @@ def estimate_shifts(varr, max_sh, dim="frame", npart=None, local=False, temp_nfm
     varr = varr.transpose(..., dim, "height", "width")
     loop_dims = list(set(varr.dims) - set(["height", "width", dim]))
     if npart is None:
-        # by default use a npart that result in three layers of recursion
-        npart = max(3, int(np.ceil((varr.sizes[dim] / temp_nfm) ** (1 / 3))))
-        print(npart)
+        # by default use a npart that result in two layers of recursion
+        npart = max(3, int(np.ceil((varr.sizes[dim] / temp_nfm) ** (1 / 2))))
     if loop_dims:
         loop_labs = [varr.coords[d].values for d in loop_dims]
         res_dict = dict()
