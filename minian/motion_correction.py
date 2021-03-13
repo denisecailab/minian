@@ -7,7 +7,7 @@ import dask.array as darr
 import numpy as np
 import xarray as xr
 
-from .utilities import xrconcat_recursive, inline_zarr
+from .utilities import custom_arr_optimize, xrconcat_recursive
 
 
 def estimate_shifts(varr, max_sh, dim="frame", npart=None, local=False, temp_nfm=30):
@@ -72,32 +72,21 @@ def est_sh_part(varr, max_sh, npart, local, temp_nfm):
         xarray.DataArray: the max shift per frame
         xarray.DataArray: the shift per frame
     """
-
-    def max_fm(a):
-        return np.max(a, axis=0, keepdims=True)
-
     varr = varr.rechunk((temp_nfm, None, None))
-    gu_est_sh = darr.gufunc(
-        est_sh_chunk,
-        signature="(h,w)->(h,w),(s)",
-        output_dtypes=[np.uint8, np.float],
-        output_sizes={"s": 2},
-    )
-    temps, shifts = gu_est_sh(varr, sh_org=None, max_sh=max_sh, local=local)
-    # ref: https://github.com/dask/dask/issues/5105
-    with da.config.set(**{"optimization.fuse.ave-width": 4}):
-        shifts = da.optimize(shifts)[0]
-        temps = da.optimize(temps)[0]
-    # ref: https://github.com/dask/dask/issues/6668
-    with da.config.set(array_optimize=inline_zarr):
-        shifts = da.optimize(shifts)[0]
-        temps = da.optimize(temps)[0]
-    temps = darr.map_blocks(
-        max_fm,
-        temps,
-        dtype=temps.dtype,
-        chunks=(1, temps.chunksize[1], temps.chunksize[2]),
-    )
+    arr_opt = fct.partial(custom_arr_optimize, keep_patterns=["^est_sh_chunk"])
+    tmp_ls = []
+    sh_ls = []
+    for blk in varr.blocks:
+        res = da.delayed(est_sh_chunk)(blk, sh_org=None, max_sh=max_sh, local=local)
+        tmp = darr.from_delayed(
+            res[0], shape=(blk.shape[1], blk.shape[2]), dtype=blk.dtype
+        )
+        sh = darr.from_delayed(res[1], shape=(blk.shape[0], 2), dtype=float)
+        tmp_ls.append(tmp)
+        sh_ls.append(sh)
+    with da.config.set(array_optimize=arr_opt):
+        temps = da.optimize(darr.stack(tmp_ls, axis=0))[0]
+        shifts = da.optimize(darr.concatenate(sh_ls, axis=0))[0]
     while temps.shape[0] > 1:
         tmp_ls = []
         sh_ls = []
@@ -106,8 +95,8 @@ def est_sh_part(varr, max_sh, npart, local, temp_nfm):
             sh_org = shifts.blocks[idx : idx + npart]
             sh_org_ls = [sh_org.blocks[i] for i in range(sh_org.numblocks[0])]
             res = da.delayed(est_sh_chunk)(tmps, sh_org_ls, max_sh=max_sh, local=local)
-            tmp = darr.from_delayed(res[0], shape=tmps.shape, dtype=tmps.dtype).max(
-                axis=0
+            tmp = darr.from_delayed(
+                res[0], shape=(tmps.shape[1], tmps.shape[2]), dtype=tmps.dtype
             )
             sh_new = darr.from_delayed(res[1], shape=sh_org.shape, dtype=sh_org.dtype)
             tmp_ls.append(tmp)
