@@ -166,7 +166,6 @@ def update_spatial(
         List(xarray.DataArray):
 
     """
-    _T = Y.sizes["frame"]
     intpath = os.environ["MINIAN_INTERMEDIATE"]
     if in_memory:
         C_store = C.compute().values
@@ -175,7 +174,7 @@ def update_spatial(
         C_store = zarr.open_array(C_path)
     print("estimating penalty parameter")
     alpha = sparse_penal * sn
-    alpha = alpha.persist()
+    alpha = rechunk_like(alpha.compute(), sn)
     print("computing subsetting matrix")
     selem = moph.disk(dl_wnd)
     sub = xr.apply_ufunc(
@@ -189,33 +188,55 @@ def update_spatial(
         output_dtypes=[A.dtype],
     )
     sub = sub > 0
-    sub = save_minian(
-        sub.rename("sub"),
-        intpath,
-        overwrite=True,
-        chunks={
-            "unit_id": -1,
-            "height": Y.data.chunksize[1],
-            "width": Y.data.chunksize[2],
-        },
-    )
     sub.data = sub.data.map_blocks(sparse.COO)
     if update_background:
         b_in = rechunk_like(b > 0, Y).assign_coords(unit_id=-1).expand_dims("unit_id")
         b_in.data = b_in.data.map_blocks(sparse.COO)
-        b_in = b_in.persist()
-        sub = xr.concat([sub, b_in], "unit_id").chunk({"unit_id": -1})
-        f_in = f.persist().data
+        b_in = b_in.compute()
+        sub = xr.concat([sub, b_in], "unit_id")
+        f_in = f.compute().data
     else:
         f_in = None
-    print("fitting spatial matrix")
-    A_new = update_spatial_block(
-        Y.transpose("height", "width", "frame").data,
-        alpha.data,
-        sub.transpose("height", "width", "unit_id").data,
-        C_store=C_store,
-        f=f_in,
+    sub = sub.transpose("height", "width", "unit_id").compute()
+    sub.data = darr.array(sub.data).rechunk(
+        (Y.data.chunksize[1], Y.data.chunksize[2], -1)
     )
+    print("fitting spatial matrix")
+    ssub = darr.map_blocks(
+        sps_any,
+        sub.data,
+        drop_axis=2,
+        chunks=((1, 1)),
+        meta=sparse.ones(1).astype(bool),
+    ).compute()
+    Y_trans = Y.transpose("height", "width", "frame")
+    # take fast route if a lot of chunks are empty
+    if ssub.sum() < 500:
+        A_new = np.empty(sub.data.numblocks, dtype=object)
+        for (hblk, wblk), has_unit in np.ndenumerate(ssub):
+            cur_sub = sub.data.blocks[hblk, wblk, :]
+            if has_unit:
+                cur_blk = update_spatial_block(
+                    Y_trans.data.blocks[hblk, wblk, :],
+                    alpha.data.blocks[hblk, wblk],
+                    cur_sub,
+                    C_store=C_store,
+                    f=f_in,
+                )
+            else:
+                cur_blk = darr.array(sparse.zeros((cur_sub.shape)))
+            A_new[hblk, wblk, 0] = cur_blk
+        A_new = darr.block(A_new.tolist())
+    else:
+        A_new = update_spatial_block(
+            Y_trans.data,
+            alpha.data,
+            sub.data,
+            C_store=C_store,
+            f=f_in,
+        )
+    with da.config.set(**{"optimization.fuse.ave-width": 6}):
+        A_new = da.optimize(A_new)[0]
     if normalize:
         A_new = A_new / A_new.sum(axis=(0, 1))
     A_new = xr.DataArray(
@@ -227,13 +248,12 @@ def update_spatial(
             "width": A.coords["width"],
         },
     )
-    with parallel_backend("dask"):
-        A_new = save_minian(
-            A_new.rename("A_new"),
-            intpath,
-            overwrite=True,
-            chunks={"unit_id": 1, "height": -1, "width": -1},
-        )
+    A_new = save_minian(
+        A_new.rename("A_new"),
+        intpath,
+        overwrite=True,
+        chunks={"unit_id": 1, "height": -1, "width": -1},
+    )
     if update_background:
         print("updating background")
         b_new = A_new.sel(unit_id=-1)
@@ -274,6 +294,10 @@ def update_spatial(
     return A_new, b_new, f_new, mask
 
 
+def sps_any(x):
+    return np.atleast_2d(x.nnz > 0)
+
+
 def update_spatial_perpx(y, alpha, sub, C_store, f):
     if f is not None:
         idx = sub[:-1].nonzero()[0]
@@ -310,10 +334,10 @@ def update_spatial_block(y, alpha, sub, **kwargs):
         return sparse.COO(
             coords=np.concatenate(crd_ls, axis=1),
             data=np.concatenate(data_ls),
-            shape=(sub.shape[0], sub.shape[1], sub.shape[2]),
+            shape=sub.shape,
         )
     else:
-        return sparse.zeros((sub.shape[0], sub.shape[1], sub.shape[2]))
+        return sparse.zeros(sub.shape)
 
 
 def compute_trace(Y, A, b, C, f, noise_freq=None):
