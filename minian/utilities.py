@@ -252,7 +252,13 @@ def open_minian_mf(
 
 
 def save_minian(
-    var, dpath, meta_dict=None, overwrite=False, chunks=None, mem_limit="200MB"
+    var,
+    dpath,
+    meta_dict=None,
+    overwrite=False,
+    chunks=None,
+    compute=True,
+    mem_limit="200MB",
 ):
     """
     Saves the data (var) in the format specified by the backend variable, in the location specified by dpath under the name ‘minian’, if overwrite True
@@ -285,8 +291,8 @@ def save_minian(
             shutil.rmtree(fp)
         except FileNotFoundError:
             pass
-    ds.to_zarr(fp, mode=md)
-    if chunks is not None:
+    arr = ds.to_zarr(fp, compute=compute, mode=md)
+    if (chunks is not None) and compute:
         chunks = {d: var.sizes[d] if v <= 0 else v for d, v in chunks.items()}
         dst_path = os.path.join(dpath, str(uuid4()))
         temp_path = os.path.join(dpath, str(uuid4()))
@@ -309,8 +315,9 @@ def save_minian(
         for f in os.listdir(dst_path):
             os.rename(os.path.join(dst_path, f), os.path.join(arr_path, f))
         os.rmdir(dst_path)
-    arr = xr.open_zarr(fp)[var.name]
-    arr.data = darr.from_zarr(os.path.join(fp, var.name), inline_array=True)
+    if compute:
+        arr = xr.open_zarr(fp)[var.name]
+        arr.data = darr.from_zarr(os.path.join(fp, var.name), inline_array=True)
     return arr
 
 
