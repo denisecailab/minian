@@ -1056,7 +1056,7 @@ def generate_videos(
         print("generating traces")
         AC = compute_AtC(A, C)
     Y = Y * 255 / Y.max().compute().values
-    AC = AC * 255 / AC.max().compute().values
+    AC = AC * 255 / C.max().compute().values
     res = Y - AC
     print("writing videos")
     vid = xr.concat(
