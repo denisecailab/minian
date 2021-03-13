@@ -17,7 +17,6 @@ import dask.array as darr
 import ffmpeg
 import numpy as np
 import pandas as pd
-import psutil
 import rechunker
 import xarray as xr
 import zarr as zr
