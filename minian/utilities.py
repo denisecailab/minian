@@ -501,7 +501,13 @@ class TaskAnnotation(SchedulerPlugin):
 
 
 def custom_arr_optimize(
-    dsk, keys, inline_patterns=[], rename_dict=None, keep_patterns=[]
+    dsk,
+    keys,
+    fast_funcs=FAST_FUNCTIONS,
+    inline_patterns=[],
+    rename_dict=None,
+    rewrite_dict=None,
+    keep_patterns=[],
 ):
     # inlining lots of array operations ref:
     # https://github.com/dask/dask/issues/6668
@@ -518,12 +524,37 @@ def custom_arr_optimize(
         dsk,
         keys,
         fuse_keys=keep_keys,
-        fast_functions=FAST_FUNCTIONS,
+        fast_functions=fast_funcs,
         rename_fused_keys=key_renamer,
     )
     if inline_patterns:
         dsk = inline_pattern(dsk, inline_patterns, inline_constants=False)
+    if rewrite_dict:
+        dsk_old = dsk.copy()
+        for key, val in dsk_old.items():
+            key_new = rewrite_key(key, rewrite_dict)
+            if key_new != key:
+                dsk[key_new] = val
+                dsk[key] = key_new
     return dsk
+
+
+def rewrite_key(key, rwdict):
+    typ = type(key)
+    if typ is tuple:
+        k = key[0]
+    elif typ is str:
+        k = key
+    else:
+        raise ValueError("key must be either str or tuple: {}".format(key))
+    for pat, repl in rwdict.items():
+        k = re.sub(pat, repl, k)
+    if typ is tuple:
+        ret_key = list(key)
+        ret_key[0] = k
+        return tuple(ret_key)
+    else:
+        return k
 
 
 def custom_fused_keys_renamer(keys, max_fused_key_length=120, rename_dict=None):
