@@ -464,6 +464,7 @@ ANNOTATIONS = {
     "update_spatial_block": {"resources": {"MEM": 1}},
     "tensordot_restricted": {"resources": {"MEM": 1}},
     "update_temporal_block": {"resources": {"MEM": 1}},
+    "merge_restricted": {"resources": {"MEM": 1}},
 }
 
 FAST_FUNCTIONS = [
@@ -661,3 +662,16 @@ def get_keys_pat(pat, keys, return_all=False):
         return keys_filt
     else:
         return keys_filt[0]
+
+
+def optimize_chunk(arr, chk):
+    fast_funcs = FAST_FUNCTIONS + [darr.core.concatenate3]
+    arr_chk = arr.chunk(chk)
+    arr_opt = fct.partial(
+        custom_arr_optimize,
+        fast_funcs=fast_funcs,
+        rewrite_dict={"rechunk-merge": "merge_restricted"},
+    )
+    with da.config.set(array_optimize=arr_opt):
+        arr_chk.data = da.optimize(arr_chk.data)[0]
+    return arr_chk
