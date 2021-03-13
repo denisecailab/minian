@@ -38,10 +38,7 @@ def estimate_shifts(varr, max_sh, dim="frame", npart=None, local=False, temp_nfm
             sh = xr.DataArray(
                 sh,
                 dims=[dim, "variable"],
-                coords={
-                    dim: va.coords[dim].values,
-                    "variable": ["height", "width"],
-                },
+                coords={dim: va.coords[dim].values, "variable": ["height", "width"],},
             )
             res_dict[lab] = sh.assign_coords(**{k: v for k, v in zip(loop_dims, lab)})
         sh = xrconcat_recursive(res_dict, loop_dims)
@@ -50,10 +47,7 @@ def estimate_shifts(varr, max_sh, dim="frame", npart=None, local=False, temp_nfm
         sh = xr.DataArray(
             sh,
             dims=[dim, "variable"],
-            coords={
-                dim: varr.coords[dim].values,
-                "variable": ["height", "width"],
-            },
+            coords={dim: varr.coords[dim].values, "variable": ["height", "width"],},
         )
     return sh
 

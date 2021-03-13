@@ -638,11 +638,7 @@ def custom_delay_optimize(dsk, keys, fast_functions=[], inline_patterns=[], **kw
     if inline_patterns:
         dsk = inline_pattern(dsk, inline_patterns, inline_constants=False)
     if fast_functions:
-        dsk = inline_functions(
-            dsk,
-            [],
-            fast_functions=fast_functions,
-        )
+        dsk = inline_functions(dsk, [], fast_functions=fast_functions,)
     return dsk
 
 
