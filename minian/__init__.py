@@ -8,10 +8,10 @@ da.config.set(
 # setting fuse width ref: https://github.com/dask/dask/issues/5105
 da.config.set(
     **{
-        "distributed.worker.memory.target": 0.25,
-        "distributed.worker.memory.spill": 0.5,
-        "distributed.worker.memory.pause": 0.9,
-        "distributed.worker.memory.terminate": 0.95,
+        # "distributed.worker.memory.target": 0.25,
+        # "distributed.worker.memory.spill": 0.5,
+        # "distributed.worker.memory.pause": 0.9,
+        # "distributed.worker.memory.terminate": 0.95,
         "distributed.admin.log-length": 100,
         "distributed.scheduler.transition-log-length": 100,
         "optimization.fuse.ave-width": 3,
