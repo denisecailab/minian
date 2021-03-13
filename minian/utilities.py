@@ -1,3 +1,4 @@
+import functools as fct
 import os
 import re
 import shutil
@@ -9,17 +10,26 @@ from os.path import join as pjoin
 from pathlib import Path
 from uuid import uuid4
 
-import ffmpeg
+import _operator
 import cv2
 import dask as da
 import dask.array as darr
+import ffmpeg
 import numpy as np
 import pandas as pd
 import psutil
 import rechunker
 import xarray as xr
 import zarr as zr
-from dask.optimization import inline_functions
+from dask.core import flatten
+from dask.delayed import optimize as default_delay_optimize
+from dask.optimization import (
+    cull,
+    fuse,
+    inline,
+    inline_functions,
+)
+from dask.utils import ensure_dict
 from distributed.diagnostics.plugin import SchedulerPlugin
 from distributed.scheduler import SchedulerState, cast
 from natsort import natsorted
@@ -280,11 +290,15 @@ def save_minian(
         chunks = {d: var.sizes[d] if v <= 0 else v for d, v in chunks.items()}
         dst_path = os.path.join(dpath, str(uuid4()))
         temp_path = os.path.join(dpath, str(uuid4()))
-        zstore = zr.open(fp)
-        rechk = rechunker.rechunk(
-            zstore[var.name], chunks, mem_limit, dst_path, temp_store=temp_path
-        )
-        rechk.execute()
+        with da.config.set(
+            array_optimize=darr.optimization.optimize,
+            delayed_optimize=default_delay_optimize,
+        ):
+            zstore = zr.open(fp)
+            rechk = rechunker.rechunk(
+                zstore[var.name], chunks, mem_limit, dst_path, temp_store=temp_path
+            )
+            rechk.execute()
         try:
             shutil.rmtree(temp_path)
         except FileNotFoundError:
@@ -433,17 +447,41 @@ def get_optimal_chk(ref, arr=None, dim_grp=None, ncores="auto", mem_limit="auto"
     return opt_chk
 
 
+ANNOTATIONS = {
+    "from-zarr-store": {"resources": {"MEM": 0.5}},
+    "load_avi_ffmpeg": {"resources": {"MEM": 1}},
+    "est_sh_chunk": {"resources": {"MEM": 0.5}},
+    "shift_perframe": {"resources": {"MEM": 0.5}},
+    "pnr_perseed": {"resources": {"MEM": 0.5}},
+    "ks_perseed": {"resources": {"MEM": 0.5}},
+    "smooth_corr": {"resources": {"MEM": 1}},
+    "vectorize__noise_fft": {"resources": {"MEM": 0.5}},
+    "vectorize_noise_welch": {"resources": {"MEM": 0.5}},
+    "update_spatial_block": {"resources": {"MEM": 1}},
+    "tensordot_restricted": {"resources": {"MEM": 1}},
+    "update_temporal_block": {"resources": {"MEM": 1}},
+}
+
+FAST_FUNCTIONS = [
+    darr.core.getter_inline,
+    darr.core.getter,
+    _operator.getitem,
+    zr.core.Array,
+    darr.chunk.astype,
+    darr.core.concatenate_axes,
+    darr.core._vindex_slice,
+    darr.core._vindex_merge,
+    darr.core._vindex_transpose,
+]
+
+
 class TaskAnnotation(SchedulerPlugin):
     def __init__(self) -> None:
         super().__init__()
-        self.annt_dict = {
-            "load_avi_ffmpeg": {"resources": {"MEM": 1}, "priority": -1},
-            "est_sh_chunk": {"resources": {"MEM": 0.5}},
-        }
+        self.annt_dict = ANNOTATIONS
 
     def update_graph(self, scheduler, client, tasks, **kwargs):
         parent = cast(SchedulerState, scheduler)
-        # set_trace()
         for tk in tasks.keys():
             for pattern, annt in self.annt_dict.items():
                 if re.search(pattern, tk):
@@ -458,11 +496,133 @@ class TaskAnnotation(SchedulerPlugin):
                         ts._priority = tuple(pri_org)
 
 
-def inline_zarr(dsk, keys):
-    dsk = inline_functions(
+def custom_arr_optimize(
+    dsk, keys, inline_patterns=[], rename_dict=None, keep_patterns=[]
+):
+    # inlining lots of array operations ref:
+    # https://github.com/dask/dask/issues/6668
+    if rename_dict:
+        key_renamer = fct.partial(custom_fused_keys_renamer, rename_dict=rename_dict)
+    else:
+        key_renamer = custom_fused_keys_renamer
+    keep_keys = []
+    if keep_patterns:
+        key_ls = list(dsk.keys())
+        for pat in keep_patterns:
+            keep_keys.extend(list(filter(lambda k: check_key(k, pat), key_ls)))
+    dsk = darr.optimization.optimize(
         dsk,
-        [],
-        fast_functions=[darr.core.getter, zr.core.Array],
-        inline_constants=True,
+        keys,
+        fuse_keys=keep_keys,
+        fast_functions=FAST_FUNCTIONS,
+        rename_fused_keys=key_renamer,
     )
-    return darr.optimization.optimize(dsk, keys)
+    if inline_patterns:
+        dsk = inline_pattern(dsk, inline_patterns, inline_constants=False)
+    return dsk
+
+
+def custom_fused_keys_renamer(keys, max_fused_key_length=120, rename_dict=None):
+    """Create new keys for ``fuse`` tasks.
+
+    The optional parameter `max_fused_key_length` is used to limit the maximum string length for each renamed key.
+    If this parameter is set to `None`, there is no limit.
+    """
+    it = reversed(keys)
+    first_key = next(it)
+    typ = type(first_key)
+
+    if max_fused_key_length:  # Take into account size of hash suffix
+        max_fused_key_length -= 5
+
+    def _enforce_max_key_limit(key_name):
+        if max_fused_key_length and len(key_name) > max_fused_key_length:
+            name_hash = f"{hash(key_name):x}"[:4]
+            key_name = f"{key_name[:max_fused_key_length]}-{name_hash}"
+        return key_name
+
+    if typ is str:
+        first_name = split_key(first_key, rename_dict=rename_dict)
+        names = {split_key(k, rename_dict=rename_dict) for k in it}
+        names.discard(first_name)
+        names = sorted(names)
+        names.append(first_key)
+        concatenated_name = "-".join(names)
+        return _enforce_max_key_limit(concatenated_name)
+    elif typ is tuple and len(first_key) > 0 and isinstance(first_key[0], str):
+        first_name = split_key(first_key, rename_dict=rename_dict)
+        names = {split_key(k, rename_dict=rename_dict) for k in it}
+        names.discard(first_name)
+        names = sorted(names)
+        names.append(first_key[0])
+        concatenated_name = "-".join(names)
+        return (_enforce_max_key_limit(concatenated_name),) + first_key[1:]
+
+
+def split_key(key, rename_dict=None):
+    if type(key) is tuple:
+        key = key[0]
+    kls = key.split("-")
+    if rename_dict:
+        kls = list(map(lambda k: rename_dict.get(k, k), kls))
+    kls_ft = list(filter(lambda k: k in ANNOTATIONS.keys(), kls))
+    if kls_ft:
+        return "-".join(kls_ft)
+    else:
+        return kls[0]
+
+
+def check_key(key, pat):
+    try:
+        return bool(re.search(pat, key))
+    except TypeError:
+        return bool(re.search(pat, key[0]))
+
+
+def check_pat(key, pat_ls):
+    for pat in pat_ls:
+        if check_key(key, pat):
+            return True
+    return False
+
+
+def inline_pattern(dsk, pat_ls, inline_constants):
+    keys = [k for k in dsk.keys() if check_pat(k, pat_ls)]
+    if keys:
+        dsk = inline(dsk, keys, inline_constants=inline_constants)
+        for k in keys:
+            del dsk[k]
+        if inline_constants:
+            dsk, dep = cull(dsk, set(list(flatten(keys))))
+    return dsk
+
+
+def custom_delay_optimize(dsk, keys, fast_functions=[], inline_patterns=[], **kwargs):
+    dsk, _ = fuse(ensure_dict(dsk), rename_keys=custom_fused_keys_renamer)
+    if inline_patterns:
+        dsk = inline_pattern(dsk, inline_patterns, inline_constants=False)
+    if fast_functions:
+        dsk = inline_functions(
+            dsk,
+            [],
+            fast_functions=fast_functions,
+        )
+    return dsk
+
+
+def unique_keys(keys):
+    new_keys = []
+    for k in keys:
+        if isinstance(k, tuple):
+            new_keys.append("chunked-" + k[0])
+        elif isinstance(k, str):
+            new_keys.append(k)
+    return np.unique(new_keys)
+
+
+def get_keys_pat(pat, keys, return_all=False):
+    keys_filt = list(filter(lambda k: check_key(k, pat), list(keys)))
+    if return_all:
+        return keys_filt
+    else:
+        return keys_filt[0]
