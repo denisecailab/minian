@@ -398,49 +398,30 @@ def rechunk_like(x, y):
         return x.compute()
 
 
-def get_optimal_chk(ref, arr=None, dim_grp=None, ncores="auto", mem_limit="auto"):
+def get_optimal_chk(
+    arr,
+    dim_grp=[("frame",), ("height", "width")],
+    csize=256,
+    dtype=None,
+):
     """
     Estimates the chunk of video (i.e. video sizes and number of frames) that optimizes computer memory use when the script is run parallel over multiple cores.
 
     Args:
-        ref (xarray.DataArray): xarray.DataArray a labeled 3-d array representation of the videos with dimensions: frame, height and width.
-        arr (xarray.DataArray): xarray.DataArray a labeled 3-d array representation of the videos with dimensions: frame, height and width. Defaults to None.
+        arr (xarray.DataArray): xarray.DataArray a labeled 3-d array representation of the videos with dimensions: frame, height and width.
         dim_grp (array, optional): provide labels for the dimension of the data. Defaults to None.
-        ncores (str, optional): number of CPU cores. Defaults to 'auto'.
-        mem_limit (str, optional): max available memory that can be given to a process without the system going into swap. Defaults to 'auto'.
+        csize (int, optional): target chunk size in MB. Defaults to 256.
+        dtype (optional): the expected dtype of data. useful when determining chunksize for array with same shape but different dtype.
 
     Returns:
         dict: sizes of the chunks that optimize memory usage in parallel computing the key is the dimension, the value is the max chunk size
     """
-    if arr is None:
-        arr = ref
-    szs = ref.sizes
-    if ncores == "auto":
-        ncores = psutil.cpu_count()
-    if mem_limit == "auto":
-        mem_limit = psutil.virtual_memory().available / (1024 ** 2)
-    tempsz = (
-        1000
-        * (3 * szs["height"] * szs["width"] + 7 * szs["frame"])
-        * ref.dtype.itemsize
-        / (1024 ** 2)
-    )
-    csize = int(np.floor((mem_limit - tempsz) / ncores / 4))
-    if csize < 64:
-        warnings.warn(
-            "estimated memory limit is smaller than 64MiB. Using 64MiB chunksize instead. "
-        )
-        csize = 64
-    csize = int(np.floor((mem_limit) / ncores))
-    if csize > 512:
-        warnings.warn(
-            "estimated memory limit is bigger than 512MiB. Using 512MiB chunksize instead. "
-        )
-        csize = 512
+    if dtype is not None:
+        arr = arr.astype(dtype)
     dims = arr.dims
     if not dim_grp:
         dim_grp = [(d,) for d in dims]
-    opt_chk = dict()
+    chk_compute = dict()
     for dg in dim_grp:
         d_rest = set(dims) - set(dg)
         dg_dict = {d: "auto" for d in dg}
@@ -448,10 +429,27 @@ def get_optimal_chk(ref, arr=None, dim_grp=None, ncores="auto", mem_limit="auto"
         dg_dict.update(dr_dict)
         with da.config.set({"array.chunk-size": "{}MiB".format(csize)}):
             arr_chk = arr.chunk(dg_dict)
-        re_dict = {d: c for d, c in zip(dims, arr_chk.chunks)}
-        re_dict = {d: max(re_dict[d]) for d in dg}
-        opt_chk.update(re_dict)
-    return opt_chk
+        chk = get_chunksize(arr_chk)
+        chk_compute.update({d: chk[d] for d in dg})
+    with da.config.set({"array.chunk-size": "{}MiB".format(csize)}):
+        arr_chk = arr.chunk({d: "auto" for d in dims})
+    chk_store_da = get_chunksize(arr_chk)
+    chk_store = dict()
+    for d in dims:
+        ncomp = int(arr.sizes[d] / chk_compute[d])
+        sz = np.array(factors(ncomp)) * chk_compute[d]
+        chk_store[d] = sz[np.argmin(np.abs(sz - chk_store_da[d]))]
+    return chk_compute, chk_store_da
+
+
+def get_chunksize(arr):
+    dims = arr.dims
+    sz = arr.data.chunksize
+    return {d: s for d, s in zip(dims, sz)}
+
+
+def factors(x):
+    return [i for i in range(1, x + 1) if x % i == 0]
 
 
 ANNOTATIONS = {
