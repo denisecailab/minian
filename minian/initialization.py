@@ -326,7 +326,6 @@ def seeds_merge(varr, max_proj, seeds, thres_dist=5, thres_corr=0.6, noise_freq=
         dict: seeds
     """
     print("computing distance")
-    seeds = seeds.sort_values(["height", "width"])
     nng = radius_neighbors_graph(seeds[["height", "width"]], thres_dist)
     print("computing correlations")
     adj = adj_corr(varr, nng, seeds[["height", "width"]], noise_freq)
