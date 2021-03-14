@@ -257,7 +257,7 @@ def save_minian(
     overwrite=False,
     chunks=None,
     compute=True,
-    mem_limit="1GB",
+    mem_limit="500MB",
 ):
     """
     Saves the data (var) in the format specified by the backend variable, in the location specified by dpath under the name ‘minian’, if overwrite True
