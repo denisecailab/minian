@@ -205,10 +205,7 @@ def update_spatial(
         f_in = f.compute().data
     else:
         f_in = None
-    sub = sub.transpose("height", "width", "unit_id").compute()
-    sub.data = darr.array(sub.data).rechunk(
-        (Y.data.chunksize[1], Y.data.chunksize[2], -1)
-    )
+    sub = rechunk_like(sub.transpose("height", "width", "unit_id").compute(), Y)
     print("fitting spatial matrix")
     ssub = darr.map_blocks(
         sps_any,
