@@ -16,6 +16,7 @@ import scipy.sparse
 import sparse
 import xarray as xr
 import zarr
+from distributed import get_client
 from scipy.linalg import lstsq, toeplitz
 from scipy.ndimage import label
 from scipy.signal import butter, lfilter, welch
@@ -46,6 +47,11 @@ def get_noise_fft(varr, noise_range=(0.25, 0.5), noise_method="logmexp"):
         type: spectral density of the noise
 
     """
+    try:
+        clt = get_client()
+        threads = min(clt.nthreads().values())
+    except ValueError:
+        threads = 1
     sn = xr.apply_ufunc(
         _noise_fft,
         varr,
@@ -53,13 +59,15 @@ def get_noise_fft(varr, noise_range=(0.25, 0.5), noise_method="logmexp"):
         output_core_dims=[[]],
         dask="parallelized",
         vectorize=True,
-        kwargs=dict(noise_range=noise_range, noise_method=noise_method),
+        kwargs=dict(
+            noise_range=noise_range, noise_method=noise_method, threads=threads
+        ),
         output_dtypes=[np.float],
     )
     return sn
 
 
-def _noise_fft(px, noise_range=(0.25, 0.5), noise_method="logmexp"):
+def _noise_fft(px, noise_range=(0.25, 0.5), noise_method="logmexp", threads=1):
     """
     Estimates the periodic components in the noise by estimating the power spectral density within the user-defined noise range (noise_range). Noise_range should be set by the user to include the most obvious sources of periodic artifacts (e.g. motion due to heart beat, respiration, etc..). The function is constrained to compute only the non-negative frequency terms of signal (numpy.fft.rfft).
 
@@ -74,16 +82,16 @@ def _noise_fft(px, noise_range=(0.25, 0.5), noise_method="logmexp"):
     """
     _T = len(px)
     nr = np.around(np.array(noise_range) * _T).astype(int)
-    px_band = (1 / _T * np.abs(numpy_fft.rfft(px)) ** 2)[nr[0] : nr[1]]
+    px = 1 / _T * np.abs(numpy_fft.rfft(px, threads=threads)[nr[0] : nr[1]]) ** 2
     if noise_method == "mean":
-        return np.sqrt(px_band.mean())
+        return np.sqrt(px.mean())
     elif noise_method == "median":
-        return np.sqrt(px_band.median())
+        return np.sqrt(px.median())
     elif noise_method == "logmexp":
-        eps = np.finfo(px_band.dtype).eps
-        return np.sqrt(np.exp(np.log(px_band + eps).mean()))
+        eps = np.finfo(px.dtype).eps
+        return np.sqrt(np.exp(np.log(px + eps).mean()))
     elif noise_method == "sum":
-        return np.sqrt(px_band.sum())
+        return np.sqrt(px.sum())
 
 
 def get_noise_welch(
