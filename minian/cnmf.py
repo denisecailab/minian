@@ -237,7 +237,11 @@ def update_spatial(
         A_new = darr.block(A_new.tolist())
     else:
         A_new = update_spatial_block(
-            Y_trans.data, alpha.data, sub.data, C_store=C_store, f=f_in,
+            Y_trans.data,
+            alpha.data,
+            sub.data,
+            C_store=C_store,
+            f=f_in,
         )
     with da.config.set(**{"optimization.fuse.ave-width": 6}):
         A_new = da.optimize(A_new)[0]
@@ -380,7 +384,9 @@ def compute_trace(Y, A, b, C, f):
     with da.config.set(array_optimize=arr_opt):
         YrA = da.optimize(YrA)[0]
     YrA = xr.DataArray(
-        YrA, dims=["frame", "unit_id"], coords={"frame": fms, "unit_id": uid},
+        YrA,
+        dims=["frame", "unit_id"],
+        coords={"frame": fms, "unit_id": uid},
     )
     return YrA.transpose("unit_id", "frame")
 
@@ -432,7 +438,8 @@ def update_temporal(
     if warm_start:
         C.data = C.data.map_blocks(scipy.sparse.csr_matrix)
     inline_opt = fct.partial(
-        custom_delay_optimize, inline_patterns=["getitem", "rechunk-merge"],
+        custom_delay_optimize,
+        inline_patterns=["getitem", "rechunk-merge"],
     )
     for cur_YrA, cur_C in zip(YrA.groupby(grp_dim), C.groupby(grp_dim)):
         uid_ls.append(cur_YrA[1].coords["unit_id"].values.reshape(-1))
@@ -486,25 +493,37 @@ def update_temporal(
     C_new = xr.DataArray(
         darr.concatenate(c_ls, axis=0),
         dims=["unit_id", "frame"],
-        coords={"unit_id": uids_new, "frame": YrA.coords["frame"],},
+        coords={
+            "unit_id": uids_new,
+            "frame": YrA.coords["frame"],
+        },
         name="C_new",
     )
     S_new = xr.DataArray(
         darr.concatenate(s_ls, axis=0),
         dims=["unit_id", "frame"],
-        coords={"unit_id": uids_new, "frame": YrA.coords["frame"].values,},
+        coords={
+            "unit_id": uids_new,
+            "frame": YrA.coords["frame"].values,
+        },
         name="S_new",
     )
     b0_new = xr.DataArray(
         darr.concatenate(b_ls, axis=0),
         dims=["unit_id", "frame"],
-        coords={"unit_id": uids_new, "frame": YrA.coords["frame"].values,},
+        coords={
+            "unit_id": uids_new,
+            "frame": YrA.coords["frame"].values,
+        },
         name="b0_new",
     )
     c0_new = xr.DataArray(
         darr.concatenate(c0_ls, axis=0),
         dims=["unit_id", "frame"],
-        coords={"unit_id": uids_new, "frame": YrA.coords["frame"].values,},
+        coords={
+            "unit_id": uids_new,
+            "frame": YrA.coords["frame"].values,
+        },
         name="c0_new",
     )
     g = xr.DataArray(

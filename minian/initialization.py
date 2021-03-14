@@ -439,7 +439,7 @@ def initbf(varr, A, C):
     b = Yb.mean("frame")
     f = Yb.mean(["height", "width"])
     arr_opt = fct.partial(
-        custom_arr_optimize, rename_dict={"tensordot": "tensordot_restricted"},
+        custom_arr_optimize, rename_dict={"tensordot": "tensordot_restricted"}
     )
     with da.config.set(array_optimize=arr_opt):
         b = da.optimize(b)[0]
