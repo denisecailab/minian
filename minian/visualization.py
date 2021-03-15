@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 import panel as pn
 import param
+import scipy.sparse as scisps
 import skvideo.io
 import xarray as xr
 from bokeh.palettes import Category10_10, Viridis256
@@ -1035,6 +1036,8 @@ def generate_videos(
     A=None,
     C=None,
     AC=None,
+    nfm_norm=200,
+    gain=1.5,
     vpath=".",
     vname="minian.mp4",
     options={"crf": "18", "preset": "ultrafast"},
@@ -1055,8 +1058,15 @@ def generate_videos(
     if AC is None:
         print("generating traces")
         AC = compute_AtC(A, C)
-    Y = Y * 255 / Y.max().compute().values
-    AC = AC * 255 / C.max().compute().values
+    print("normalizing")
+    Y = Y * 255 / Y.max().compute().values * gain
+    norm_idx = np.random.randint(0, Y.sizes["frame"], nfm_norm)
+    Y_sub = Y.isel(frame=norm_idx).values.reshape(-1)
+    AC_sub = scisps.csc_matrix(AC.isel(frame=norm_idx).values.reshape((-1, 1)))
+    lsqr = scisps.linalg.lsqr(AC_sub, Y_sub)
+    norm_factor = lsqr[0].item()
+    del Y_sub, AC_sub
+    AC = AC * norm_factor
     res = Y - AC
     print("writing videos")
     vid = xr.concat(
