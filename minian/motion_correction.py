@@ -264,7 +264,7 @@ def shift_perframe(fm, sh, fill=np.nan):
     return fm
 
 
-def est_trans_chunk(varr, trans_org, mesh_size, niter, bin_thres=None, bin_wnd=None):
+def est_trans_chunk(varr, trans_org, mesh_size, niter=10, bin_thres=5, bin_wnd=41):
     if bin_thres:
         masks = []
         for fm in varr:
@@ -284,26 +284,18 @@ def est_trans_chunk(varr, trans_org, mesh_size, niter, bin_thres=None, bin_wnd=N
     param = get_bspline_param(varr[0], mesh_size)
     # the dimension of transform coef array is: frame, 2, grid_size1, grid_size0
     transform = np.zeros((varr.shape[0], 2, int(param[1]), int(param[0])))
-    for i, fm in enumerate(varr):
-        if i < mid:
-            temp = varr[i + 1]
-            tmp_ma = masks[i + 1]
-            slc = slice(0, i + 1)
-        elif i > mid:
-            temp = varr[i - 1]
-            tmp_ma = masks[i - 1]
-            slc = slice(i, None)
-        else:
-            continue
-        tx = ffd_transform(
-            fm, temp, mesh_size, src_ma=masks[i], dst_ma=tmp_ma, niter=niter
+    for i in range(mid)[::-1]:
+        coef = ffd_transform(
+            varr[i], varr[i + 1], mesh_size, masks[i], masks[i + 1], niter=niter
         )
-        coef = np.stack(
-            [sitk.GetArrayFromImage(im) for im in tx.Downcast().GetCoefficientImages()]
+        transform[i] = coef
+        varr[i] = transform_perframe(varr[i], coef, fill=0, param=param)
+    for i in range(mid + 1, varr.shape[0]):
+        coef = ffd_transform(
+            varr[i], varr[i - 1], mesh_size, masks[i], masks[i - 1], niter=niter
         )
-        transform[slc] = transform[slc] + coef
-    for i, tx_coef in enumerate(transform):
-        varr[i] = transform_perframe(varr[i], tx_coef, fill=0, param=param)
+        transform[i] = coef
+        varr[i] = transform_perframe(varr[i], coef, fill=0, param=param)
     if trans_org is not None:
         transform = np.concatenate(
             [transform[i] + torg for i, torg in enumerate(trans_org)], axis=0
@@ -329,7 +321,9 @@ def ffd_transform(src, dst, mesh_size, src_ma=None, dst_ma=None, niter=10):
         learningRate=1.0, convergenceMinimumValue=1e-5, numberOfIterations=niter
     )
     tx = reg.Execute(dst, src)
-    return tx
+    return np.stack(
+        [sitk.GetArrayFromImage(im) for im in tx.Downcast().GetCoefficientImages()]
+    )
 
 
 def apply_transform(varr, trans, fill=0, mesh_size=None):
