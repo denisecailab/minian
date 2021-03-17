@@ -147,21 +147,16 @@ def est_motion_part(varr, mtype, npart, temp_nfm, **kwargs):
     return temps, shifts
 
 
-def est_sh_chunk(varr, sh_org, max_sh, local):
+def est_sh_chunk(varr, sh_org, max_sh=40, local=False):
     mid = int(varr.shape[0] / 2)
     shifts = np.zeros((varr.shape[0], 2))
-    for i, fm in enumerate(varr):
-        if i < mid:
-            temp = varr[i + 1]
-            slc = slice(0, i + 1)
-        elif i > mid:
-            temp = varr[i - 1]
-            slc = slice(i, None)
-        else:
-            continue
-        sh = match_temp(fm, temp, max_sh, local)
-        shifts[slc] = shifts[slc] + sh
-    for i, sh in enumerate(shifts):
+    for i in range(mid)[::-1]:
+        sh = match_temp(varr[i], varr[i + 1], max_sh, local)
+        shifts[i] = sh
+        varr[i] = shift_perframe(varr[i], sh, 0)
+    for i in range(mid + 1, varr.shape[0]):
+        sh = match_temp(varr[i], varr[i - 1], max_sh, local)
+        shifts[i] = sh
         varr[i] = shift_perframe(varr[i], sh, 0)
     if sh_org is not None:
         shifts = np.concatenate([shifts[i] + sh for i, sh in enumerate(sh_org)], axis=0)
