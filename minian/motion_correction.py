@@ -70,7 +70,7 @@ def estimate_motion(varr, mtype, dim="frame", npart=None, temp_nfm=30, **kwargs)
         else:
             sh = xr.DataArray(
                 sh,
-                dims=[dim, "variable"],
+                dims=[dim, "shift_dim"],
                 coords={
                     dim: varr.coords[dim].values,
                     "shift_dim": ["height", "width"],
