@@ -1,6 +1,7 @@
 name: minian
 channels:
   - conda-forge
+  - simpleitk
   - defaults
 dependencies:
   - av=7.0.1
@@ -39,6 +40,7 @@ dependencies:
   - scikit-learn=0.22.1
   - scipy=1.4.1
   - scs=2.1.1.2
+  - simpleitk=2.0.2
   - sk-video=1.1.10
   - statsmodels=0.11.1
   - tifffile=2020.2.16
