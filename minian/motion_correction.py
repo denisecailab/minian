@@ -5,12 +5,13 @@ import cv2
 import dask as da
 import dask.array as darr
 import numpy as np
+import SimpleITK as sitk
 import xarray as xr
 
 from .utilities import custom_arr_optimize, xrconcat_recursive
 
 
-def estimate_shifts(varr, max_sh, dim="frame", npart=None, local=False, temp_nfm=30):
+def estimate_motion(varr, mtype, dim="frame", npart=None, temp_nfm=30, **kwargs):
     """
     Estimate the frame shifts
 
@@ -34,31 +35,51 @@ def estimate_shifts(varr, max_sh, dim="frame", npart=None, local=False, temp_nfm
         res_dict = dict()
         for lab in itt.product(*loop_labs):
             va = varr.sel({loop_dims[i]: lab[i] for i in range(len(loop_dims))})
-            vmax, sh = est_sh_part(va.data, max_sh, npart, local, temp_nfm)
+            vmax, sh = est_motion_part(va.data, mtype, npart, temp_nfm, **kwargs)
+            if mtype == "bspline":
+                sh = xr.DataArray(
+                    sh,
+                    dims=[dim, "shift_dim", "grid0", "grid1"],
+                    coords={
+                        dim: va.coords[dim].values,
+                        "shift_dim": ["width", "height"],
+                    },
+                )
+            else:
+                sh = xr.DataArray(
+                    sh,
+                    dims=[dim, "shift_dim"],
+                    coords={
+                        dim: va.coords[dim].values,
+                        "shift_dim": ["height", "width"],
+                    },
+                )
+            res_dict[lab] = sh.assign_coords(**{k: v for k, v in zip(loop_dims, lab)})
+        sh = xrconcat_recursive(res_dict, loop_dims)
+    else:
+        vmax, sh = est_motion_part(varr.data, mtype, npart, temp_nfm, **kwargs)
+        if mtype == "bspline":
+            sh = xr.DataArray(
+                sh,
+                dims=[dim, "shift_dim", "grid0", "grid1"],
+                coords={
+                    dim: varr.coords[dim].values,
+                    "shift_dim": ["width", "height"],
+                },
+            )
+        else:
             sh = xr.DataArray(
                 sh,
                 dims=[dim, "variable"],
                 coords={
-                    dim: va.coords[dim].values,
-                    "variable": ["height", "width"],
+                    dim: varr.coords[dim].values,
+                    "shift_dim": ["height", "width"],
                 },
             )
-            res_dict[lab] = sh.assign_coords(**{k: v for k, v in zip(loop_dims, lab)})
-        sh = xrconcat_recursive(res_dict, loop_dims)
-    else:
-        vmax, sh = est_sh_part(varr.data, max_sh, npart, local, temp_nfm)
-        sh = xr.DataArray(
-            sh,
-            dims=[dim, "variable"],
-            coords={
-                dim: varr.coords[dim].values,
-                "variable": ["height", "width"],
-            },
-        )
     return sh
 
 
-def est_sh_part(varr, max_sh, npart, local, temp_nfm):
+def est_motion_part(varr, mtype, npart, temp_nfm, **kwargs):
     """
     Estimate the shift per frame
 
@@ -73,15 +94,34 @@ def est_sh_part(varr, max_sh, npart, local, temp_nfm):
         xarray.DataArray: the shift per frame
     """
     varr = varr.rechunk((temp_nfm, None, None))
-    arr_opt = fct.partial(custom_arr_optimize, keep_patterns=["^est_sh_chunk"])
+    arr_opt = fct.partial(
+        custom_arr_optimize, keep_patterns=["^est_sh_chunk", "^est_trans_chunk"]
+    )
+    est_func = {
+        "translation": da.delayed(est_sh_chunk),
+        "bspline": da.delayed(est_trans_chunk),
+    }[mtype]
+    if mtype == "bspline":
+        mesh_size = kwargs["mesh_size"]
+        if mesh_size is None:
+            mesh_size = get_mesh_size(varr[0])
+            kwargs["mesh_size"] = mesh_size
+        param = get_bspline_param(varr[0].compute(), kwargs["mesh_size"])
     tmp_ls = []
     sh_ls = []
     for blk in varr.blocks:
-        res = da.delayed(est_sh_chunk)(blk, sh_org=None, max_sh=max_sh, local=local)
+        res = est_func(blk, None, **kwargs)
         tmp = darr.from_delayed(
             res[0], shape=(blk.shape[1], blk.shape[2]), dtype=blk.dtype
         )
-        sh = darr.from_delayed(res[1], shape=(blk.shape[0], 2), dtype=float)
+        if mtype == "bspline":
+            sh = darr.from_delayed(
+                res[1],
+                shape=(blk.shape[0], 2, int(param[1]), int(param[0])),
+                dtype=float,
+            )
+        else:
+            sh = darr.from_delayed(res[1], shape=(blk.shape[0], 2), dtype=float)
         tmp_ls.append(tmp)
         sh_ls.append(sh)
     with da.config.set(array_optimize=arr_opt):
@@ -94,7 +134,8 @@ def est_sh_part(varr, max_sh, npart, local, temp_nfm):
             tmps = temps.blocks[idx : idx + npart]
             sh_org = shifts.blocks[idx : idx + npart]
             sh_org_ls = [sh_org.blocks[i] for i in range(sh_org.numblocks[0])]
-            res = da.delayed(est_sh_chunk)(tmps, sh_org_ls, max_sh=max_sh, local=local)
+            kwargs["bin_thres"] = None
+            res = est_func(tmps, sh_org_ls, **kwargs)
             tmp = darr.from_delayed(
                 res[0], shape=(tmps.shape[1], tmps.shape[2]), dtype=tmps.dtype
             )
@@ -184,12 +225,12 @@ def apply_shifts(varr, shifts, fill=np.nan):
     Returns:
         (xarray.DataArray): xarray.DataArray of the shifted input frames (varr)
     """
-    sh_dim = shifts.coords["variable"].values.tolist()
+    sh_dim = shifts.coords["shift_dim"].values.tolist()
     varr_sh = xr.apply_ufunc(
         shift_perframe,
         varr.chunk({d: -1 for d in sh_dim}),
         shifts,
-        input_core_dims=[sh_dim, ["variable"]],
+        input_core_dims=[sh_dim, ["shift_dim"]],
         output_core_dims=[sh_dim],
         vectorize=True,
         dask="parallelized",
@@ -226,3 +267,129 @@ def shift_perframe(fm, sh, fill=np.nan):
             index[ish] = slice(s, None)
             fm[tuple(index)] = fill
     return fm
+
+
+def est_trans_chunk(varr, trans_org, mesh_size, niter, bin_thres=None, bin_wnd=None):
+    if bin_thres:
+        masks = []
+        for fm in varr:
+            masks.append(
+                cv2.adaptiveThreshold(
+                    fm,
+                    1,
+                    cv2.ADAPTIVE_THRESH_MEAN_C,
+                    cv2.THRESH_BINARY,
+                    bin_wnd,
+                    -bin_thres,
+                ).astype(bool)
+            )
+    else:
+        masks = [None] * varr.shape[0]
+    mid = int(varr.shape[0] / 2)
+    param = get_bspline_param(varr[0], mesh_size)
+    # the dimension of transform coef array is: frame, 2, grid_size1, grid_size0
+    transform = np.zeros((varr.shape[0], 2, int(param[1]), int(param[0])))
+    for i, fm in enumerate(varr):
+        if i < mid:
+            temp = varr[i + 1]
+            tmp_ma = masks[i + 1]
+            slc = slice(0, i + 1)
+        elif i > mid:
+            temp = varr[i - 1]
+            tmp_ma = masks[i - 1]
+            slc = slice(i, None)
+        else:
+            continue
+        tx = ffd_transform(
+            fm, temp, mesh_size, src_ma=masks[i], dst_ma=tmp_ma, niter=niter
+        )
+        coef = np.stack(
+            [sitk.GetArrayFromImage(im) for im in tx.Downcast().GetCoefficientImages()]
+        )
+        transform[slc] = transform[slc] + coef
+    for i, tx_coef in enumerate(transform):
+        varr[i] = transform_perframe(varr[i], tx_coef, fill=0, param=param)
+    if trans_org is not None:
+        transform = np.concatenate(
+            [transform[i] + torg for i, torg in enumerate(trans_org)], axis=0
+        )
+    return varr.max(axis=0), transform
+
+
+def ffd_transform(src, dst, mesh_size, src_ma=None, dst_ma=None, niter=10):
+    src = sitk.GetImageFromArray(src.astype(np.float32))
+    dst = sitk.GetImageFromArray(dst.astype(np.float32))
+    reg = sitk.ImageRegistrationMethod()
+    trans_init = sitk.BSplineTransformInitializer(
+        image1=dst, transformDomainMeshSize=mesh_size
+    )
+    if src_ma is not None:
+        reg.SetMetricMovingMask(sitk.GetImageFromArray(src_ma.astype(np.uint8)))
+    if dst_ma is not None:
+        reg.SetMetricFixedMask(sitk.GetImageFromArray(dst_ma.astype(np.uint8)))
+    reg.SetInitialTransform(trans_init)
+    reg.SetMetricAsMeanSquares()
+    reg.SetInterpolator(sitk.sitkLinear)
+    reg.SetOptimizerAsGradientDescent(
+        learningRate=1.0, convergenceMinimumValue=1e-5, numberOfIterations=niter
+    )
+    tx = reg.Execute(dst, src)
+    return tx
+
+
+def apply_transform(varr, trans, fill=0, mesh_size=None):
+    sh_dim = trans.coords["shift_dim"].values.tolist()
+    fm0 = varr.isel(frame=0).values
+    if mesh_size is None:
+        mesh_size = get_mesh_size(fm0)
+    param = get_bspline_param(fm0, mesh_size)
+    varr_sh = xr.apply_ufunc(
+        transform_perframe,
+        varr.chunk({d: -1 for d in sh_dim}),
+        trans,
+        input_core_dims=[sh_dim, ["shift_dim", "grid0", "grid1"]],
+        output_core_dims=[sh_dim],
+        vectorize=True,
+        dask="parallelized",
+        kwargs={"fill": fill, "param": param},
+        output_dtypes=[varr.dtype],
+    )
+    return varr_sh
+
+
+def transform_perframe(fm, tx_coef, fill=0, param=None, mesh_size=None):
+    if param is None:
+        if mesh_size is None:
+            mesh_size = get_mesh_size(fm)
+        param = get_bspline_param(fm, mesh_size)
+    fm = sitk.GetImageFromArray(fm)
+    tx = sitk.BSplineTransform([sitk.GetImageFromArray(a) for a in tx_coef])
+    tx.SetFixedParameters(param)
+    fm = sitk.Resample(fm, fm, tx, sitk.sitkLinear, fill)
+    return sitk.GetArrayFromImage(fm)
+
+
+def optimize_bspline_composite(comp_tx):
+    coef_ls = []
+    for itx in range(comp_tx.GetNumberOfTransforms()):
+        tx = comp_tx.GetNthTransform(itx).Downcast()
+        try:
+            coef_im = tx.GetCoefficientImages()
+        except AttributeError:
+            return comp_tx
+        coef = np.stack([sitk.GetArrayFromImage(ci) for ci in coef_im], axis=0)
+        coef_ls.append(coef)
+    coef = np.stack(coef_ls, axis=0).sum(axis=0)
+    tx_new = sitk.BSplineTransform([sitk.GetImageFromArray(a) for a in coef])
+    tx_new.SetFixedParameters(tx.GetFixedParameters())
+    return tx_new
+
+
+def get_bspline_param(img, mesh_size):
+    return sitk.BSplineTransformInitializer(
+        image1=sitk.GetImageFromArray(img), transformDomainMeshSize=mesh_size
+    ).GetFixedParameters()
+
+
+def get_mesh_size(fm):
+    return (int(np.around(fm.shape[0] / 100)), int(np.around(fm.shape[1] / 100)))
