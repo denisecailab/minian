@@ -42,7 +42,7 @@ def estimate_motion(varr, mtype, dim="frame", npart=None, temp_nfm=30, **kwargs)
                     dims=[dim, "shift_dim", "grid0", "grid1"],
                     coords={
                         dim: va.coords[dim].values,
-                        "shift_dim": ["width", "height"],
+                        "shift_dim": ["height", "width"],
                     },
                 )
             else:
@@ -64,7 +64,7 @@ def estimate_motion(varr, mtype, dim="frame", npart=None, temp_nfm=30, **kwargs)
                 dims=[dim, "shift_dim", "grid0", "grid1"],
                 coords={
                     dim: varr.coords[dim].values,
-                    "shift_dim": ["width", "height"],
+                    "shift_dim": ["height", "width"],
                 },
             )
         else:
