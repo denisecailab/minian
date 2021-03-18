@@ -326,6 +326,25 @@ def ffd_transform(src, dst, mesh_size, src_ma=None, dst_ma=None, niter=10):
     )
 
 
+def translation_transform(src, dst, src_ma=None, dst_ma=None, niter=10):
+    src = sitk.GetImageFromArray(src.astype(np.float32))
+    dst = sitk.GetImageFromArray(dst.astype(np.float32))
+    reg = sitk.ImageRegistrationMethod()
+    trans_init = sitk.TranslationTransform(2)
+    if src_ma is not None:
+        reg.SetMetricMovingMask(sitk.GetImageFromArray(src_ma.astype(np.uint8)))
+    if dst_ma is not None:
+        reg.SetMetricFixedMask(sitk.GetImageFromArray(dst_ma.astype(np.uint8)))
+    reg.SetInitialTransform(trans_init)
+    reg.SetMetricAsMeanSquares()
+    reg.SetInterpolator(sitk.sitkLinear)
+    reg.SetOptimizerAsGradientDescent(
+        learningRate=1.0, convergenceMinimumValue=1e-5, numberOfIterations=niter
+    )
+    tx = reg.Execute(src, dst)
+    return np.array(tx.Downcast().GetOffset())[::-1]
+
+
 def apply_transform(varr, trans, fill=0, mesh_size=None):
     sh_dim = trans.coords["shift_dim"].values.tolist()
     fm0 = varr.isel(frame=0).values
