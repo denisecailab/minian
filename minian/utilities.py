@@ -675,3 +675,16 @@ def optimize_chunk(arr, chk):
     with da.config.set(array_optimize=arr_opt):
         arr_chk.data = da.optimize(arr_chk.data)[0]
     return arr_chk
+
+
+def local_extreme(fm, k, etype="max", diff=0):
+    fm_max = cv2.dilate(fm, k)
+    fm_min = cv2.erode(fm, k)
+    fm_diff = ((fm_max - fm_min) > diff).astype(np.uint8)
+    if etype == "max":
+        fm_ext = (fm == fm_max).astype(np.uint8)
+    elif etype == "min":
+        fm_ext = (fm == fm_min).astype(np.uint8)
+    else:
+        raise ValueError("Don't understand {}".format(etype))
+    return cv2.bitwise_and(fm_ext, fm_diff).astype(np.uint8)
