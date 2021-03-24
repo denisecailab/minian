@@ -1,5 +1,6 @@
 import functools as fct
 import itertools as itt
+import warnings
 
 import cv2
 import dask as da
@@ -7,11 +8,12 @@ import dask.array as darr
 import numpy as np
 import SimpleITK as sitk
 import xarray as xr
+from skimage.registration import phase_cross_correlation
 
 from .utilities import custom_arr_optimize, xrconcat_recursive
 
 
-def estimate_motion(varr, mtype, dim="frame", npart=None, temp_nfm=30, **kwargs):
+def estimate_motion(varr, dim="frame", npart=3, temp_nfm=None, **kwargs):
     """
     Estimate the frame shifts
 
@@ -35,8 +37,8 @@ def estimate_motion(varr, mtype, dim="frame", npart=None, temp_nfm=30, **kwargs)
         res_dict = dict()
         for lab in itt.product(*loop_labs):
             va = varr.sel({loop_dims[i]: lab[i] for i in range(len(loop_dims))})
-            vmax, sh = est_motion_part(va.data, mtype, npart, temp_nfm, **kwargs)
-            if mtype == "bspline":
+            vmax, sh = est_motion_part(va.data, npart, temp_nfm, **kwargs)
+            if kwargs.get("mesh_size", None):
                 sh = xr.DataArray(
                     sh,
                     dims=[dim, "shift_dim", "grid0", "grid1"],
@@ -57,8 +59,8 @@ def estimate_motion(varr, mtype, dim="frame", npart=None, temp_nfm=30, **kwargs)
             res_dict[lab] = sh.assign_coords(**{k: v for k, v in zip(loop_dims, lab)})
         sh = xrconcat_recursive(res_dict, loop_dims)
     else:
-        vmax, sh = est_motion_part(varr.data, mtype, npart, temp_nfm, **kwargs)
-        if mtype == "bspline":
+        vmax, sh = est_motion_part(varr.data, npart, temp_nfm, **kwargs)
+        if kwargs.get("mesh_size", None):
             sh = xr.DataArray(
                 sh,
                 dims=[dim, "shift_dim", "grid0", "grid1"],
@@ -79,7 +81,7 @@ def estimate_motion(varr, mtype, dim="frame", npart=None, temp_nfm=30, **kwargs)
     return sh
 
 
-def est_motion_part(varr, mtype, npart, temp_nfm, **kwargs):
+def est_motion_part(varr, npart, temp_nfm, aggregation="max", **kwargs):
     """
     Estimate the shift per frame
 
@@ -93,28 +95,25 @@ def est_motion_part(varr, mtype, npart, temp_nfm, **kwargs):
         xarray.DataArray: the max shift per frame
         xarray.DataArray: the shift per frame
     """
+    if temp_nfm is None:
+        temp_nfm = varr.chunksize[0]
     varr = varr.rechunk((temp_nfm, None, None))
-    arr_opt = fct.partial(
-        custom_arr_optimize, keep_patterns=["^est_sh_chunk", "^est_trans_chunk"]
-    )
-    est_func = {
-        "translation": da.delayed(est_sh_chunk),
-        "bspline": da.delayed(est_trans_chunk),
-    }[mtype]
-    if mtype == "bspline":
-        mesh_size = kwargs["mesh_size"]
-        if mesh_size is None:
-            mesh_size = get_mesh_size(varr[0])
-            kwargs["mesh_size"] = mesh_size
+    arr_opt = fct.partial(custom_arr_optimize, keep_patterns=["^est_motion_chunk"])
+    if kwargs.get("mesh_size", None):
         param = get_bspline_param(varr[0].compute(), kwargs["mesh_size"])
     tmp_ls = []
     sh_ls = []
     for blk in varr.blocks:
-        res = est_func(blk, None, **kwargs)
-        tmp = darr.from_delayed(
-            res[0], shape=(blk.shape[1], blk.shape[2]), dtype=blk.dtype
-        )
-        if mtype == "bspline":
+        res = da.delayed(est_motion_chunk)(blk, None, aggregation=aggregation, **kwargs)
+        if aggregation is None:
+            tmp = darr.from_delayed(
+                res[0], shape=(2, blk.shape[1], blk.shape[2]), dtype=blk.dtype
+            )
+        else:
+            tmp = darr.from_delayed(
+                res[0], shape=(blk.shape[1], blk.shape[2]), dtype=blk.dtype
+            )
+        if kwargs.get("mesh_size", None):
             sh = darr.from_delayed(
                 res[1],
                 shape=(blk.shape[0], 2, int(param[1]), int(param[0])),
@@ -134,11 +133,18 @@ def est_motion_part(varr, mtype, npart, temp_nfm, **kwargs):
             tmps = temps.blocks[idx : idx + npart]
             sh_org = shifts.blocks[idx : idx + npart]
             sh_org_ls = [sh_org.blocks[i] for i in range(sh_org.numblocks[0])]
-            kwargs["bin_thres"] = None
-            res = est_func(tmps, sh_org_ls, **kwargs)
-            tmp = darr.from_delayed(
-                res[0], shape=(tmps.shape[1], tmps.shape[2]), dtype=tmps.dtype
+            kwargs["circ_thres"] = None
+            res = da.delayed(est_motion_chunk)(
+                tmps, sh_org_ls, aggregation=aggregation, **kwargs
             )
+            if aggregation is None:
+                tmp = darr.from_delayed(
+                    res[0], shape=(2, tmps.shape[1], tmps.shape[2]), dtype=tmps.dtype
+                )
+            else:
+                tmp = darr.from_delayed(
+                    res[0], shape=(tmps.shape[1], tmps.shape[2]), dtype=tmps.dtype
+                )
             sh_new = darr.from_delayed(res[1], shape=sh_org.shape, dtype=sh_org.dtype)
             tmp_ls.append(tmp)
             sh_ls.append(sh_new)
@@ -147,20 +153,145 @@ def est_motion_part(varr, mtype, npart, temp_nfm, **kwargs):
     return temps, shifts
 
 
-def est_sh_chunk(varr, sh_org, max_sh=40, local=False):
-    mid = int(varr.shape[0] / 2)
-    shifts = np.zeros((varr.shape[0], 2))
-    for i in range(mid)[::-1]:
-        sh = match_temp(varr[i], varr[i + 1], max_sh, local)
-        shifts[i] = sh
-        varr[i] = shift_perframe(varr[i], sh, 0)
-    for i in range(mid + 1, varr.shape[0]):
-        sh = match_temp(varr[i], varr[i - 1], max_sh, local)
-        shifts[i] = sh
-        varr[i] = shift_perframe(varr[i], sh, 0)
+def est_motion_chunk(
+    varr,
+    sh_org,
+    aggregation,
+    upsample=100,
+    max_sh=100,
+    circ_thres=0.6,
+    mesh_size=None,
+    niter=100,
+    bin_thres=None,
+):
+    # varr could have 4 dimensions in which case the second dimension has length
+    # 2 representing the first and last frame of a chunk
+    mask = np.ones_like(varr, dtype=bool)
+    if bin_thres is not None and varr.ndim <= 3:
+        for i, fm in enumerate(varr):
+            mask[i] = fm > bin_thres
+    good_fm = np.ones(varr.shape[0], dtype=bool)
+    if circ_thres is not None and varr.ndim <= 3:
+        for i, fm in enumerate(varr):
+            good_fm[i] = check_temp(fm, max_sh) > circ_thres
+    good_idxs = np.where(good_fm)[0].astype(int)
+    prop_good = len(good_idxs) / len(good_fm)
+    if prop_good < 0.9:
+        warnings.warn(
+            "only {} of the frames are good."
+            "Consider lowering your circularity threshold".format(prop_good)
+        )
+    # use good frame closest to center as template
+    mid = good_idxs[np.abs(good_idxs - varr.shape[0] / 2).argmin()]
+    if mesh_size is not None:
+        fm0 = varr[0, 0] if varr.ndim > 3 else varr[0]
+        param = get_bspline_param(fm0, mesh_size)
+        motions = np.zeros((varr.shape[0], 2, int(param[1]), int(param[0])))
+    else:
+        motions = np.zeros((varr.shape[0], 2))
+    for i, fm in enumerate(varr):
+        if i < mid:
+            if varr.ndim > 3:
+                src, dst = varr[i][1], varr[i + 1][0]
+                src_ma, dst_ma = mask[i][1], mask[i + 1][0]
+            else:
+                # select the next good frame as template
+                didx = good_idxs[good_idxs - (i + 1) >= 0][0]
+                src, dst = varr[i], varr[didx]
+                src_ma, dst_ma = mask[i], mask[didx]
+            slc = slice(0, i + 1)
+        elif i > mid:
+            if varr.ndim > 3:
+                src, dst = varr[i][0], varr[i - 1][1]
+                src_ma, dst_ma = mask[i][0], mask[i - 1][1]
+            else:
+                # select the previous good frame as template
+                didx = good_idxs[good_idxs - (i - 1) <= 0][-1]
+                src, dst = varr[i], varr[didx]
+                src_ma, dst_ma = mask[i], mask[didx]
+            slc = slice(i, None)
+        else:
+            continue
+        mo = est_motion_perframe(src, dst, upsample, src_ma, dst_ma, mesh_size, niter)
+        # only add to the rest if current frame is good
+        if good_fm[i]:
+            motions[slc] = motions[slc] + mo
+        else:
+            motions[i] = motions[i] + mo
+    if aggregation is None:
+        # center shifts based on first and last frame
+        if mesh_size is not None:
+            motions -= motions[[0, -1]].mean(axis=(0, 2, 3), keepdims=True)
+        else:
+            motions -= motions[[0, -1]].mean(axis=0)
+        if varr.ndim > 3:
+            tmp0 = transform_perframe(varr[0][0], motions[0], fill=0)
+            tmp1 = transform_perframe(varr[-1][-1], motions[-1], fill=0)
+        else:
+            tmp0 = transform_perframe(varr[good_idxs[0]], motions[good_idxs[0]], fill=0)
+            tmp1 = transform_perframe(
+                varr[good_idxs[-1]], motions[good_idxs[-1]], fill=0
+            )
+        tmp = np.stack([tmp0, tmp1])
+    else:
+        for i, v in enumerate(varr):
+            if i not in good_idxs:
+                continue
+            if v.ndim > 2:
+                for j, fm in enumerate(v):
+                    varr[i][j] = transform_perframe(fm, motions[i], fill=0)
+            else:
+                varr[i] = transform_perframe(v, motions[i], fill=0)
+        varr = varr[good_idxs]
+        if aggregation == "max":
+            tmp = varr.max(axis=0)
+        elif aggregation == "mean":
+            tmp = varr.mean(axis=0)
+        else:
+            raise ValueError("does not understand aggregation: {}".format(aggregation))
     if sh_org is not None:
-        shifts = np.concatenate([shifts[i] + sh for i, sh in enumerate(sh_org)], axis=0)
-    return varr.max(axis=0), shifts
+        motions = np.concatenate(
+            [motions[i] + sh for i, sh in enumerate(sh_org)], axis=0
+        )
+    return tmp, motions
+
+
+def est_motion_perframe(
+    src, dst, upsample, src_ma=None, dst_ma=None, mesh_size=None, niter=100
+):
+    sh = phase_cross_correlation(
+        src,
+        dst,
+        upsample_factor=upsample,
+        return_error=False,
+    )
+    if mesh_size is None:
+        return -sh
+    src = sitk.GetImageFromArray(src.astype(np.float32))
+    dst = sitk.GetImageFromArray(dst.astype(np.float32))
+    reg = sitk.ImageRegistrationMethod()
+    sh = sh[::-1]
+    trans_init = sitk.TranslationTransform(2, sh)
+    reg.SetMovingInitialTransform(trans_init)
+    if src_ma is not None:
+        reg.SetMetricMovingMask(sitk.GetImageFromArray(src_ma.astype(np.uint8)))
+    if dst_ma is not None:
+        reg.SetMetricFixedMask(sitk.GetImageFromArray(dst_ma.astype(np.uint8)))
+    trans_opt = sitk.BSplineTransformInitializer(
+        image1=dst, transformDomainMeshSize=mesh_size
+    )
+    reg.SetInitialTransform(trans_opt)
+    reg.SetMetricAsCorrelation()
+    reg.SetInterpolator(sitk.sitkLinear)
+    reg.SetOptimizerAsGradientDescent(
+        learningRate=0.1, convergenceMinimumValue=1e-5, numberOfIterations=niter
+    )
+    tx = reg.Execute(dst, src)
+    coef = np.stack(
+        [sitk.GetArrayFromImage(im) for im in tx.Downcast().GetCoefficientImages()]
+    )
+    coef = coef + sh.reshape((2, 1, 1))
+    return coef
 
 
 def match_temp(src, dst, max_sh, local, subpixel=False):
