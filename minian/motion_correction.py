@@ -178,7 +178,7 @@ def match_temp(src, dst, max_sh, local, subpixel=False):
     Returns:
         [array]: array (x,y) of the shift (match)
     """
-    src = np.pad(src, max_sh)
+    dst = np.pad(dst, max_sh)
     cor = cv2.matchTemplate(
         src.astype(np.float32), dst.astype(np.float32), cv2.TM_CCOEFF_NORMED
     )
