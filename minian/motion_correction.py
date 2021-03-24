@@ -465,22 +465,6 @@ def transform_perframe(fm, tx_coef, fill=0, param=None, mesh_size=None):
     return sitk.GetArrayFromImage(fm)
 
 
-def optimize_bspline_composite(comp_tx):
-    coef_ls = []
-    for itx in range(comp_tx.GetNumberOfTransforms()):
-        tx = comp_tx.GetNthTransform(itx).Downcast()
-        try:
-            coef_im = tx.GetCoefficientImages()
-        except AttributeError:
-            return comp_tx
-        coef = np.stack([sitk.GetArrayFromImage(ci) for ci in coef_im], axis=0)
-        coef_ls.append(coef)
-    coef = np.stack(coef_ls, axis=0).sum(axis=0)
-    tx_new = sitk.BSplineTransform([sitk.GetImageFromArray(a) for a in coef])
-    tx_new.SetFixedParameters(tx.GetFixedParameters())
-    return tx_new
-
-
 def get_bspline_param(img, mesh_size):
     return sitk.BSplineTransformInitializer(
         image1=sitk.GetImageFromArray(img), transformDomainMeshSize=mesh_size
