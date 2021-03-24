@@ -264,85 +264,15 @@ def shift_perframe(fm, sh, fill=np.nan):
     return fm
 
 
-def est_trans_chunk(varr, trans_org, mesh_size, niter=10, bin_thres=5, bin_wnd=41):
-    if bin_thres:
-        masks = []
-        for fm in varr:
-            masks.append(
-                cv2.adaptiveThreshold(
-                    fm,
-                    1,
-                    cv2.ADAPTIVE_THRESH_MEAN_C,
-                    cv2.THRESH_BINARY,
-                    bin_wnd,
-                    -bin_thres,
-                ).astype(bool)
-            )
-    else:
-        masks = [None] * varr.shape[0]
-    mid = int(varr.shape[0] / 2)
-    param = get_bspline_param(varr[0], mesh_size)
-    # the dimension of transform coef array is: frame, 2, grid_size1, grid_size0
-    transform = np.zeros((varr.shape[0], 2, int(param[1]), int(param[0])))
-    for i in range(mid)[::-1]:
-        coef = ffd_transform(
-            varr[i], varr[i + 1], mesh_size, masks[i], masks[i + 1], niter=niter
-        )
-        transform[i] = coef
-        varr[i] = transform_perframe(varr[i], coef, fill=0, param=param)
-    for i in range(mid + 1, varr.shape[0]):
-        coef = ffd_transform(
-            varr[i], varr[i - 1], mesh_size, masks[i], masks[i - 1], niter=niter
-        )
-        transform[i] = coef
-        varr[i] = transform_perframe(varr[i], coef, fill=0, param=param)
-    if trans_org is not None:
-        transform = np.concatenate(
-            [transform[i] + torg for i, torg in enumerate(trans_org)], axis=0
-        )
-    return varr.max(axis=0), transform
-
-
-def ffd_transform(src, dst, mesh_size, src_ma=None, dst_ma=None, niter=10):
-    src = sitk.GetImageFromArray(src.astype(np.float32))
-    dst = sitk.GetImageFromArray(dst.astype(np.float32))
-    reg = sitk.ImageRegistrationMethod()
-    trans_init = sitk.BSplineTransformInitializer(
-        image1=dst, transformDomainMeshSize=mesh_size
-    )
-    if src_ma is not None:
-        reg.SetMetricMovingMask(sitk.GetImageFromArray(src_ma.astype(np.uint8)))
-    if dst_ma is not None:
-        reg.SetMetricFixedMask(sitk.GetImageFromArray(dst_ma.astype(np.uint8)))
-    reg.SetInitialTransform(trans_init)
-    reg.SetMetricAsMeanSquares()
-    reg.SetInterpolator(sitk.sitkLinear)
-    reg.SetOptimizerAsGradientDescent(
-        learningRate=1.0, convergenceMinimumValue=1e-5, numberOfIterations=niter
-    )
-    tx = reg.Execute(dst, src)
-    return np.stack(
-        [sitk.GetArrayFromImage(im) for im in tx.Downcast().GetCoefficientImages()]
-    )
-
-
-def translation_transform(src, dst, src_ma=None, dst_ma=None, niter=10):
-    src = sitk.GetImageFromArray(src.astype(np.float32))
-    dst = sitk.GetImageFromArray(dst.astype(np.float32))
-    reg = sitk.ImageRegistrationMethod()
-    trans_init = sitk.TranslationTransform(2)
-    if src_ma is not None:
-        reg.SetMetricMovingMask(sitk.GetImageFromArray(src_ma.astype(np.uint8)))
-    if dst_ma is not None:
-        reg.SetMetricFixedMask(sitk.GetImageFromArray(dst_ma.astype(np.uint8)))
-    reg.SetInitialTransform(trans_init)
-    reg.SetMetricAsMeanSquares()
-    reg.SetInterpolator(sitk.sitkLinear)
-    reg.SetOptimizerAsGradientDescent(
-        learningRate=1.0, convergenceMinimumValue=1e-5, numberOfIterations=niter
-    )
-    tx = reg.Execute(src, dst)
-    return np.array(tx.Downcast().GetOffset())[::-1]
+def get_mask(fm, bin_thres, bin_wnd):
+    return cv2.adaptiveThreshold(
+        fm,
+        1,
+        cv2.ADAPTIVE_THRESH_MEAN_C,
+        cv2.THRESH_BINARY,
+        bin_wnd,
+        -bin_thres,
+    ).astype(bool)
 
 
 def apply_transform(varr, trans, fill=0, mesh_size=None):
