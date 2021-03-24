@@ -277,15 +277,20 @@ def get_mask(fm, bin_thres, bin_wnd):
 
 def apply_transform(varr, trans, fill=0, mesh_size=None):
     sh_dim = trans.coords["shift_dim"].values.tolist()
-    fm0 = varr.isel(frame=0).values
-    if mesh_size is None:
-        mesh_size = get_mesh_size(fm0)
-    param = get_bspline_param(fm0, mesh_size)
+    if trans.ndim > 2:
+        fm0 = varr.isel(frame=0).values
+        if mesh_size is None:
+            mesh_size = get_mesh_size(fm0)
+        param = get_bspline_param(fm0, mesh_size)
+        mdim = ["shift_dim", "grid0", "grid1"]
+    else:
+        param = None
+        mdim = ["shift_dim"]
     varr_sh = xr.apply_ufunc(
         transform_perframe,
         varr.chunk({d: -1 for d in sh_dim}),
         trans,
-        input_core_dims=[sh_dim, ["shift_dim", "grid0", "grid1"]],
+        input_core_dims=[sh_dim, mdim],
         output_core_dims=[sh_dim],
         vectorize=True,
         dask="parallelized",
@@ -296,13 +301,16 @@ def apply_transform(varr, trans, fill=0, mesh_size=None):
 
 
 def transform_perframe(fm, tx_coef, fill=0, param=None, mesh_size=None):
-    if param is None:
-        if mesh_size is None:
-            mesh_size = get_mesh_size(fm)
-        param = get_bspline_param(fm, mesh_size)
+    if tx_coef.ndim > 1:
+        if param is None:
+            if mesh_size is None:
+                mesh_size = get_mesh_size(fm)
+            param = get_bspline_param(fm, mesh_size)
+        tx = sitk.BSplineTransform([sitk.GetImageFromArray(a) for a in tx_coef])
+        tx.SetFixedParameters(param)
+    else:
+        tx = sitk.TranslationTransform(2, -tx_coef[::-1])
     fm = sitk.GetImageFromArray(fm)
-    tx = sitk.BSplineTransform([sitk.GetImageFromArray(a) for a in tx_coef])
-    tx.SetFixedParameters(param)
     fm = sitk.Resample(fm, fm, tx, sitk.sitkLinear, fill)
     return sitk.GetArrayFromImage(fm)
 
