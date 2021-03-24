@@ -454,8 +454,8 @@ def factors(x):
 ANNOTATIONS = {
     "from-zarr-store": {"resources": {"MEM": 1}},
     "load_avi_ffmpeg": {"resources": {"MEM": 1}},
-    "est_sh_chunk": {"resources": {"MEM": 0.5}},
-    "shift_perframe": {"resources": {"MEM": 0.5}},
+    "est_motion_chunk": {"resources": {"MEM": 1}},
+    "transform_perframe": {"resources": {"MEM": 0.5}},
     "pnr_perseed": {"resources": {"MEM": 0.5}},
     "ks_perseed": {"resources": {"MEM": 0.5}},
     "smooth_corr": {"resources": {"MEM": 1}},
