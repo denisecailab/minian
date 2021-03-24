@@ -1547,3 +1547,38 @@ def NNsort(cents):
                 NNord = NNord + 1
                 break
     return result
+
+
+def visualize_motion(motion):
+    if motion.ndim > 2:
+        opts_im = {
+            "frame_width": 500,
+            "aspect": 3,
+            "cmap": "RdBu",
+            "symmetric": True,
+            "colorbar": True,
+        }
+        mheight = motion.sel(shift_dim="height").stack(grid=["grid0", "grid1"])
+        mwidth = motion.sel(shift_dim="width").stack(grid=["grid0", "grid1"])
+        mheight = mheight.assign_coords(grid=np.arange(mheight.sizes["grid"]))
+        mwidth = mwidth.assign_coords(grid=np.arange(mwidth.sizes["grid"]))
+        return (
+            (
+                hv.Image(mheight.rename("height_motion"), kdims=["frame", "grid"]).opts(
+                    title="height_motion", **opts_im
+                )
+                + hv.Image(mwidth.rename("width_motion"), kdims=["frame", "grid"]).opts(
+                    title="width_motion", **opts_im
+                )
+            )
+            .cols(1)
+            .opts(show_title=True)
+        )
+    else:
+        opts_cv = {"frame_width": 500, "tools": ["hover"], "aspect": 2}
+        return hv.NdOverlay(
+            dict(
+                width=hv.Curve(motion.sel(shift_dim="width")).opts(**opts_cv),
+                height=hv.Curve(motion.sel(shift_dim="height")).opts(**opts_cv),
+            )
+        )
