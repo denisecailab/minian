@@ -109,6 +109,9 @@ def load_videos(
     varr = varr.rename("fluorescence")
     if post_process:
         varr = post_process(varr, vpath, ssname, vlist, varr_list)
+    arr_opt = fct.partial(custom_arr_optimize, keep_patterns=["^load_avi_ffmpeg"])
+    with da.config.set(array_optimize=arr_opt):
+        varr = da.optimize(varr)[0]
     return varr
 
 
