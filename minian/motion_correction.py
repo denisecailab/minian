@@ -209,6 +209,25 @@ def match_temp(src, dst, max_sh, local, subpixel=False):
     return sh
 
 
+def check_temp(fm, max_sh):
+    fm_pad = np.pad(fm, max_sh)
+    cor = cv2.matchTemplate(
+        fm.astype(np.float32), fm_pad.astype(np.float32), cv2.TM_SQDIFF_NORMED
+    )
+    conts = cv2.findContours(
+        (cor < 1).astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+    )[0]
+    if len(conts) != 1:
+        return 0
+    cont = conts[0]
+    perimeter = cv2.arcLength(cont, True)
+    if perimeter <= 0:
+        return 0
+    area = cv2.contourArea(cont)
+    circularity = 4 * np.pi * (area / (perimeter ** 2))
+    return circularity
+
+
 def apply_shifts(varr, shifts, fill=np.nan):
     """
     Apply the shifts to the input frames
