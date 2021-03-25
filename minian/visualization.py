@@ -39,7 +39,7 @@ from scipy.spatial import cKDTree
 
 from .cnmf import compute_AtC
 from .motion_correction import apply_shifts
-from .utilities import rechunk_like
+from .utilities import rechunk_like, custom_arr_optimize
 
 
 class VArrayViewer:
@@ -991,9 +991,13 @@ def write_video(
         vname = "{}.mp4".format(uuid4())
     fname = os.path.join(vpath, vname)
     if norm:
-        arr = arr.astype(np.float32)
-        arr_max = arr.max().compute().values
-        arr_min = arr.min().compute().values
+        arr_opt = fct.partial(
+            custom_arr_optimize, rename_dict={"rechunk": "merge_restricted"}
+        )
+        with dask.config.set(array_optimize=arr_opt):
+            arr = arr.astype(np.float32)
+            arr_max = arr.max().compute().values
+            arr_min = arr.min().compute().values
         den = arr_max - arr_min
         arr -= arr_min
         arr /= den
