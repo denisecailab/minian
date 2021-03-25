@@ -109,6 +109,9 @@ def load_videos(
     varr = varr.rename("fluorescence")
     if post_process:
         varr = post_process(varr, vpath, ssname, vlist, varr_list)
+    arr_opt = fct.partial(custom_arr_optimize, keep_patterns=["^load_avi_ffmpeg"])
+    with da.config.set(array_optimize=arr_opt):
+        varr = da.optimize(varr)[0]
     return varr
 
 
@@ -454,8 +457,8 @@ def factors(x):
 ANNOTATIONS = {
     "from-zarr-store": {"resources": {"MEM": 1}},
     "load_avi_ffmpeg": {"resources": {"MEM": 1}},
-    "est_sh_chunk": {"resources": {"MEM": 0.5}},
-    "shift_perframe": {"resources": {"MEM": 0.5}},
+    "est_motion_chunk": {"resources": {"MEM": 1}},
+    "transform_perframe": {"resources": {"MEM": 0.5}},
     "pnr_perseed": {"resources": {"MEM": 0.5}},
     "ks_perseed": {"resources": {"MEM": 0.5}},
     "smooth_corr": {"resources": {"MEM": 1}},
@@ -675,3 +678,16 @@ def optimize_chunk(arr, chk):
     with da.config.set(array_optimize=arr_opt):
         arr_chk.data = da.optimize(arr_chk.data)[0]
     return arr_chk
+
+
+def local_extreme(fm, k, etype="max", diff=0):
+    fm_max = cv2.dilate(fm, k)
+    fm_min = cv2.erode(fm, k)
+    fm_diff = ((fm_max - fm_min) > diff).astype(np.uint8)
+    if etype == "max":
+        fm_ext = (fm == fm_max).astype(np.uint8)
+    elif etype == "min":
+        fm_ext = (fm == fm_min).astype(np.uint8)
+    else:
+        raise ValueError("Don't understand {}".format(etype))
+    return cv2.bitwise_and(fm_ext, fm_diff).astype(np.uint8)

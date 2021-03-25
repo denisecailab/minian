@@ -19,7 +19,7 @@ from sklearn.mixture import GaussianMixture
 from sklearn.neighbors import KDTree, radius_neighbors_graph
 
 from .cnmf import adj_corr, graph_optimize_corr, label_connected
-from .utilities import custom_arr_optimize, save_minian
+from .utilities import custom_arr_optimize, local_extreme, save_minian
 
 
 def seeds_init(
@@ -93,7 +93,7 @@ def local_max_roll(fm, k0, k1, diff):
     max_ls = []
     for ksize in range(k0, k1):
         selem = disk(ksize)
-        fm_max = local_max(fm, selem, diff)
+        fm_max = local_extreme(fm, selem, diff=diff)
         max_ls.append(fm_max)
     lmax = (np.stack(max_ls, axis=0).sum(axis=0) > 0).astype(np.uint8)
     nlab, max_lab = cv2.connectedComponents(lmax)
@@ -106,14 +106,6 @@ def local_max_roll(fm, k0, k1, diff):
         else:
             max_res[np.where(area)] = 1
     return max_res
-
-
-def local_max(fm, k, diff=0):
-    fm_max = cv2.dilate(fm, k)
-    fm_min = cv2.erode(fm, k)
-    fm_diff = ((fm_max - fm_min) > diff).astype(np.uint8)
-    fm_max = (fm == fm_max).astype(np.uint8)
-    return cv2.bitwise_and(fm_max, fm_diff).astype(np.uint8)
 
 
 def gmm_refine(
