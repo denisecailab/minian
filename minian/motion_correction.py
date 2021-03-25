@@ -81,7 +81,7 @@ def estimate_motion(varr, dim="frame", npart=3, temp_nfm=None, **kwargs):
     return sh
 
 
-def est_motion_part(varr, npart, temp_nfm, aggregation="max", **kwargs):
+def est_motion_part(varr, npart, temp_nfm, alt_error=5, **kwargs):
     """
     Estimate the shift per frame
 
@@ -104,10 +104,12 @@ def est_motion_part(varr, npart, temp_nfm, aggregation="max", **kwargs):
     tmp_ls = []
     sh_ls = []
     for blk in varr.blocks:
-        res = da.delayed(est_motion_chunk)(blk, None, aggregation=aggregation, **kwargs)
-        if aggregation is None:
+        res = da.delayed(est_motion_chunk)(
+            blk, None, alt_error=alt_error, npart=npart, **kwargs
+        )
+        if alt_error:
             tmp = darr.from_delayed(
-                res[0], shape=(2, blk.shape[1], blk.shape[2]), dtype=blk.dtype
+                res[0], shape=(3, blk.shape[1], blk.shape[2]), dtype=blk.dtype
             )
         else:
             tmp = darr.from_delayed(
@@ -133,13 +135,12 @@ def est_motion_part(varr, npart, temp_nfm, aggregation="max", **kwargs):
             tmps = temps.blocks[idx : idx + npart]
             sh_org = shifts.blocks[idx : idx + npart]
             sh_org_ls = [sh_org.blocks[i] for i in range(sh_org.numblocks[0])]
-            kwargs["circ_thres"] = None
             res = da.delayed(est_motion_chunk)(
-                tmps, sh_org_ls, aggregation=aggregation, **kwargs
+                tmps, sh_org_ls, alt_error=alt_error, npart=npart, **kwargs
             )
-            if aggregation is None:
+            if alt_error:
                 tmp = darr.from_delayed(
-                    res[0], shape=(2, tmps.shape[1], tmps.shape[2]), dtype=tmps.dtype
+                    res[0], shape=(3, tmps.shape[1], tmps.shape[2]), dtype=tmps.dtype
                 )
             else:
                 tmp = darr.from_delayed(
@@ -156,16 +157,42 @@ def est_motion_part(varr, npart, temp_nfm, aggregation="max", **kwargs):
 def est_motion_chunk(
     varr,
     sh_org,
-    aggregation,
+    npart,
+    alt_error,
+    aggregation="mean",
     upsample=100,
     max_sh=100,
-    circ_thres=0.6,
+    circ_thres=None,
     mesh_size=None,
     niter=100,
     bin_thres=None,
 ):
+    while varr.shape[0] > npart:
+        part_idx = np.array_split(
+            np.arange(varr.shape[0]), np.ceil(varr.shape[0] / npart)
+        )
+        tmp_ls = []
+        sh_ls = []
+        for idx in part_idx:
+            cur_tmp, cur_motions = est_motion_chunk(
+                varr[idx],
+                [sh_org[i] for i in idx] if sh_org is not None else None,
+                npart=npart,
+                alt_error=alt_error,
+                aggregation=aggregation,
+                upsample=upsample,
+                max_sh=max_sh,
+                circ_thres=circ_thres,
+                mesh_size=mesh_size,
+                niter=niter,
+                bin_thres=bin_thres,
+            )
+            tmp_ls.append(cur_tmp)
+            sh_ls.append(cur_motions)
+        varr = np.stack(tmp_ls, axis=0)
+        sh_org = sh_ls
     # varr could have 4 dimensions in which case the second dimension has length
-    # 2 representing the first and last frame of a chunk
+    # 3 representing the first, aggregated and the last frame of a chunk
     mask = np.ones_like(varr, dtype=bool)
     if bin_thres is not None and varr.ndim <= 3:
         for i, fm in enumerate(varr):
@@ -192,8 +219,11 @@ def est_motion_chunk(
     for i, fm in enumerate(varr):
         if i < mid:
             if varr.ndim > 3:
-                src, dst = varr[i][1], varr[i + 1][0]
-                src_ma, dst_ma = mask[i][1], mask[i + 1][0]
+                src, dst = varr[i][1], varr[i + 1][1]
+                src_ma, dst_ma = mask[i][1], mask[i + 1][1]
+                if alt_error:
+                    src_alt, dst_alt = varr[i][2], varr[i + 1][0]
+                    src_alt_ma, dst_alt_ma = mask[i][2], mask[i + 1][0]
             else:
                 # select the next good frame as template
                 didx = good_idxs[good_idxs - (i + 1) >= 0][0]
@@ -202,8 +232,11 @@ def est_motion_chunk(
             slc = slice(0, i + 1)
         elif i > mid:
             if varr.ndim > 3:
-                src, dst = varr[i][0], varr[i - 1][1]
-                src_ma, dst_ma = mask[i][0], mask[i - 1][1]
+                src, dst = varr[i][1], varr[i - 1][1]
+                src_ma, dst_ma = mask[i][1], mask[i - 1][1]
+                if alt_error:
+                    src_alt, dst_alt = varr[i][0], varr[i - 1][2]
+                    src_alt_ma, dst_alt_ma = mask[i][0], mask[i - 1][2]
             else:
                 # select the previous good frame as template
                 didx = good_idxs[good_idxs - (i - 1) <= 0][-1]
@@ -213,42 +246,53 @@ def est_motion_chunk(
         else:
             continue
         mo = est_motion_perframe(src, dst, upsample, src_ma, dst_ma, mesh_size, niter)
+        if alt_error and varr.ndim > 3:
+            mo_alt = est_motion_perframe(
+                src_alt, dst_alt, upsample, src_alt_ma, dst_alt_ma, mesh_size, niter
+            )
+            if ((np.abs(mo - mo_alt) > alt_error).any()) and (
+                np.abs(mo).sum() > np.abs(mo_alt).sum()
+            ):
+                mo = mo_alt
         # only add to the rest if current frame is good
         if good_fm[i]:
             motions[slc] = motions[slc] + mo
         else:
             motions[i] = motions[i] + mo
-    if aggregation is None:
-        # center shifts based on first and last frame
-        if mesh_size is not None:
-            motions -= motions[[0, -1]].mean(axis=(0, 2, 3), keepdims=True)
-        else:
-            motions -= motions[[0, -1]].mean(axis=0)
-        if varr.ndim > 3:
-            tmp0 = transform_perframe(varr[0][0], motions[0], fill=0)
-            tmp1 = transform_perframe(varr[-1][-1], motions[-1], fill=0)
-        else:
-            tmp0 = transform_perframe(varr[good_idxs[0]], motions[good_idxs[0]], fill=0)
-            tmp1 = transform_perframe(
-                varr[good_idxs[-1]], motions[good_idxs[-1]], fill=0
-            )
-        tmp = np.stack([tmp0, tmp1])
+    # center shifts
+    if mesh_size is not None:
+        motions -= motions.mean(axis=(0, 2, 3), keepdims=True)
     else:
-        for i, v in enumerate(varr):
-            if i not in good_idxs:
-                continue
-            if v.ndim > 2:
-                for j, fm in enumerate(v):
-                    varr[i][j] = transform_perframe(fm, motions[i], fill=0)
-            else:
-                varr[i] = transform_perframe(v, motions[i], fill=0)
-        varr = varr[good_idxs]
-        if aggregation == "max":
-            tmp = varr.max(axis=0)
-        elif aggregation == "mean":
-            tmp = varr.mean(axis=0)
+        motions -= motions.mean(axis=0)
+    for i, v in enumerate(varr):
+        if i not in good_idxs:
+            continue
+        if v.ndim > 2:
+            for j, fm in enumerate(v):
+                varr[i][j] = transform_perframe(fm, motions[i], fill=0)
         else:
-            raise ValueError("does not understand aggregation: {}".format(aggregation))
+            varr[i] = transform_perframe(v, motions[i], fill=0)
+    varr = varr[good_idxs]
+    if aggregation == "max":
+        if varr.ndim > 3:
+            tmp = varr.max(axis=(0, 1))
+        else:
+            tmp = varr.max(axis=0)
+    elif aggregation == "mean":
+        if varr.ndim > 3:
+            tmp = varr.mean(axis=(0, 1))
+        else:
+            tmp = varr.mean(axis=0)
+    else:
+        raise ValueError("does not understand aggregation: {}".format(aggregation))
+    if alt_error:
+        if varr.ndim > 3:
+            tmp0 = varr[0][0]
+            tmp1 = varr[-1][-1]
+        else:
+            tmp0 = varr[0]
+            tmp1 = varr[1]
+        tmp = np.stack([tmp0, tmp, tmp1], axis=0)
     if sh_org is not None:
         motions = np.concatenate(
             [motions[i] + sh for i, sh in enumerate(sh_org)], axis=0
