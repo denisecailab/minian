@@ -1,17 +1,9 @@
 import numpy as np
-import nbformat
 import os
-from nbconvert.preprocessors import ExecutePreprocessor
 from ..utilities import open_minian
 
 
 def test_pipeline_notebook():
-    # run the notebook
-    with open("./pipeline.ipynb") as nbf:
-        nb = nbformat.read(nbf, as_version=nbformat.NO_CONVERT)
-    ep = ExecutePreprocessor(timeout=-1)
-    ep.preprocess(nb)
-    # load results
     minian_ds = open_minian("./demo_movies/minian")
     assert minian_ds.sizes["frame"] == 2000
     assert minian_ds.sizes["height"] == 480
