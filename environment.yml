@@ -49,6 +49,6 @@ dependencies:
   - zarr=2.4.0
   - sparse=0.11.2
   - pymetis=2020.1
+  - rechunker==0.3.3
   - pip:
       - medpy==0.4.0
-      - rechunker==0.2.0
