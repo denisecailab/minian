@@ -52,6 +52,7 @@ autoapi_options = [
     "special-members",
     "imported-members",
 ]
+autoapi_member_order = "groupwise"
 napoleon_use_rtype = False
 
 # Add any paths that contain templates here, relative to this directory.
