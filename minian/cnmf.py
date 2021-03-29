@@ -1605,6 +1605,10 @@ def filt_butter(x: np.ndarray, freq: float, btype: str) -> np.ndarray:
     -------
     x_filt : np.ndarray
         filtered timeseries
+
+    See Also
+    -------
+    scipy.signal.butter
     """
     but_b, but_a = butter(2, freq * 2, btype=btype, analog=False)
     return lfilter(but_b, but_a, x)
