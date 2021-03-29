@@ -11,11 +11,3 @@ Welcome to minian's documentation!
 
    userguide_pipeline
    userguide_crossregistration
-
-
-Indices and tables
-==================
-
-* :ref:`genindex`
-* :ref:`modindex`
-* :ref:`search`
