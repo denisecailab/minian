@@ -7,10 +7,10 @@ Welcome to minian's documentation!
 ==================================
 
 .. toctree::
-   :maxdepth: 4
-   :caption: Contents:
+   :maxdepth: 2
 
-   userguide
+   userguide_pipeline
+   userguide_crossregistration
 
 
 Indices and tables
