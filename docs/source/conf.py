@@ -42,6 +42,7 @@ extensions = [
 ]
 
 autoapi_dirs = ["../../minian"]
+autoapi_template_dir = "./autoapi_templates"
 autoapi_ignore = ["*test/*"]
 autoapi_options = [
     "members",
