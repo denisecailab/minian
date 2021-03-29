@@ -1,5 +1,6 @@
 Sphinx
 sphinx-rtd-theme
+sphinx-autodoc-typehints
 sphinxcontrib-applehelp
 sphinxcontrib-devhelp
 sphinxcontrib-htmlhelp
