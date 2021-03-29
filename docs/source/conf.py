@@ -55,6 +55,19 @@ autoapi_options = [
 autoapi_member_order = "groupwise"
 napoleon_use_rtype = False
 
+intersphinx_mapping = {
+    "python": ("https://docs.python.org/3/", None),
+    "matplotlib": ("https://matplotlib.org/stable/", None),
+    "numpy": ("https://numpy.org/doc/stable/", None),
+    "pandas": ("https://pandas.pydata.org/docs/", None),
+    "sklearn": ("https://scikit-learn.org/stable/", None),
+    "scipy": ("https://docs.scipy.org/doc/scipy/reference/", None),
+    "xarray": ("http://xarray.pydata.org/en/stable/", None),
+    "sparse": ("https://sparse.pydata.org/en/stable/", None),
+    "networkx": ("https://networkx.org/documentation/stable/", None),
+}
+
+
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ["_templates"]
 
