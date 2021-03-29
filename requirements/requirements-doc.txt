@@ -1,5 +1,5 @@
 Sphinx
-sphinx-autodoc-typehints
+sphinx-autoapi
 pydata-sphinx-theme
 sphinxcontrib-applehelp
 sphinxcontrib-devhelp

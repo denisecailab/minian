@@ -33,19 +33,25 @@ sys.path.append(os.path.abspath("exts"))
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
 extensions = [
+    "sphinx.ext.napoleon",
     "sphinx.ext.intersphinx",
-    "sphinx.ext.autodoc",
     "sphinx.ext.viewcode",
     "sphinx.ext.todo",
     "sphinx.ext.mathjax",
-    "sphinx.ext.napoleon",
-    "sphinx_autodoc_typehints",
-    "numbadoc",
+    "autoapi.extension",
 ]
 
+autoapi_dirs = ["../../minian"]
+autoapi_ignore = ["*test/*"]
+autoapi_options = [
+    "members",
+    "undoc-members",
+    "private-members",
+    "show-inheritance",
+    "special-members",
+    "imported-members",
+]
 napoleon_use_rtype = False
-typehints_document_rtype = False
-numba_jit_prefix = ""
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ["_templates"]

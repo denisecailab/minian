@@ -11,7 +11,6 @@ Welcome to minian's documentation!
    :caption: Contents:
 
    userguide
-   referenceguide
 
 
 Indices and tables
