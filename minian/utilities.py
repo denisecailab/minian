@@ -462,7 +462,7 @@ ANNOTATIONS = {
     "pnr_perseed": {"resources": {"MEM": 0.5}},
     "ks_perseed": {"resources": {"MEM": 0.5}},
     "smooth_corr": {"resources": {"MEM": 1}},
-    "vectorize__noise_fft": {"resources": {"MEM": 1}},
+    "vectorize_noise_fft": {"resources": {"MEM": 1}},
     "vectorize_noise_welch": {"resources": {"MEM": 1}},
     "update_spatial_block": {"resources": {"MEM": 1}},
     "tensordot_restricted": {"resources": {"MEM": 1}},

@@ -74,7 +74,7 @@ def get_noise_fft(
     except ValueError:
         threads = 1
     sn = xr.apply_ufunc(
-        _noise_fft,
+        noise_fft,
         varr,
         input_core_dims=[["frame"]],
         output_core_dims=[[]],
@@ -88,7 +88,7 @@ def get_noise_fft(
     return sn
 
 
-def _noise_fft(
+def noise_fft(
     px: np.ndarray, noise_range=(0.25, 0.5), noise_method="logmexp", threads=1
 ) -> float:
     """
@@ -1148,7 +1148,7 @@ def update_temporal_block(
     update_temporal : for more explanation of parameters
     """
     vec_get_noise = np.vectorize(
-        _noise_fft,
+        noise_fft,
         otypes=[float],
         excluded=["noise_range", "noise_method"],
         signature="(f)->()",
