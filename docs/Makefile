@@ -15,11 +15,12 @@ help:
 .PHONY: help Makefile
 
 cleanup:
-	rm -rf ../minian/.ipynb_checkpoints
+	-rm -rf ../minian/.ipynb_checkpoints
+	-rm -rf build
+	-rm -f source/pipeline_noted.rst
+	-rm -f source/cross-registration.rst
 
 convert_noted:
-	rm -rf build && \
-	rm -f source/pipeline_noted.rst && \
 	cd .. && \
 	jupyter nbconvert --to rst pipeline_noted.ipynb && \
 	mv pipeline_noted.rst docs/source && \
