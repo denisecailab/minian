@@ -16,6 +16,18 @@ import sys
 sys.path.insert(0, os.path.abspath("../../"))
 sys.path.append(os.path.abspath("ext"))
 
+# -- Custom scripts ----------------------------------------------------------
+import dask.array
+
+
+def custom_as_gufunc(signature=None, **kwargs):
+    def _as_gufunc(pyfunc):
+        return pyfunc
+
+    return _as_gufunc
+
+
+dask.array.as_gufunc = custom_as_gufunc
 
 # -- Project information -----------------------------------------------------
 
@@ -42,6 +54,7 @@ extensions = [
 
 napoleon_use_rtype = False
 autodoc_typehints = "none"
+autodoc_mock_imports = ["dask"]
 
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3/", None),
