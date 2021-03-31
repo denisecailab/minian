@@ -5,6 +5,9 @@
 {% if obj.name != 'minian' %}
 :mod:`{{ obj.name }}`
 ======={{ "=" * obj.name|length }}
+
+.. py:module:: {{ obj.name }}
+
 {% endif %}
 
 {% if obj.docstring %}

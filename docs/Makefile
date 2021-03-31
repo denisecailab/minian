@@ -43,3 +43,4 @@ autoapi:
 	-rm $(SOURCEDIR)/conf.py
 	ln -s conf_base.py $(SOURCEDIR)/conf.py
 	@$(SPHINXBUILD) -M $@ "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) $(O)
+	python post_process.py "$(BUILDDIR)"
