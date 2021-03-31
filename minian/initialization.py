@@ -690,7 +690,7 @@ def initA(
 
     See Also
     -------
-    graph_optimize_corr :
+    minian.cnmf.graph_optimize_corr :
         for how the correlation are computed in an out-of-core fashion
     """
     print("optimizing computation graph")
