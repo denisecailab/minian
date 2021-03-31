@@ -166,7 +166,7 @@ def local_max_roll(
 
     See Also
     -------
-    local_extreme
+    minian.utilities.local_extreme
     """
     max_ls = []
     for ksize in range(k0, k1):
@@ -448,7 +448,7 @@ def med_baseline(a: np.ndarray, wnd: int) -> np.ndarray:
 
     See Also
     -------
-    scipy.ndimage.filters.median_filter
+    scipy.ndimage.median_filter
     """
     base = median_filter(a, size=wnd)
     a -= base
@@ -524,7 +524,7 @@ def ks_refine(varr: xr.DataArray, seeds: pd.DataFrame, sig=0.01) -> pd.DataFrame
 
     Returns
     -------
-    pd.DataFrame
+    seeds : pd.DataFrame
         the resulting seeds dataframe with an additional column "mask_ks",
         indicating whether the seed is considered valid by this function, if the
         column already exists in input `seeds` it will be overwritten
