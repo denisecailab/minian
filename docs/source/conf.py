@@ -37,6 +37,7 @@ extensions = [
     "sphinx.ext.mathjax",
     "sphinx.ext.autodoc",
     "toctree",
+    "ref_alias",
 ]
 
 napoleon_use_rtype = False
@@ -51,6 +52,11 @@ intersphinx_mapping = {
     "xarray": ("http://xarray.pydata.org/en/stable/", None),
     "sparse": ("https://sparse.pydata.org/en/stable/", None),
     "networkx": ("https://networkx.org/documentation/stable/", None),
+ref_aliases = {
+    "xr.DataArray": ("xarray.DataArray", "xr.DataArray"),
+    "np.ndarray": ("numpy.ndarray", "np.ndarray"),
+    "pd.DataFrame": ("pandas.DataFrame", "pd.DataFrame"),
+    "nx.Graph": ("networkx.Graph", "nx.Graph"),
 }
 
 
