@@ -41,6 +41,7 @@ extensions = [
 ]
 
 napoleon_use_rtype = False
+autodoc_typehints = "none"
 
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3/", None),
@@ -52,6 +53,9 @@ intersphinx_mapping = {
     "xarray": ("http://xarray.pydata.org/en/stable/", None),
     "sparse": ("https://sparse.pydata.org/en/stable/", None),
     "networkx": ("https://networkx.org/documentation/stable/", None),
+    "zarr": ("https://zarr.readthedocs.io/en/stable/", None),
+}
+
 ref_aliases = {
     "xr.DataArray": ("xarray.DataArray", "xr.DataArray"),
     "np.ndarray": ("numpy.ndarray", "np.ndarray"),
