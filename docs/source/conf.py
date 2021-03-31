@@ -10,9 +10,11 @@
 # add these directories to sys.path here. If the directory is relative to the
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 #
-# import os
-# import sys
-# sys.path.insert(0, os.path.abspath('.'))
+import os
+import sys
+
+sys.path.insert(0, os.path.abspath("../../"))
+sys.path.append(os.path.abspath("ext"))
 
 
 # -- Project information -----------------------------------------------------
@@ -21,11 +23,6 @@ project = "MiniAn"
 copyright = "2020, Denise J. Cai"
 author = "Denise J. Cai"
 
-import os
-import sys
-
-sys.path.insert(0, os.path.abspath("../../"))
-sys.path.append(os.path.abspath("exts"))
 
 # -- General configuration ---------------------------------------------------
 
@@ -38,21 +35,10 @@ extensions = [
     "sphinx.ext.viewcode",
     "sphinx.ext.todo",
     "sphinx.ext.mathjax",
-    "autoapi.extension",
+    "sphinx.ext.autodoc",
+    "toctree",
 ]
 
-autoapi_dirs = ["../../minian"]
-autoapi_template_dir = "./autoapi_templates"
-autoapi_ignore = ["*test/*"]
-autoapi_options = [
-    "members",
-    "undoc-members",
-    "private-members",
-    "show-inheritance",
-    "special-members",
-    "imported-members",
-]
-autoapi_member_order = "groupwise"
 napoleon_use_rtype = False
 
 intersphinx_mapping = {
