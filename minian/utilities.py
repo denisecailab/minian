@@ -8,6 +8,7 @@ from os import listdir
 from os.path import isdir
 from os.path import join as pjoin
 from pathlib import Path
+from typing import Union, Optional, Callable
 from uuid import uuid4
 
 import _operator
@@ -22,12 +23,7 @@ import xarray as xr
 import zarr as zr
 from dask.core import flatten
 from dask.delayed import optimize as default_delay_optimize
-from dask.optimization import (
-    cull,
-    fuse,
-    inline,
-    inline_functions,
-)
+from dask.optimization import cull, fuse, inline, inline_functions
 from dask.utils import ensure_dict
 from distributed.diagnostics.plugin import SchedulerPlugin
 from distributed.scheduler import SchedulerState, cast
@@ -36,38 +32,68 @@ from tifffile import TiffFile, imread
 
 
 def load_videos(
-    vpath,
+    vpath: str,
     pattern=r"msCam[0-9]+\.avi$",
-    dtype=np.float64,
-    downsample=None,
+    dtype: Union[str, type] = np.float64,
+    downsample: Optional[dict] = None,
     downsample_strategy="subset",
-    post_process=None,
-):
+    post_process: Optional[Callable] = None,
+) -> xr.DataArray:
     """
+    Load multiple videos in a folder and return a `xr.DataArray`.
+
     Load videos from the folder specified in `vpath` and according to the regex
-    `pattern`, then concatenate them together across time and return a
-    `xarray.DataArray` representation of the concatenated videos. The default
-    assumption is video filenames start with ``msCam`` followed by at least a
-    number, and then followed by ``.avi``. In addition, it is assumed that the
-    name of the folder correspond to a recording session identifier.
+    `pattern`, then concatenate them together and return a `xr.DataArray`
+    representation of the concatenated videos. The videos are sorted by
+    filenames with `natsort` before concatenation. Optionally the data can be
+    downsampled, and the user can pass in a custom callable to post-process the
+    result.
 
     Parameters
     ----------
     vpath : str
-        The path to search for videos
-    pattern : str, optional
-        The pattern that describes filenames of videos. (Default value =
-        'msCam[0-9]+\.avi')
+        the path containing the videos to load
+    pattern : regexp, optional
+        the regexp matching the filenames of the videso, by default
+        r"msCam[0-9]+\.avi$", which can be interpreted as filenames starting
+        with "msCam" followed by at least a number, and then followed by ".avi"
+    dtype : Union[str, type], optional
+        datatype of the resulting DataArray, by default np.float64
+    downsample : dict, optional
+        a dictionary mapping dimension names to an integer downsampling factor,
+        the dimension names should be one of "height", "width" or "frame", by
+        default None
+    downsample_strategy : str, optional
+        how the downsampling should be done, only used if `downsample` is not
+        `None`, either "subset" where data points are taken at an interval
+        specified in `downsample`, or "mean" where mean will be taken over data
+        within each interval, by default "subset"
+    post_process : Callable, optional
+        an user-supplied custom function to post-process the resulting array,
+        four arguments will be passed to the function: the resulting DataArray
+        `varr`, the input path `vpath`, the list of matched video filenames
+        `vlist`, and the list of DataArray before concatenation `varr_list`, the
+        function should output another valide DataArray, in other words, the
+        function should have signature `f(varr: xr.DataArray, vpath: str, vlist:
+        List[str], varr_list: List[xr.DataArray]) -> xr.DataArray`, by default
+        None
 
     Returns
     -------
-    xarray.DataArray or None
-        The labeled 3-d array representation of the videos with dimensions:
-        ``frame``, ``height`` and ``width``. Returns ``None`` if no data was
-        found in the specified folder.
+    varr : xr.DataArray
+        the resulting array representation of the input movie, should have
+        dimensions ("frame", "height", "width")
+
+    Raises
+    ------
+    FileNotFoundError
+        if no files under `vpath` match the pattern `pattern`
+    ValueError
+        if the matched files does not have extension ".avi", ".mkv" or ".tif"
+    NotImplementedError
+        if `downsample_strategy` is not "subset" or "mean"
     """
     vpath = os.path.normpath(vpath)
-    ssname = os.path.basename(vpath)
     vlist = natsorted(
         [vpath + os.sep + v for v in os.listdir(vpath) if re.search(pattern, v)]
     )
@@ -108,14 +134,27 @@ def load_videos(
             raise NotImplementedError("unrecognized downsampling strategy")
     varr = varr.rename("fluorescence")
     if post_process:
-        varr = post_process(varr, vpath, ssname, vlist, varr_list)
+        varr = post_process(varr, vpath, vlist, varr_list)
     arr_opt = fct.partial(custom_arr_optimize, keep_patterns=["^load_avi_ffmpeg"])
     with da.config.set(array_optimize=arr_opt):
         varr = da.optimize(varr)[0]
     return varr
 
 
-def load_tif_lazy(fname):
+def load_tif_lazy(fname: str) -> darr.array:
+    """
+    Lazy load a tif stack of images.
+
+    Parameters
+    ----------
+    fname : str
+        the filename of the tif stack to load
+
+    Returns
+    -------
+    arr : darr.array
+        resulting dask array representation of the tif stack
+    """
     data = TiffFile(fname)
     f = len(data.pages)
 
@@ -130,11 +169,43 @@ def load_tif_lazy(fname):
     return da.array.stack(arr, axis=0)
 
 
-def load_tif_perframe(fname, fid):
+def load_tif_perframe(fname: str, fid: int) -> np.ndarray:
+    """
+    Load a single image from a tif stack.
+
+    Parameters
+    ----------
+    fname : str
+        the filename of the tif stack
+    fid : int
+        the index of the image to load
+
+    Returns
+    -------
+    np.ndarray
+        array representation of the image
+    """
     return imread(fname, key=fid)
 
 
-def load_avi_lazy_framewise(fname):
+def load_avi_lazy_framewise(fname: str) -> darr.array:
+    """
+    Lazy load an avi video frame by frame with seeking using `opencv`.
+
+    .. deprecated:: 1.0.0
+        `load_avi_lazy_framewise` will be removed in the future in favor of the
+        more efficient `load_avi_lazy`.
+
+    Parameters
+    ----------
+    fname : str
+        the filename of the video to load
+
+    Returns
+    -------
+    arr : darr.array
+        the array representation of the video
+    """
     cap = cv2.VideoCapture(fname)
     f = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     fmread = da.delayed(load_avi_perframe)
@@ -147,7 +218,23 @@ def load_avi_lazy_framewise(fname):
     return da.array.stack(arr, axis=0)
 
 
-def load_avi_lazy(fname):
+def load_avi_lazy(fname: str) -> darr.array:
+    """
+    Lazy load an avi video.
+
+    This function construct a single delayed task for loading the video as a
+    whole.
+
+    Parameters
+    ----------
+    fname : str
+        the filename of the video to load
+
+    Returns
+    -------
+    arr : darr.array
+        the array representation of the video
+    """
     probe = ffmpeg.probe(fname)
     video_info = next(s for s in probe["streams"] if s["codec_type"] == "video")
     w = int(video_info["width"])
@@ -158,7 +245,29 @@ def load_avi_lazy(fname):
     )
 
 
-def load_avi_ffmpeg(fname, h, w, f):
+def load_avi_ffmpeg(fname: str, h: int, w: int, f: int) -> np.ndarray:
+    """
+    Load an avi video using `ffmpeg`.
+
+    This function directly invoke `ffmpeg` using the `python-ffmpeg` wrapper and
+    retrieve the data from buffer.
+
+    Parameters
+    ----------
+    fname : str
+        the filename of the video to load
+    h : int
+        the height of the video
+    w : int
+        the width of the video
+    f : int
+        the number of frames in the video
+
+    Returns
+    -------
+    arr : np.ndarray
+        the resulting array, has shape (`f`, `h`, `w`)
+    """
     out_bytes, err = (
         ffmpeg.input(fname)
         .video.output("pipe:", format="rawvideo", pix_fmt="gray")
@@ -167,7 +276,26 @@ def load_avi_ffmpeg(fname, h, w, f):
     return np.frombuffer(out_bytes, np.uint8).reshape(f, h, w)
 
 
-def load_avi_perframe(fname, fid):
+def load_avi_perframe(fname: str, fid: int) -> np.ndarray:
+    """
+    Load a single frame in a video with seeking using `opencv`
+
+    .. deprecated:: 1.0.0
+        `load_avi_lazy_framewise` will be removed in the future in favor of the
+        more efficient `load_avi_lazy`.
+
+    Parameters
+    ----------
+    fname : str
+        the filename to the video
+    fid : int
+        the index of frame to load
+
+    Returns
+    -------
+    arr : np.ndarray
+        the resulting array
+    """
     cap = cv2.VideoCapture(fname)
     h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -180,17 +308,47 @@ def load_avi_perframe(fname, fid):
         return np.zeros((h, w))
 
 
-def open_minian(dpath, post_process=None, return_dict=False):
+def open_minian(
+    dpath: str, post_process: Optional[Callable] = None, return_dict=False
+) -> Union[dict, xr.Dataset]:
     """
-    Opens a file previously saved in minian handling the proper data format and chunks
+    Load an existing minian dataset.
 
-    Args:
-        dpath ([string]): contains the normalized absolutized version of the pathname path,which is the path to minian folder;
-        Post_process (function): post processing function, parameters: dataset (xarray.DataArray), mpath (string, path to the raw backend files)
-        return_dict ([boolean]): default False
+    This function will iterate through all the directories under input `dpath`
+    and load them as `xr.DataArray` with `zarr` backend, so it is important that
+    the user make sure every directory under `dpath` can be load this way. The
+    loaded arrays will be combined as either a `xr.Dataset` or a `dict`.
+    Optionally a user-supplied custom function can be used to post process the
+    resulting `xr.Dataset`.
 
-    Returns:
-        xarray.DataArray: [loaded data]
+    Parameters
+    ----------
+    dpath : str
+        the path to the minian dataset that should be loaded
+    post_process : Callable, optional
+        user-supplied function to post process the dataset, only used if
+        `return_dict` is `False`, two arguments will be passed to the function:
+        the resulting dataset `ds` and the data path `dpath`, in other words the
+        function should have signature `f(ds: xr.Dataset, dpath: str) ->
+        xr.Dataset`, by default None
+    return_dict : bool, optional
+        whether to combine the DataArray as dictionary, the `.name` attribute
+        will be used as key, otherwise the DataArray will be combined using
+        `xr.merge(..., compat="no_conflicts")`, which will implicitly align the
+        DataArray over all dimensions, so it is important to make sure the
+        coordinates are compatible and will not result in creation of large
+        NaN-padded results, by default False
+
+    Returns
+    -------
+    Union[dict, xr.Dataset]
+        the resulting dataset, if `return_dict` is `True` it will be a `dict`,
+        otherwise a `xr.Dataset`
+
+    See Also
+    -------
+    xarray.open_zarr : for how each directory will be loaded as `xr.DataArray`
+    xarray.merge : for how the `xr.DataArray` will be merged as `xr.Dataset`
     """
     dslist = []
     for d in listdir(dpath):
