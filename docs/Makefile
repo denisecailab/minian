@@ -32,15 +32,8 @@ copy_images:
 	mkdir -p build/html && \
 	cp -r ../img build/html
 
-autoapi:
-	-rm $(SOURCEDIR)/conf.py
-	ln -s conf_autoapi.py $(SOURCEDIR)/conf.py
-	@$(SPHINXBUILD) -M text "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) $(O)
-
 # Catch-all target: route all unknown targets to Sphinx using the new
 # "make mode" option.  $(O) is meant as a shortcut for $(SPHINXOPTS).
-%: Makefile cleanup convert_noted copy_images autoapi
-	-rm $(SOURCEDIR)/conf.py
-	ln -s conf_base.py $(SOURCEDIR)/conf.py
+%: Makefile cleanup convert_noted copy_images
 	@$(SPHINXBUILD) -M $@ "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) $(O)
 	python post_process.py "$(BUILDDIR)"

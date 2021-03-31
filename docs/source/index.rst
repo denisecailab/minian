@@ -11,4 +11,3 @@ Welcome to minian's documentation!
 
    userguide_pipeline
    userguide_crossregistration
-   autoapi/index
