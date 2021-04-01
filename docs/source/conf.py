@@ -68,6 +68,7 @@ intersphinx_mapping = {
     "networkx": ("https://networkx.org/documentation/stable/", None),
     "zarr": ("https://zarr.readthedocs.io/en/stable/", None),
     "dask": ("https://docs.dask.org/en/latest/", None),
+    "distributed": ("https://distributed.dask.org/en/latest/", None),
 }
 
 ref_aliases = {

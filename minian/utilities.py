@@ -182,7 +182,7 @@ def load_tif_perframe(fname: str, fid: int) -> np.ndarray:
 
     Returns
     -------
-    np.ndarray
+    arr : np.ndarray
         array representation of the image
     """
     return imread(fname, key=fid)
@@ -341,7 +341,7 @@ def open_minian(
 
     Returns
     -------
-    Union[dict, xr.Dataset]
+    ds : Union[dict, xr.Dataset]
         the resulting dataset, if `return_dict` is `True` it will be a `dict`,
         otherwise a `xr.Dataset`
 
@@ -384,7 +384,8 @@ def open_minian_mf(
     load minian datasets from all directories matching `pattern`. It will then
     combine them based on `index_dims` into either a `xr.Dataset` object or a
     `pd.DataFrame`. Optionally a subset of paths can be specified, so that
-    they can either be excluded or white-listed.
+    they can either be excluded or white-listed. Additional keyword arguments
+    will be passed directly to `open_minian`.
 
     Parameters
     ----------
@@ -522,8 +523,8 @@ def save_minian(
     -------
     The following will save the variable `var` to directory
     `/spatial_memory/alpha/learning1/minian/important_array.zarr`, with the
-    additional coordinates: {"session": "learning1", "animal": "alpha",
-    "experiment": "spatial_memory"}.
+    additional coordinates: `{"session": "learning1", "animal": "alpha",
+    "experiment": "spatial_memory"}`.
 
     >>> save_minian(
     ...     var.rename("important_array"),
@@ -576,7 +577,31 @@ def save_minian(
     return arr
 
 
-def xrconcat_recursive(var, dims):
+def xrconcat_recursive(var: Union[dict, list], dims: List[str]) -> xr.Dataset:
+    """
+    Recursively concatenate `xr.DataArray` over multiple dimensions.
+
+    Parameters
+    ----------
+    var : Union[dict, list]
+        either a `dict` or a `list` of `xr.DataArray` to be concatenated, if a
+        `dict` then keys should be `tuple`, with length same as the length of
+        `dims` and values corresponding to the coordinates that uniquely
+        identify each `xr.DataArray`, if a `list` then each `xr.DataArray`
+        should contain valid coordinates for each dimensions specified in `dims`
+    dims : List[str]
+        dimensions to be concatenated over
+
+    Returns
+    -------
+    ds : xr.Dataset
+        the concatenated dataset
+
+    Raises
+    ------
+    NotImplementedError
+        if input `var` is neither a `dict` nor a `list`
+    """
     if len(dims) > 1:
         if type(var) is dict:
             var_dict = var
@@ -629,20 +654,38 @@ def update_meta(dpath, pattern=r"^minian\.nc$", meta_dict=None, backend="netcdf"
             print("updated: {}".format(f_path))
 
 
-def get_chk(arr):
+def get_chk(arr: xr.DataArray) -> dict:
+    """
+    Get chunks of a `xr.DataArray`.
+
+    Parameters
+    ----------
+    arr : xr.DataArray
+        the input `xr.DataArray`
+
+    Returns
+    -------
+    chk : dict
+        dictionary mapping dimension names to chunks
+    """
     return {d: c for d, c in zip(arr.dims, arr.chunks)}
 
 
-def rechunk_like(x, y):
+def rechunk_like(x: xr.DataArray, y: xr.DataArray) -> xr.DataArray:
     """
-    Resizes chunks based on the new input dimensions
+    Rechunk the input `x` such that its chunks are compatible with `y`.
 
-    Args:
-        x (array): the array to be rechunked. i.e. destination of rechunking
-        y (array): the array where chunk information are extracted. i.e. the source of rechunking
+    Parameters
+    ----------
+    x : xr.DataArray
+        the array to be rechunked
+    y : xr.DataArray
+        the array where chunk information are extracted
 
-    Returns:
-        dict: data with new dimensions as specified in the input
+    Returns
+    -------
+    x_chk : xr.DataArray
+        the rechunked `x`
     """
     try:
         dst_chk = get_chk(y)
@@ -654,22 +697,42 @@ def rechunk_like(x, y):
 
 
 def get_optimal_chk(
-    arr,
+    arr: xr.DataArray,
     dim_grp=[("frame",), ("height", "width")],
     csize=256,
-    dtype=None,
-):
+    dtype: Optional[type] = None,
+) -> dict:
     """
-    Estimates the chunk of video (i.e. video sizes and number of frames) that optimizes computer memory use when the script is run parallel over multiple cores.
+    Compute the optimal chunk size across all dimensions of the input array.
 
-    Args:
-        arr (xarray.DataArray): xarray.DataArray a labeled 3-d array representation of the videos with dimensions: frame, height and width.
-        dim_grp (array, optional): provide labels for the dimension of the data. Defaults to None.
-        csize (int, optional): target chunk size in MB. Defaults to 256.
-        dtype (optional): the expected dtype of data. useful when determining chunksize for array with same shape but different dtype.
+    This function use `dask` autochunking mechanism to determine the optimal
+    chunk size of an array. The difference between this and directly using
+    "auto" as chunksize is that it understands which dimensions are usually
+    chunked together with the help of `dim_grp`. It also support computing
+    chunks for custom `dtype` and explicit requirement of chunk size.
 
-    Returns:
-        dict: sizes of the chunks that optimize memory usage in parallel computing the key is the dimension, the value is the max chunk size
+    Parameters
+    ----------
+    arr : xr.DataArray
+        the input array to estimate for chunk size
+    dim_grp : list, optional
+        list of tuples specifying which dimensions are usually chunked together
+        during computation, for each tuple in the list, it is assumed that only
+        dimensions in the tuple will be chunked while all other dimensions in
+        the input `arr` will not be chunked, each dimensions in the input `arr`
+        should appear once and only once across the list, by default
+        [("frame",), ("height", "width")]
+    csize : int, optional
+        the desired space each chunk should occupy, specified in "MB", by
+        default 256
+    dtype : type, optional
+        the datatype of `arr` during actual computation in case that will be
+        different from the current `arr.dtype`, by default None
+
+    Returns
+    -------
+    chk : dict
+        dictionary mapping dimension names to chunk sizes
     """
     if dtype is not None:
         arr = arr.astype(dtype)
@@ -697,13 +760,39 @@ def get_optimal_chk(
     return chk_compute, chk_store_da
 
 
-def get_chunksize(arr):
+def get_chunksize(arr: xr.DataArray) -> dict:
+    """
+    Get chunk size of a `xr.DataArray`.
+
+    Parameters
+    ----------
+    arr : xr.DataArray
+        the input `xr.DataArray`
+
+    Returns
+    -------
+    chk : dict
+        dictionary mapping dimension names to chunk sizes
+    """
     dims = arr.dims
     sz = arr.data.chunksize
     return {d: s for d, s in zip(dims, sz)}
 
 
-def factors(x):
+def factors(x: int) -> List[int]:
+    """
+    Compute all factors of an interger.
+
+    Parameters
+    ----------
+    x : int
+        input
+
+    Returns
+    -------
+    factors : List[int]
+        list of factors of `x`
+    """
     return [i for i in range(1, x + 1) if x % i == 0]
 
 
@@ -722,6 +811,17 @@ ANNOTATIONS = {
     "update_temporal_block": {"resources": {"MEM": 1}},
     "merge_restricted": {"resources": {"MEM": 1}},
 }
+"""
+Dask annotations that should be applied to each task.
+
+This is a `dict` mapping task names (actually patterns) to a `dict` of dask
+annotations that should be applied to the tasks. It is mainly used to constrain
+number of tasks that can be concurrently in memory for each worker.
+
+See Also
+-------
+:doc:`distributed:resources`
+"""
 
 FAST_FUNCTIONS = [
     darr.core.getter_inline,
@@ -734,9 +834,22 @@ FAST_FUNCTIONS = [
     darr.core._vindex_merge,
     darr.core._vindex_transpose,
 ]
+"""
+List of fast functions that should be inlined during optimization.
+
+See Also
+-------
+:doc:`dask:optimize`
+"""
 
 
 class TaskAnnotation(SchedulerPlugin):
+    """
+    Custom `SchedulerPlugin` that implemented per-task level annotation. The
+    annotations are applied according to the module constant
+    :const:`ANNOTATIONS`.
+    """
+
     def __init__(self) -> None:
         super().__init__()
         self.annt_dict = ANNOTATIONS
@@ -758,14 +871,47 @@ class TaskAnnotation(SchedulerPlugin):
 
 
 def custom_arr_optimize(
-    dsk,
-    keys,
-    fast_funcs=FAST_FUNCTIONS,
+    dsk: dict,
+    keys: list,
+    fast_funcs: list = FAST_FUNCTIONS,
     inline_patterns=[],
-    rename_dict=None,
-    rewrite_dict=None,
+    rename_dict: Optional[dict] = None,
+    rewrite_dict: Optional[dict] = None,
     keep_patterns=[],
-):
+) -> dict:
+    """
+    Customized implementation of array optimization function.
+
+    Parameters
+    ----------
+    dsk : dict
+        input dask task graph
+    keys : list
+        output task keys
+    fast_funcs : list, optional
+        list of fast functions to be inlined, by default :const:`FAST_FUNCTIONS`
+    inline_patterns : list, optional
+        list of patterns of task keys to be inlined, by default []
+    rename_dict : dict, optional
+        dict mapping old task keys to new ones, only used during fusing of
+        tasks, by default None
+    rewrite_dict : dict, optional
+        dict mapping old task key substrings to new ones, applied at the end of
+        optimization to all task keys, by default None
+    keep_patterns : list, optional
+        list of patterns of task keys that should be preserved during
+        optimization, by default []
+
+    Returns
+    -------
+    dsk : dict
+        optimized dask graph
+
+    See Also
+    -------
+    :doc:`dask:optimize`
+    `dask.array.optimization.optimize`
+    """
     # inlining lots of array operations ref:
     # https://github.com/dask/dask/issues/6668
     if rename_dict:
@@ -796,7 +942,28 @@ def custom_arr_optimize(
     return dsk
 
 
-def rewrite_key(key, rwdict):
+def rewrite_key(key: Union[str, tuple], rwdict: dict) -> str:
+    """
+    Rewrite a task key according to `rwdict`.
+
+    Parameters
+    ----------
+    key : Union[str, tuple]
+        input task key
+    rwdict : dict
+        dictionary mapping old task key substring to new ones, all keys in this
+        dictionary that exists in input `key` will be substituted
+
+    Returns
+    -------
+    key : str
+        the new key
+
+    Raises
+    ------
+    ValueError
+        if input `key` is neither `str` or `tuple`
+    """
     typ = type(key)
     if typ is tuple:
         k = key[0]
@@ -814,11 +981,33 @@ def rewrite_key(key, rwdict):
         return k
 
 
-def custom_fused_keys_renamer(keys, max_fused_key_length=120, rename_dict=None):
-    """Create new keys for ``fuse`` tasks.
+def custom_fused_keys_renamer(
+    keys: list, max_fused_key_length=120, rename_dict: Optional[dict] = None
+) -> str:
+    """
+    Custom implmentation to create new keys for `fuse` tasks.
 
-    The optional parameter `max_fused_key_length` is used to limit the maximum string length for each renamed key.
-    If this parameter is set to `None`, there is no limit.
+    Uses custom `split_key` implementation.
+
+    Parameters
+    ----------
+    keys : list
+        list of task keys that should be fused together
+    max_fused_key_length : int, optional
+        used to limit the maximum string length for each renamed key, if `None`,
+        there is no limit, by default 120
+    rename_dict : dict, optional
+        dictionary used to rename keys during fuse, by default None
+
+    Returns
+    -------
+    fused_key : str
+        the fused task key
+
+    See Also
+    -------
+    split_key
+    dask.optimization.fuse
     """
     it = reversed(keys)
     first_key = next(it)
@@ -851,7 +1040,24 @@ def custom_fused_keys_renamer(keys, max_fused_key_length=120, rename_dict=None):
         return (_enforce_max_key_limit(concatenated_name),) + first_key[1:]
 
 
-def split_key(key, rename_dict=None):
+def split_key(key: Union[tuple, str], rename_dict: Optional[dict] = None) -> str:
+    """
+    Split, rename and filter task keys.
+
+    This is custom implementation that only keeps keys found in :const:`ANNOTATIONS`.
+
+    Parameters
+    ----------
+    key : Union[tuple, str]
+        the input task key
+    rename_dict : dict, optional
+        dictionary used to rename keys, by default None
+
+    Returns
+    -------
+    new_key : str
+        new key
+    """
     if type(key) is tuple:
         key = key[0]
     kls = key.split("-")
@@ -864,21 +1070,72 @@ def split_key(key, rename_dict=None):
         return kls[0]
 
 
-def check_key(key, pat):
+def check_key(key: Union[str, tuple], pat: str) -> bool:
+    """
+    Check whether `key` contains pattern.
+
+    Parameters
+    ----------
+    key : Union[str, tuple]
+        input key, if `tuple` then the first element will be used to check
+    pat : str
+        pattern to check
+
+    Returns
+    -------
+    bool
+        whether `key` contains pattern
+    """
     try:
         return bool(re.search(pat, key))
     except TypeError:
         return bool(re.search(pat, key[0]))
 
 
-def check_pat(key, pat_ls):
+def check_pat(key: Union[str, tuple], pat_ls: List[str]) -> bool:
+    """
+    Check whether `key` contains any pattern in a list.
+
+    Parameters
+    ----------
+    key : Union[str, tuple]
+        input key, if `tuple` then the first element will be used to check
+    pat_ls : List[str]
+        list of pattern to check
+
+    Returns
+    -------
+    bool
+        whether `key` contains any pattern in the list
+    """
     for pat in pat_ls:
         if check_key(key, pat):
             return True
     return False
 
 
-def inline_pattern(dsk, pat_ls, inline_constants):
+def inline_pattern(dsk: dict, pat_ls: List[str], inline_constants: bool) -> dict:
+    """
+    Inline tasks whose keys match certain patterns.
+
+    Parameters
+    ----------
+    dsk : dict
+        input dask graph
+    pat_ls : List[str]
+        list of patterns to check
+    inline_constants : bool
+        whether to inline constants
+
+    Returns
+    -------
+    dsk : dict
+        dask graph with keys inlined
+
+    See Also
+    -------
+    dask.optimization.inline
+    """
     keys = [k for k in dsk.keys() if check_pat(k, pat_ls)]
     if keys:
         dsk = inline(dsk, keys, inline_constants=inline_constants)
@@ -889,7 +1146,30 @@ def inline_pattern(dsk, pat_ls, inline_constants):
     return dsk
 
 
-def custom_delay_optimize(dsk, keys, fast_functions=[], inline_patterns=[], **kwargs):
+def custom_delay_optimize(
+    dsk: dict, keys: list, fast_functions=[], inline_patterns=[], **kwargs
+) -> dict:
+    """
+    Custom optimization functions for delayed tasks.
+
+    By default only fusing of tasks will be carried out.
+
+    Parameters
+    ----------
+    dsk : dict
+        input dask task graph
+    keys : list
+        output task keys
+    fast_functions : list, optional
+        list of fast functions to be inlined, by default []
+    inline_patterns : list, optional
+        list of patterns of task keys to be inlined, by default []
+
+    Returns
+    -------
+    dsk : dict
+        optimized dask graph
+    """
     dsk, _ = fuse(ensure_dict(dsk), rename_keys=custom_fused_keys_renamer)
     if inline_patterns:
         dsk = inline_pattern(dsk, inline_patterns, inline_constants=False)
@@ -902,7 +1182,23 @@ def custom_delay_optimize(dsk, keys, fast_functions=[], inline_patterns=[], **kw
     return dsk
 
 
-def unique_keys(keys):
+def unique_keys(keys: list) -> np.ndarray:
+    """
+    Returns only unique keys in a list of task keys.
+
+    Dask task keys regarding arrays are usually tuples representing chunked
+    operations. This function ignore different chunks and only return unique keys.
+
+    Parameters
+    ----------
+    keys : list
+        list of dask keys
+
+    Returns
+    -------
+    unique : np.ndarray
+        unique keys
+    """
     new_keys = []
     for k in keys:
         if isinstance(k, tuple):
@@ -912,7 +1208,26 @@ def unique_keys(keys):
     return np.unique(new_keys)
 
 
-def get_keys_pat(pat, keys, return_all=False):
+def get_keys_pat(pat: str, keys: list, return_all=False) -> Union[list, str]:
+    """
+    Filter a list of task keys by pattern.
+
+    Parameters
+    ----------
+    pat : str
+        pattern to check
+    keys : list
+        list of keys to be filtered
+    return_all : bool, optional
+        whether to return all keys matching `pat`, if `False` then only the
+        first match will be returned, by default False
+
+    Returns
+    -------
+    keys : Union[list, str]
+        if `return_all` is `True` then a list of keys will be returned,
+        otherwise only one key will be returned
+    """
     keys_filt = list(filter(lambda k: check_key(k, pat), list(keys)))
     if return_all:
         return keys_filt
@@ -920,7 +1235,22 @@ def get_keys_pat(pat, keys, return_all=False):
         return keys_filt[0]
 
 
-def optimize_chunk(arr, chk):
+def optimize_chunk(arr: xr.DataArray, chk: dict) -> xr.DataArray:
+    """
+    Rechunk a `xr.DataArray` with constrained "rechunk-merge" tasks.
+
+    Parameters
+    ----------
+    arr : xr.DataArray
+        the array to be rechunked
+    chk : dict
+        the desired chunk size
+
+    Returns
+    -------
+    arr_chk : xr.DataArray
+        the rechunked array
+    """
     fast_funcs = FAST_FUNCTIONS + [darr.core.concatenate3]
     arr_chk = arr.chunk(chk)
     arr_opt = fct.partial(
@@ -933,7 +1263,34 @@ def optimize_chunk(arr, chk):
     return arr_chk
 
 
-def local_extreme(fm, k, etype="max", diff=0):
+def local_extreme(fm: np.ndarray, k: np.ndarray, etype="max", diff=0) -> np.ndarray:
+    """
+    Find local extreme of a 2d array.
+
+    Parameters
+    ----------
+    fm : np.ndarray
+        the input 2d array
+    k : np.ndarray
+        structuring element defining the locality of the result, passed as
+        `kernel` to `cv2.erode` and `cv2.dilate`
+    etype : str, optional
+        type of local extreme, either "min" or "max", by default "max"
+    diff : int, optional
+        threshold of difference between local extreme and its neighbours, by
+        default 0
+
+    Returns
+    -------
+    fm_ext : np.ndarray
+        the returned 2d array whose non-zero elements represent the location of
+        local extremes
+
+    Raises
+    ------
+    ValueError
+        if `etype` is not "min" or "max"
+    """
     fm_max = cv2.dilate(fm, k)
     fm_min = cv2.erode(fm, k)
     fm_diff = ((fm_max - fm_min) > diff).astype(np.uint8)
