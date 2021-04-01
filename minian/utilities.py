@@ -8,7 +8,7 @@ from os import listdir
 from os.path import isdir
 from os.path import join as pjoin
 from pathlib import Path
-from typing import Union, Optional, Callable
+from typing import Callable, List, Optional, Union
 from uuid import uuid4
 
 import _operator
@@ -369,14 +369,67 @@ def open_minian(
 
 
 def open_minian_mf(
-    dpath,
-    index_dims,
+    dpath: str,
+    index_dims: List[str],
     result_format="xarray",
-    pattern=r"minian\.[0-9]+$",
-    sub_dirs=[],
+    pattern=r"minian$",
+    sub_dirs: List[str] = [],
     exclude=True,
     **kwargs,
-):
+) -> Union[xr.Dataset, pd.DataFrame]:
+    """
+    Open multiple minian datasets across multiple directories.
+
+    This function recursively walks through directories under `dpath` and try to
+    load minian datasets from all directories matching `pattern`. It will then
+    combine them based on `index_dims` into either a `xr.Dataset` object or a
+    `pd.DataFrame`. Optionally a subset of paths can be specified, so that
+    they can either be excluded or white-listed.
+
+    Parameters
+    ----------
+    dpath : str
+        the root folder containing all datasets to be loaded
+    index_dims : List[str]
+        list of dimensions that can be used to index and merge multiple
+        datasets, all loaded datasets should have unique coordinates in the
+        listed dimensions
+    result_format : str, optional
+        if "xarray", the result will be merged together recursively along each
+        dimensions listed in `index_dims`, users should make sure the
+        coordinates are compatible and the merging will not cause generation of
+        large NaN-padded results, if "pandas", then a `pd.DataFrame` is
+        returned, with columns corresponding to `index_dims` uniquely identify
+        each dataset, and an additional column named "minian" of object dtype
+        pointing to the loaded minian dataset objects, by default "xarray"
+    pattern : regexp, optional
+        pattern of minian dataset directory names, by default r"minian$"
+    sub_dirs : List[str], optional
+        a list of sub-directories under `dpath`, useful if only a subset of
+        datasets under `dpath` should be recursively loaded, by default []
+    exclude : bool, optional
+        whether to exclude directories listed under `sub_dirs`, if `True`, then
+        any minian datasets under those specified in `sub_dirs` will be ignored,
+        if `False`, then **only** the datasets under those specified in
+        `sub_dirs` will be loaded (they still have to be under `dpath` though),
+        by default True
+
+    Returns
+    -------
+    ds : Union[xr.Dataset, pd.DataFrame]
+        the resulting combined datasets, if `result_format` is "xarray", then a
+        `xr.Dataset` will be returned, otherwise a `pd.DataFrame` will be
+        returned
+
+    Raises
+    ------
+    NotImplementedError
+        if `result_format` is not "xarray" or "pandas"
+
+    See Also
+    -------
+    open_minian
+    """
     minian_dict = dict()
     for nextdir, dirlist, filelist in os.walk(dpath, topdown=False):
         nextdir = os.path.abspath(nextdir)
@@ -412,29 +465,71 @@ def open_minian_mf(
 
 
 def save_minian(
-    var,
-    dpath,
-    meta_dict=None,
+    var: xr.DataArray,
+    dpath: str,
+    meta_dict: Optional[dict] = None,
     overwrite=False,
-    chunks=None,
+    chunks: Optional[dict] = None,
     compute=True,
     mem_limit="500MB",
-):
+) -> xr.DataArray:
     """
-    Saves the data (var) in the format specified by the backend variable, in the location specified by dpath under the name ‘minian’, if overwrite True
-    Args:
-        var (xarray.DataArray): data to be saved
-        dpath (str): path where to save the data
-        fname (str, optional): output file name. Defaults to 'minian'.
-        backend (str, optional): file storage format. Defaults to 'netcdf'.
-        meta_dict (dict, optional): metadata for example {‘animal’: -3, ‘session’: -2, ‘session_id’: -1}. Key value pair. Defaults to None.
-        overwrite (bool, optional): if true overwrites a file in the same location with the same name. Defaults to False.
+    Save a `xr.DataArray` with `zarr` storage backend following minian
+    conventions.
 
-    Raises:
-        NotImplementedError
+    This function will store arbitrary `xr.DataArray` into `dpath` with `zarr`
+    backend. A separate folder will be created under `dpath`, with folder name
+    `var.name + ".zarr"`. Optionally metadata can be retrieved from directory
+    hierarchy and added as coordinates of the `xr.DataArray`. In addition, an
+    on-disk rechunking of the result can be performed using `rechunker` if
+    `chunks` are given.
 
-    Returns:
-        xarray.DataArray: the saved var xarray.DataArray
+    Parameters
+    ----------
+    var : xr.DataArray
+        the array to be saved
+    dpath : str
+        the path to the minian dataset directory
+    meta_dict : dict, optional
+        how metadata should be retrieved from directory hierarchy, the keys
+        should be negative integers representing directory level relative to
+        `dpath` (so `-1` means the immediate parent directory of `dpath`), and
+        values should be the name of dimensions represented by the corresponding
+        level of directory, the actual coordinate value of the dimensions will
+        be the directory name of corresponding level, by default None
+    overwrite : bool, optional
+        whether to overwrite the result on disk, by default False
+    chunks : dict, optional
+        a dictionary specifying the desired chunk size, the chunk size should be
+        specified using :doc:`dask:array-chunks` convention, except the "auto"
+        specifiication is not supported, the rechunking operation will be
+        carried out with on-disk algorithms using `rechunker`, by default None
+    compute : bool, optional
+        whether to compute `var` and save it immediately, by default True
+    mem_limit : str, optional
+        the memory limit for the on-disk rechunking algorithm, only used if
+        `chunks` is not `None`, by default "500MB"
+
+    Returns
+    -------
+    var : xr.DataArray
+        the array representation of saving result, if `compute` is `True`, then
+        the returned array will only contain delayed task of loading the on-disk
+        `zarr` arrays, otherwise all computation leading to the input `var` will
+        be preserved in the result
+
+    Examples
+    -------
+    The following will save the variable `var` to directory
+    `/spatial_memory/alpha/learning1/minian/important_array.zarr`, with the
+    additional coordinates: {"session": "learning1", "animal": "alpha",
+    "experiment": "spatial_memory"}.
+
+    >>> save_minian(
+    ...     var.rename("important_array"),
+    ...     "/spatial_memory/alpha/learning1/minian",
+    ...     {-1: "session", -2: "animal", -3: "experiment"},
+    ... )
     """
     dpath = os.path.normpath(dpath)
     Path(dpath).mkdir(parents=True, exist_ok=True)

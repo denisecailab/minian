@@ -67,6 +67,7 @@ intersphinx_mapping = {
     "sparse": ("https://sparse.pydata.org/en/stable/", None),
     "networkx": ("https://networkx.org/documentation/stable/", None),
     "zarr": ("https://zarr.readthedocs.io/en/stable/", None),
+    "dask": ("https://docs.dask.org/en/latest/", None),
 }
 
 ref_aliases = {
