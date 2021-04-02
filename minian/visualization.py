@@ -633,7 +633,7 @@ class CNMFViewer:
                 options=usub + [-1] + ulabs.tolist(),
                 value=ulb,
                 height=50,
-                width=100,
+                width=80,
             )
             for uid, ulb in zip(usub, ulabs)
         }
@@ -662,7 +662,7 @@ class CNMFViewer:
             cb = fct.partial(callback_chk, uid=uid)
             chk.param.watch(cb, "value")
         wgt_discard = pnwgt.Button(
-            name="Discard Selected", button_type="primary", width=200
+            name="Discard Selected", button_type="primary", width=180
         )
 
         def callback_discard(clicks):
@@ -671,7 +671,7 @@ class CNMFViewer:
 
         wgt_discard.param.watch(callback_discard, "clicks")
         wgt_merge = pnwgt.Button(
-            name="Merge Selected", button_type="primary", width=200
+            name="Merge Selected", button_type="primary", width=180
         )
 
         def callback_merge(clicks):
