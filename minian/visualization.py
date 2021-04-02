@@ -2,6 +2,7 @@ import functools as fct
 import itertools as itt
 import os
 from collections import OrderedDict
+from typing import List, Optional, Union
 from uuid import uuid4
 
 import colorcet as cc
@@ -39,34 +40,94 @@ from scipy.spatial import cKDTree
 
 from .cnmf import compute_AtC
 from .motion_correction import apply_shifts
-from .utilities import rechunk_like, custom_arr_optimize
+from .utilities import custom_arr_optimize, rechunk_like
 
 
 class VArrayViewer:
     """
-    This function creates an interactive figure where the data array is displayed as a movie. In the interactive figure, the user can draw an arbitrary box in the field of view and record this box as a mask using the "save mask" button
-        Args:
-            varr (xarray.DataArray): xarray.DataArray a labeled 3-d array representation of the videos with dimensions: frame, height and width.
-            framerate (int, optional): Acquisition frame rate. Defaults to 30.
-            rerange (dict, optional): the range by which the array will be color-mapped. Useful if the movie is visually too dim. Defaults to None. which would use the full range of the array.
-            summary (list, optional): [operation to perform on the data]. Defaults to ["mean"].
-            meta_dims (list, optional): List of metadata dimensions that defines each array if a list of arrays is passed in as `varr`. Defaults to None.
-            datashading (bool, optional): Use datashading yes or no. Defaults to True (yes).
-            layout (bool, optional): If set the output image will be boxed. Defaults to False.
+    Interactive visualization for movie data arrays.
 
-        Raises:
-            NotImplementedError
+    Hint
+    ----
+    .. figure:: img/vaviewer.png
+        :width: 500px
+        :align: left
+
+    The visualization contains following panels from top to bottom:
+
+    Play Toolbar
+        A toolbar that controls playback of the video. Additionally, when the
+        button "Update Mask" is clicked, the coordinates of the box drawn in
+        *Current Frame* panel will be used to update the `mask` attribute of the
+        `VArrayViewer` instance, which can be later used to subset the data. If
+        multiple arrays are visualized and `layout` is `False`, then drop-down
+        lists corresponding to each metadata dimensions will show up so the user
+        can select which array to visualize.
+    Current Frame
+        Images of the current frame. If multiple movie array are passed in,
+        multiple frames will be labeled and shown. To the side of each frame
+        there is a histogram of intensity values. The "Box Select" tool can be
+        used on the histogram to limit the range of intensity used for
+        color-mapping. Additionally, the "Box Edit Tool" is available for use on
+        the frame image, where you can hold "Shift" and draw a box, whose
+        coordinates can be used to update the `mask` attribute of the
+        `VarrayViewer` instance (remember to click "Update Mask" after drawing).
+    Summary
+        Summary statistics of each frame across time. Only shown if `summary` is
+        not empty. The red vertical line indicate current frame.
+
+    Attributes
+    ----------
+    mask : dict
+        instance attribute that can be retrieved and used to subset data later,
+        keys are `tuple` with values corresponding to each `meta_dims` and
+        uniquely identify each input array, if `meta_dims` is empty then keys
+        will be empty `tuple` as well, values are `dict` mapping dimension names
+        (of the arrays) to subsetting slices, the slices are in the plotting
+        coorandinates and can be directly passed to `xr.DataArray.sel` method to
+        subset data
     """
 
     def __init__(
         self,
-        varr,
+        varr: Union[xr.DataArray, List[xr.DataArray], xr.Dataset],
         framerate=30,
         summary=["mean"],
-        meta_dims=None,
+        meta_dims: List[str] = None,
         datashading=True,
         layout=False,
     ):
+        """
+        Parameters
+        ----------
+        varr : Union[xr.DataArray, List[xr.DataArray], xr.Dataset]
+            input array, list of arrays, or dataset to be visualized, each array
+            should contain dimensions "height", "width" and "frame", if a
+            dataset, then the dimensions specified in `meta_dims` will be used
+            as metadata dimensions that can uniquely identify each array, if a
+            list, then a dimension "data_var" will be constructed and used as
+            metadata dimension, and the `.name` attribute of each array will be
+            used to identify each array
+        framerate : int, optional
+            the framerate of playback when using the toolbar, by default 30
+        summary : list, optional
+            list of summary statistics to plot, the statistics should be one of
+            `{"mean", "max", "min", "diff"}`, by default ["mean"]
+        meta_dims : List[str], optional
+            list of dimension names that can uniquely identify each input array
+            in `varr`, only used if `varr` is a `xr.Dataset`, by default None
+        datashading : bool, optional
+            whether to use datashading on the summary statistics, by default True
+        layout : bool, optional
+            whether to visualize all arrays together as layout, if `False` then
+            only one array will be visualized and user can switch array using
+            drop-down lists below the *Play Toolbar*, by default False
+
+        Raises
+        ------
+        NotImplementedError
+            if `varr` is not a `xr.DataArray`, a `xr.Dataset` or a list of `xr.DataArray`
+        """
         if isinstance(varr, list):
             for iv, v in enumerate(varr):
                 varr[iv] = v.assign_coords(data_var=v.name)
@@ -209,12 +270,14 @@ class VArrayViewer:
             hvobj = ims
         return hvobj
 
-    def show(self):
+    def show(self) -> pn.layout.Column:
         """
-        Refreshes viewer content with the new frame
+        Return visualizations that can be directly displayed.
 
-        Returns:
-            panel.layout.Column
+        Returns
+        -------
+        pn.layout.Column
+            resulting visualizations containing both plots and toolbars
         """
         return pn.layout.Column(self.widgets, self.pnplot)
 
@@ -273,18 +336,117 @@ class VArrayViewer:
 
 class CNMFViewer:
     """
-    This class creates a figure to visualize the results of the CNMF
+    Interactive visualization for CNMF results.
 
-    Args:
-        minian (string, optional): folder under which the actual code of minian (.py files) reside. Defaults to None.
-        A (xarray.DataArray, optional): spatial footprint of each unit. Defaults to None.
-        C (xarray.DataArray, optional): temporal activity of a unit, i.e. neuron. Defaults to None.
-        S (xarray.DataArray, optional): . Defaults to None.
-        org (xarray.DataArray, optional): raw video after pre-processing and motion correction. Defaults to None.
-        sortNN (bool, optional): whether to sort cells based on nearest neighbor, so that cells that are spatially together will likely be displayed together. Defaults to True.
+    Hint
+    ----
+    .. figure:: img/cnmfviewer.png
+        :width: 1000px
+
+    The visualization can be divided into two parts vertically:
+
+    Spatial
+        Top part of the visualization. Shows spatial plots at a given time. From
+        left to right:
+
+        Spatial Footprints
+            Shows the spatial footprints of all cells. The "Box Select" tool can
+            be used in this panel to select a subset of cells to visualize for
+            both the *Isolated Activities* panel and the *Temporal Activities*
+            panel.
+        Isolated Activities
+            Shows activities of selected cells only. If the "UseAC" checkbox
+            under *General Toolbox* is enabled, then the `AtC` variable computed
+            with the selected cells will be visualized at the given frame (See
+            :func:`minian.cnmf.compute_AtC`). Otherwise the spatial footprints
+            of the cells will be plotted, which would be invariant across time.
+            The "unit_id" coordinates for each cell are shown on top of each
+            cell.
+        Original Movie
+            Shows a single frame of an arbitrary movie data supplied in `org`.
+
+    Temporal
+        Bottom part of the visualization. Shows temporal activities across time
+        and various toolboxes. From left to right:
+
+        General Toolbox
+            Contains the following tools:
+
+            * "Refresh" button, will refresh all visualization when clicked.
+            * "Load Data" button, will load all data in memory for faster
+              visualization, can be very memory-demanding.
+            * "UseAC" checkbox, whether to plot spatial-temporal activities for
+              the *Isolated Activities* panel.
+            * "ShowC", "ShowS", "Normalize" checkboxes, whether to show the
+              calcium traces, the spike signals, or to normalize both traces
+              to unit range for each cell.
+            * "Group" dropbox, "Previous Group" and "Next Group" buttons, select
+              the group of cells to visualize. The grouping is controled by
+              `sortNN` parameter.
+            * Playback toolbar, used to control which timepoint is visualized.
+            * Additional metadata dropdown, if the input dataset contains
+              additional metadata dimensions then dropdown will show up so
+              user can select which dataset to visualize.
+        Temporal Activities
+            Shows temporal activities of selected subset of cells. The red
+            vertical line indicate current frame. Additionally user can
+            double-click anywhere in the plot to move current frame to that
+            location.
+        Manual Label
+            Shows tools to carry out manual labeling of cells. User can either
+            manually assign unit label using the dropdown for each cell, or
+            select some cells with the checkboxes corresponding to the
+            "unit_id", and then merge or discard the units using the buttons.
+            The "Unit Label" dropdowns should update and refelect the merging or
+            discarding actions.
+
+    Attributes
+    ----------
+    unit_labels : xr.DataArray
+        1d array whose values represent the result of manual refinement of
+        cells, the "unit_id" coordinate of this array is identical to input
+        data, the values of this array can be interpreted as new "unit_id" after
+        the manual refinement, where duplicated values indicate merged cells,
+        and values of -1 indicate discarded cells
     """
 
-    def __init__(self, minian=None, A=None, C=None, S=None, org=None, sortNN=True):
+    def __init__(
+        self,
+        minian: Optional[xr.Dataset] = None,
+        A: Optional[xr.DataArray] = None,
+        C: Optional[xr.DataArray] = None,
+        S: Optional[xr.DataArray] = None,
+        org: Optional[xr.DataArray] = None,
+        sortNN=True,
+    ):
+        """
+        Parameters
+        ----------
+        minian : xr.Dataset, optional
+            input minian dataset containing all necessary variables, if `None`
+            then all other arguments should be supplied, by default None
+        A : xr.DataArray, optional
+            spatial footprints of cells, if `None` then it will be retrieved as
+            `minian["A"]`, by default None
+        C : xr.DataArray, optional
+            calcium dynamic of cells, if `None` then it will be retrieved as
+            `minian["C"]`, by default None
+        S : xr.DataArray, optional
+            deconvolved spikes of cells, if `None` then it will be retrieved as
+            `minian["S"]`, by default None
+        org : xr.DataArray, optional
+            arbitrary movie data to be visualized along with results of CNMF, if
+            `None` then it will be retrieved as `minian["org"]`, by default None
+        sortNN : bool, optional
+            whether to sort the units by nearest neighbor so that cells close
+            together will appear in same group for visualization, if `False`
+            then cells are simply grouped in 5 by ascending "unit_id", by
+            default True
+
+        See Also
+        --------
+        NNsort
+        """
         self._A = A if A is not None else minian["A"]
         self._C = C if C is not None else minian["C"]
         self._S = S if S is not None else minian["S"]
@@ -466,7 +628,15 @@ class CNMFViewer:
             *(list(wgt_meta.values()) + [wgt_update, wgt_load]), width=150
         )
 
-    def show(self):
+    def show(self) -> pn.layout.Column:
+        """
+        Return visualizations that can be directly displayed.
+
+        Returns
+        -------
+        pn.layout.Column
+            resulting visualizations containing both plots and toolboxes
+        """
         return pn.layout.Column(
             self.spatial_all,
             pn.layout.Row(

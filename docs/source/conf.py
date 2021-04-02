@@ -53,8 +53,9 @@ extensions = [
 ]
 
 napoleon_use_rtype = False
+napoleon_use_ivar = True
 autodoc_typehints = "none"
-autodoc_mock_imports = ["dask"]
+autoclass_content = "both"
 
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3/", None),
@@ -73,6 +74,7 @@ intersphinx_mapping = {
 
 ref_aliases = {
     "xr.DataArray": ("xarray.DataArray", "xr.DataArray"),
+    "xr.Dataset": ("xarray.Dataset", "xr.Dataset"),
     "np.ndarray": ("numpy.ndarray", "np.ndarray"),
     "pd.DataFrame": ("pandas.DataFrame", "pd.DataFrame"),
     "nx.Graph": ("networkx.Graph", "nx.Graph"),
