@@ -62,7 +62,6 @@ class VArrayViewer:
         self,
         varr,
         framerate=30,
-        rerange=None,
         summary=["mean"],
         meta_dims=None,
         datashading=True,
@@ -98,7 +97,6 @@ class VArrayViewer:
         self._h = self.ds.sizes["height"]
         self._w = self.ds.sizes["width"]
         self.mask = dict()
-        self.rerange = rerange
         CStream = Stream.define(
             "CStream",
             f=param.Integer(
@@ -150,8 +148,6 @@ class VArrayViewer:
             im = hv.DynamicMap(fim, streams=[self.strm_f]).opts(
                 frame_width=500, aspect=self._w / self._h, cmap="Viridis"
             )
-            if self.rerange:
-                im = im.redim.range(**{vname: self.rerange})
             self.xyrange = RangeXY(source=im).rename(x_range="w", y_range="h")
             if not self._layout:
                 hv_box = hv.Polygons([]).opts(
