@@ -208,9 +208,9 @@ class VArrayViewer:
             summ = (hvsum * vl).map(
                 lambda p: p.opts(frame_width=500, aspect=3), [hv.RGB, hv.Curve]
             )
+            hvobj = (ims + summ).cols(1)
         else:
-            summ = hv.Div("")
-        hvobj = (ims + summ).cols(1)
+            hvobj = ims
         return hvobj
 
     def show(self):
