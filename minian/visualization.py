@@ -972,15 +972,7 @@ class AlignViewer:
         self.mappings = mappings
         self.shiftds = shiftds
         self.brt_offset = brt_offset
-        A = self.minian_ds["A"].chunk(
-            {
-                "animal": 1,
-                "session": "auto",
-                "height": -1,
-                "width": -1,
-                "unit_id": "auto",
-            }
-        )
+        A = self.minian_ds["A"]
         self.shifts = rechunk_like(self.shiftds["shifts"], A)
         self.Ash = apply_shifts(A, self.shifts, fill=0)
         # option widgets
@@ -996,16 +988,23 @@ class AlignViewer:
         self.wgt_opt = pn.layout.WidgetBox(wgt_er, wgt_ma, wgt_uma)
         self.processA()
         # handling meta
-        self.meta_dict = {
-            col: c.unique().tolist() for col, c in mappings["meta"].iteritems()
-        }
-        self.meta = {d: v[0] for d, v in self.meta_dict.items()}
-        wgt_meta = [
-            pnwgt.Select(name=dim, options=vals) for dim, vals in self.meta_dict.items()
-        ]
-        for w in wgt_meta:
-            w.param.watch(lambda v, n=w.name: self.cb_update_meta(n, v), "value")
-        self.wgt_meta = pn.layout.WidgetBox(*wgt_meta)
+        try:
+            self.meta_dict = {
+                col: c.unique().tolist() for col, c in mappings["meta"].iteritems()
+            }
+        except KeyError:
+            self.meta_dict = None
+        if self.meta_dict:
+            self.meta = {d: v[0] for d, v in self.meta_dict.items()}
+            wgt_meta = [
+                pnwgt.Select(name=dim, options=vals)
+                for dim, vals in self.meta_dict.items()
+            ]
+            for w in wgt_meta:
+                w.param.watch(lambda v, n=w.name: self.cb_update_meta(n, v), "value")
+            self.wgt_meta = pn.layout.WidgetBox(*wgt_meta)
+        else:
+            self.wgt_meta = None
         self.update_meta()
         # sessionRGB
         sess = list(mappings["session"].columns)
@@ -1084,15 +1083,31 @@ class AlignViewer:
             "frame_height": self.curA.sizes["height"],
             "frame_width": self.curA.sizes["width"],
         }
-        return pn.panel(hv.RGB(im_ovly, kdims=["width", "height"]).opts(**im_opts))
+        return pn.panel(
+            hv.RGB(
+                (
+                    im_ovly.coords["width"],
+                    im_ovly.coords["height"],
+                    im_ovly[:, :, 0],
+                    im_ovly[:, :, 1],
+                    im_ovly[:, :, 2],
+                    im_ovly[:, :, 3],
+                ),
+                kdims=["width", "height"],
+            ).opts(**im_opts)
+        )
 
     def update_meta(self):
-        self.curA = self.dataA.sel(**self.meta).persist()
-        self.curmap = (
-            self.mappings.set_index([("meta", d) for d in self.meta.keys()])
-            .loc[tuple(self.meta.values())]
-            .reset_index()
-        )
+        if self.meta_dict:
+            self.curA = self.dataA.sel(**self.meta).persist()
+            self.curmap = (
+                self.mappings.set_index([("meta", d) for d in self.meta.keys()])
+                .loc[tuple(self.meta.values())]
+                .reset_index()
+            )
+        else:
+            self.curA = self.dataA.persist()
+            self.curmap = self.mappings
 
     def cb_update_erd(self, val):
         self.erode = val.new
