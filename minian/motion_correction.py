@@ -167,7 +167,7 @@ def est_motion_chunk(
     niter=100,
     bin_thres=None,
 ):
-    if varr.shape[0] == 1:
+    if varr.ndim == 3 and varr.shape[0] == 1:
         if sh_org is not None:
             motions = sh_org
         else:
