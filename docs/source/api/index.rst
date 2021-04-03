@@ -2,7 +2,7 @@ API Reference
 ==============
 
 .. toctree::
-   :maxdepth: 4
+   :maxdepth: 1
 
    minian.cnmf
    minian.cross_registration

@@ -55,6 +55,7 @@ extensions = [
 napoleon_use_rtype = False
 napoleon_use_ivar = True
 autodoc_typehints = "none"
+autodoc_member_order = "groupwise"
 autoclass_content = "both"
 
 intersphinx_mapping = {
@@ -70,6 +71,7 @@ intersphinx_mapping = {
     "zarr": ("https://zarr.readthedocs.io/en/stable/", None),
     "dask": ("https://docs.dask.org/en/latest/", None),
     "distributed": ("https://distributed.dask.org/en/latest/", None),
+    "ffmpeg": ("https://kkroening.github.io/ffmpeg-python/", None),
 }
 
 ref_aliases = {
@@ -77,6 +79,7 @@ ref_aliases = {
     "xr.Dataset": ("xarray.Dataset", "xr.Dataset"),
     "np.ndarray": ("numpy.ndarray", "np.ndarray"),
     "pd.DataFrame": ("pandas.DataFrame", "pd.DataFrame"),
+    "pd.Series": ("pandas.Series", "pd.Series"),
     "nx.Graph": ("networkx.Graph", "nx.Graph"),
 }
 
