@@ -167,6 +167,20 @@ def est_motion_chunk(
     niter=100,
     bin_thres=None,
 ):
+    if varr.shape[0] == 1:
+        if sh_org is not None:
+            motions = sh_org
+        else:
+            if mesh_size is not None:
+                # TODO handle non-rigid case
+                pass
+            else:
+                motions = np.array([0, 0])[np.newaxis, :]
+        if alt_error:
+            tmp = np.stack([varr[0]] * 3)
+        else:
+            tmp = varr[0]
+        return tmp, motions
     while varr.shape[0] > npart:
         part_idx = np.array_split(
             np.arange(varr.shape[0]), np.ceil(varr.shape[0] / npart)
