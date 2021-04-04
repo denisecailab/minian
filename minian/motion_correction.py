@@ -1,6 +1,7 @@
 import functools as fct
 import itertools as itt
 import warnings
+from typing import Optional, Tuple
 
 import cv2
 import dask as da
@@ -13,31 +14,126 @@ from skimage.registration import phase_cross_correlation
 from .utilities import custom_arr_optimize, xrconcat_recursive
 
 
-def estimate_motion(varr, dim="frame", npart=3, temp_nfm=None, **kwargs):
+def estimate_motion(
+    varr: xr.DataArray, dim="frame", npart=3, chunk_nfm: Optional[int] = None, **kwargs
+) -> xr.DataArray:
     """
-    Estimate the frame shifts
+    Estimate motion for each frame of the input movie data.
 
-    Args:
-        varr (xarray.DataArray): xarray.DataArray a labeled 3-d array representation of the videos with dimensions: frame, height and width.
-        max_sh (integer): maximum shift
-        dim (str, optional): name of the z-dimension, defaults to "frame".
-        npart (integer, optional): [the number of partitions of the divide-and-conquer algorithm]. Defaults to 3.
-        local (boolean, optional): [in case where there are multiple local maximum of the cross-correlogram, setting this to `True` will constraint the shift to be the one that’s closest to zero shift. i.e. this assumes the shifts are always small and local regardless of the correlation value]. Defaults to False.
+    This function estimates motion using a recursive approach. The movie is
+    splitted into chunks of `npart` frames and motion estimation is carried out
+    within each chunk relative to the middle frame, then a template is generated
+    for each chunk by aggregating the motion-corrected frames within each chunk.
+    Next, every `npart` chunks are grouped together, and motion estimation is
+    carried out within each group relative to the middle chunk using the
+    aggregated templates. The chunk-level motions are added on top of the
+    previous within-chunk level motions. This step is then repeated recursively
+    until we are left with a single chunk representing the full movie, at which
+    point the motion estimation is finished.
 
-    Returns:
-        xarray.DataArray: the estimated shifts
+    The motion estimation itself is carried out with fft-based phase correlation
+    by default. Alternatively, non-rigid motion correction can be carried out by
+    modelling the motion of each frame as translations of individual vertices of
+    a smooth BSpline mesh. The estimation of the translations can then be find
+    by gradient descent using correlation between frames as objective. This
+    feature is currently experimental. Additionally, various correction
+    procedures can be carry out to filter out frames not suited as template for
+    motion correction, or to correct for large false shifts when the quality of
+    templates are low.
+
+    Parameters
+    ----------
+    varr : xr.DataArray
+        Input movie data.
+    dim : str, optional
+        The dimension along which motion estimation should be carried out. By
+        default `"frame"`.
+    npart : int, optional
+        Number of frames/chunks to combine for the recursive algorithm. By
+        default `3`.
+    chunk_nfm : int, optional
+        Number of frames in each parallel task. Note that this only affects dask
+        graph construction, but not the recursion of the algorithm. If `None`
+        then the dask chunksize along `dim` will be used. By default `None`.
+
+    Keyword Arguments
+    -----------------
+    alt_error : float, optional
+        Error threshold between estimated shifts from two alternative methods,
+        specified in pixels. If not `None`, then for each chunk during
+        recursion, the first and last frame of that chunk will be returned in
+        addition to the aggregated template. And when estimating motion between
+        chunks, the estimation will be carried out twice: once using the
+        aggregated templates, once using the consecutive first/last frames
+        between chunks. The result of these two methods will then be compared.
+        If their absolute difference is larger than `alt_error`, then the result
+        with smaller absolute value (closer to zero shifts) will be used. This
+        is useful to correct for cases where activities of cells are sparse and
+        changing across chunks, leading to wrong features being matched in
+        aggregated templates. If `None` then no additional checking will be
+        performed. By default `5`.
+    aggregation : str, optional
+        How frames should be aggregated to generate the template for each chunk.
+        Should be either "mean" or "max". By default `"mean"`.
+    upsample : int, optional
+        The upsample factor passed to
+        :func:`skimage.registration.phase_cross_correlation` to achieve
+        sub-pixel accuracy.
+    circ_thres : float, optional
+        The circularity threshold to check whether a frame can serve as a good
+        template for estimating motion. If not `None`, then for each frame a
+        comparison image is computed using :func:`cv2.matchTemplate` between the
+        frame and zero-padded version (up to `max_sh`) using
+        `cv2.TM_SQDIFF_NORMED`. The comparison image of a good template should
+        only have `< 1` values around the center and the `< 1` region should be
+        circular. Hence the circularity defined as `4 * np.pi * (area /
+        (perimeter ** 2))` for the `< 1` region is computed, and any frame with
+        circularity smaller than `circ_thres` is excluded from propagation of
+        shifts and aggregation of templates. By default `None`.
+    max_sh : int, optional
+        Amount of zero padding when checking for the quality of frames,
+        specified in pixels. Only used if `circ_thres is not None`. See
+        `circ_thres` for more detail. By default `100`.
+    mesh_size : Tuple[int, int], optional
+        Number of control points for the BSpline mesh in each dimension,
+        specified in the order ("height", "width"). If not `None` then the
+        experimental non-rigid motion estimation is enabled. By default `None`
+    niter : int, optional
+        Max number of iteration for the gradient descent process of estimation
+        BSpline parameters. Only used if `mesh_size is not None`. By default
+        `100`.
+    bin_thres : int, optional
+        Intensity threshold for binarizing the frames. The binarized frame will
+        be used as masks for non-rigid motion estimation, where only pixels in
+        the mask will be used to evaluate the gradient during optimization.
+        Significantly improve performance but sacrifice accuracy of estimation
+        for dim regions. Only used if `mesh_size is not None`. By default
+        `None`.
+
+    Returns
+    -------
+    motion : xr.DataArray
+        Estimated motion for each frame. Has two dimensions `dim` and
+        `"shift_dim"` representing rigid shifts in each direction if `mesh_size
+        is None`, otherwise has four dimensions: `dim`, `"grid0"`, `"grid1"` and
+        `"shift_dim"` representing shifts for each mesh grid control point.
+
+    See Also
+    --------
+    :doc:`simpleitk:registrationOverview` :
+        for overview of the non-rigid estimation method
     """
     varr = varr.transpose(..., dim, "height", "width")
     loop_dims = list(set(varr.dims) - set(["height", "width", dim]))
     if npart is None:
         # by default use a npart that result in two layers of recursion
-        npart = max(3, int(np.ceil((varr.sizes[dim] / temp_nfm) ** (1 / 2))))
+        npart = max(3, int(np.ceil((varr.sizes[dim] / chunk_nfm) ** (1 / 2))))
     if loop_dims:
         loop_labs = [varr.coords[d].values for d in loop_dims]
         res_dict = dict()
         for lab in itt.product(*loop_labs):
             va = varr.sel({loop_dims[i]: lab[i] for i in range(len(loop_dims))})
-            vmax, sh = est_motion_part(va.data, npart, temp_nfm, **kwargs)
+            vmax, sh = est_motion_part(va.data, npart, chunk_nfm, **kwargs)
             if kwargs.get("mesh_size", None):
                 sh = xr.DataArray(
                     sh,
@@ -59,7 +155,7 @@ def estimate_motion(varr, dim="frame", npart=3, temp_nfm=None, **kwargs):
             res_dict[lab] = sh.assign_coords(**{k: v for k, v in zip(loop_dims, lab)})
         sh = xrconcat_recursive(res_dict, loop_dims)
     else:
-        vmax, sh = est_motion_part(varr.data, npart, temp_nfm, **kwargs)
+        vmax, sh = est_motion_part(varr.data, npart, chunk_nfm, **kwargs)
         if kwargs.get("mesh_size", None):
             sh = xr.DataArray(
                 sh,
@@ -81,23 +177,37 @@ def estimate_motion(varr, dim="frame", npart=3, temp_nfm=None, **kwargs):
     return sh
 
 
-def est_motion_part(varr, npart, temp_nfm, alt_error=5, **kwargs):
+def est_motion_part(
+    varr: darr.Array, npart: int, chunk_nfm: int, alt_error=5, **kwargs
+) -> Tuple[darr.Array, darr.Array]:
     """
-    Estimate the shift per frame
+    Construct dask graph for the recursive motion estimation algorithm.
 
-    Args:
-        varr (xarray.DataArray): xarray.DataArray a labeled 3-d array representation of the videos with dimensions: frame, height and width.
-        max_sh (integer): maximum shift
-        npart (integer): [the number of partitions of the divide-and-conquer algorithm].
-        local (boolean): [in case where there are multiple local maximum of the cross-correlogram, setting this to `True` will constraint the shift to be the one that’s closest to zero shift. i.e. this assumes the shifts are always small and local regardless of the correlation value].
+    Parameters
+    ----------
+    varr : darr.Array
+        Input dask array representing movie data.
+    npart : int
+        Number of frames/chunks to combine for the recursive algorithm.
+    chunk_nfm : int
+        Number of frames in each parallel task.
+    alt_error : int, optional
+        Error threshold between estimated shifts from two alternative methods,
+        specified in pixels. By default `5`.
 
-    Returns:
-        xarray.DataArray: the max shift per frame
-        xarray.DataArray: the shift per frame
+    Returns
+    -------
+    temps : darr.Array
+        Registration template for the movie.
+    shifts : darr.Array
+        Estimated motion.
+    See Also
+    --------
+    estimate_motion
     """
-    if temp_nfm is None:
-        temp_nfm = varr.chunksize[0]
-    varr = varr.rechunk((temp_nfm, None, None))
+    if chunk_nfm is None:
+        chunk_nfm = varr.chunksize[0]
+    varr = varr.rechunk((chunk_nfm, None, None))
     arr_opt = fct.partial(custom_arr_optimize, keep_patterns=["^est_motion_chunk"])
     if kwargs.get("mesh_size", None):
         param = get_bspline_param(varr[0].compute(), kwargs["mesh_size"])
@@ -155,18 +265,67 @@ def est_motion_part(varr, npart, temp_nfm, alt_error=5, **kwargs):
 
 
 def est_motion_chunk(
-    varr,
-    sh_org,
-    npart,
-    alt_error,
+    varr: np.ndarray,
+    sh_org: np.ndarray,
+    npart: int,
+    alt_error: float,
     aggregation="mean",
     upsample=100,
     max_sh=100,
-    circ_thres=None,
-    mesh_size=None,
+    circ_thres: Optional[float] = None,
+    mesh_size: Optional[Tuple[int, int]] = None,
     niter=100,
-    bin_thres=None,
-):
+    bin_thres: Optional[float] = None,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Carry out motion estimation per chunk.
+
+    Parameters
+    ----------
+    varr : np.ndarray
+        Input chunk of movie.
+    sh_org : np.ndarray
+        Original motions to be added upon.
+    npart : int
+        Number of frames/chunks to combine for the recursive algorithm.
+    alt_error : float
+        Error threshold between estimated shifts from two alternative methods,
+        specified in pixels.
+    aggregation : str, optional
+        How frames should be aggregated to generate the template. By default
+        `"mean"`.
+    upsample : int, optional
+        The upsample factor. By default `100`.
+    max_sh : int, optional
+        Amount of zero padding when checking for the quality of frames,
+        specified in pixels. By default `100`.
+    circ_thres : float, optional
+        The circularity threshold to check whether a frame can serve as a good
+        template for estimating motion. By default `None`.
+    mesh_size : Tuple[int, int], optional
+        Number of control points for the BSpline mesh in each dimension. By
+        default `None`.
+    niter : int, optional
+        Max number of iteration for the gradient descent process. By default `100`.
+    bin_thres : float, optional
+        Intensity threshold for binarizing the frames. By default `None`.
+
+    Returns
+    -------
+    tmp : np.ndarray
+        The template of current chunk for further motion estimation.
+    motions : np.ndarray
+        Motions between frames within the chunk.
+
+    Raises
+    ------
+    ValueError
+        if `aggregation` is not `"mean"` or `"max"`
+
+    See Also
+    --------
+    estimate_motion : for detailed explanation of parameters
+    """
     if varr.ndim == 3 and varr.shape[0] == 1:
         if sh_org is not None:
             motions = sh_org
@@ -315,8 +474,47 @@ def est_motion_chunk(
 
 
 def est_motion_perframe(
-    src, dst, upsample, src_ma=None, dst_ma=None, mesh_size=None, niter=100
-):
+    src: np.ndarray,
+    dst: np.ndarray,
+    upsample: int,
+    src_ma: Optional[np.ndarray] = None,
+    dst_ma: Optional[np.ndarray] = None,
+    mesh_size: Optional[Tuple[int, int]] = None,
+    niter=100,
+) -> np.ndarray:
+    """
+    Estimate motion given two frames.
+
+    Parameters
+    ----------
+    src : np.ndarray
+        The frame to be registered.
+    dst : np.ndarray
+        The destination frame of registration.
+    upsample : int
+        Upsample factor.
+    src_ma : np.ndarray, optional
+        Boolean mask for `src`. Only used if `mesh_size is not None`. By default
+        `None`.
+    dst_ma : np.ndarray, optional
+        Boolean mask for `dst`. Only used if `mesh_size is not None`. By default
+        `None`.
+    mesh_size : Tuple[int, int], optional
+        Number of control points for the BSpline mesh in each dimension. By
+        default `None`.
+    niter : int, optional
+        Max number of iteration for the gradient descent process. By default
+        `100`.
+
+    Returns
+    -------
+    motion : np.ndarray
+        Estimated motion between two frames.
+
+    See Also
+    --------
+    estimate_motion : for detailed explanation of parameters
+    """
     sh = phase_cross_correlation(
         src,
         dst,
@@ -353,20 +551,6 @@ def est_motion_perframe(
 
 
 def match_temp(src, dst, max_sh, local, subpixel=False):
-    """
-    Match template.
-    For more information on template matching: https://opencv-python-tutroals.readthedocs.io/en/latest/py_tutorials/py_imgproc/py_template_matching/py_template_matching.html
-
-    Args:
-        src (array): source frame
-        dst (array): template
-        max_sh (integer): maximum shift
-        local (boolean): [in case where there are multiple local maximum of the cross-correlogram, setting this to `True` will constraint the shift to be the one that’s closest to zero shift. i.e. this assumes the shifts are always small and local regardless of the correlation value].
-        subpixel (boolean, optional): [whether to estimate shifts to sub-pixel level using polynomial fitting of cross-correlogram]. Defaults to False.
-
-    Returns:
-        [array]: array (x,y) of the shift (match)
-    """
     dst = np.pad(dst, max_sh)
     cor = cv2.matchTemplate(
         src.astype(np.float32), dst.astype(np.float32), cv2.TM_CCOEFF_NORMED
@@ -398,7 +582,27 @@ def match_temp(src, dst, max_sh, local, subpixel=False):
     return sh
 
 
-def check_temp(fm, max_sh):
+def check_temp(fm: np.ndarray, max_sh: int) -> float:
+    """
+    Compute the circularity metric for a frame.
+
+    Parameters
+    ----------
+    fm : np.ndarray
+        Input frame.
+    max_sh : int
+        Amount of zero padding when computing the comparison image.
+
+    Returns
+    -------
+    circularity : float
+        The circularity metric, will be `0` if the comparison image has more
+        than one region with values `< 1`.
+
+    See Also
+    --------
+    estimate_motion
+    """
     fm_pad = np.pad(fm, max_sh)
     cor = cv2.matchTemplate(
         fm.astype(np.float32), fm_pad.astype(np.float32), cv2.TM_SQDIFF_NORMED
@@ -418,16 +622,6 @@ def check_temp(fm, max_sh):
 
 
 def apply_shifts(varr, shifts, fill=np.nan):
-    """
-    Apply the shifts to the input frames
-
-    Args:
-        varr (xarray.DataArray): xarray.DataArray a labeled 3-d array representation of the videos with dimensions: frame, height and width.
-        shifts (xarray.DataArray): xarray.DataArray a labeled 3-d array representation of the shifts with dimensions: frame, height and width.
-
-    Returns:
-        (xarray.DataArray): xarray.DataArray of the shifted input frames (varr)
-    """
     sh_dim = shifts.coords["shift_dim"].values.tolist()
     varr_sh = xr.apply_ufunc(
         shift_perframe,
@@ -444,16 +638,6 @@ def apply_shifts(varr, shifts, fill=np.nan):
 
 
 def shift_perframe(fm, sh, fill=np.nan):
-    """
-    Determine the shift per frame
-
-    Args:
-        fm (array): array with the pixels of the frame
-        sh (array): (x,y) shift
-
-    Returns:
-        array: frame
-    """
     if np.isnan(fm).all():
         return fm
     sh = np.around(sh).astype(int)
@@ -483,7 +667,37 @@ def get_mask(fm, bin_thres, bin_wnd):
     ).astype(bool)
 
 
-def apply_transform(varr, trans, fill=0, mesh_size=None):
+def apply_transform(
+    varr: xr.DataArray, trans: xr.DataArray, fill=0, mesh_size: Tuple[int, int] = None
+) -> xr.DataArray:
+    """
+    Apply necessary transform to correct for motion.
+
+    This function can correct for both rigid and non-rigid motion depending on
+    the number of dimensions of input `trans`.
+
+    Parameters
+    ----------
+    varr : xr.DataArray
+        Input array representing movie data.
+    trans : xr.DataArray
+        Estimated motion, if `trans.ndim > 2` then it is interpreted as shifts
+        of control points of mesh grid, and BSpline transform will be
+        constructed. Otherwise it is interpreted as shifts in each direction of
+        rigid translation.
+    fill : int, optional
+        Values used to fill in missing pixels (outside field of view). By default
+        `0`.
+    mesh_size : Tuple[int, int], optional
+        `mesh_size` parameter used when estimating motion. Only used if
+        `trans.ndim > 2`. If `None` and `trans.ndim > 2` then one will be
+        computed using :func:`get_mesh_size`. By default `None`.
+
+    Returns
+    -------
+    varr_sh : xr.DataArray
+        Movie data after transform.
+    """
     sh_dim = trans.coords["shift_dim"].values.tolist()
     if trans.ndim > 2:
         fm0 = varr.isel(frame=0).values
@@ -508,7 +722,40 @@ def apply_transform(varr, trans, fill=0, mesh_size=None):
     return varr_sh
 
 
-def transform_perframe(fm, tx_coef, fill=0, param=None, mesh_size=None):
+def transform_perframe(
+    fm: np.ndarray,
+    tx_coef: np.ndarray,
+    fill=0,
+    param: Optional[np.ndarray] = None,
+    mesh_size: Optional[Tuple[int, int]] = None,
+) -> np.ndarray:
+    """
+    Transform a single frame.
+
+    Parameters
+    ----------
+    fm : np.ndarray
+        Frame to be transformed.
+    tx_coef : np.ndarray
+        Coefficient of transformation. If `tx_coef.ndim > 1`, then it is
+        interpreted as BSpline transform coefficients. Otherwise it is
+        interpreted as rigid translations.
+    fill : int, optional
+        Values used to fill in missing pixels (outside field of view). By
+        default `0`.
+    param : np.ndarray, optional
+        Fixed parameters defining the BSpline transform. Only used if
+        `tx_coef.ndim > 1`. By default `None`.
+    mesh_size : Tuple[int, int], optional
+        `mesh_size` parameter used to estimate motion. If `None` and
+        `tx_coef.ndim > 1`, then one will be computed using
+        :func:`get_mesh_size`. By default `None`.
+
+    Returns
+    -------
+    fm : np.ndarray
+        The frame after transform.
+    """
     if tx_coef.ndim > 1:
         if param is None:
             if mesh_size is None:
@@ -523,11 +770,42 @@ def transform_perframe(fm, tx_coef, fill=0, param=None, mesh_size=None):
     return sitk.GetArrayFromImage(fm)
 
 
-def get_bspline_param(img, mesh_size):
+def get_bspline_param(img: np.ndarray, mesh_size: Tuple[int, int]) -> np.ndarray:
+    """
+    Compute fixed parameters for the BSpline transform given a frame and mesh size.
+
+    Parameters
+    ----------
+    img : np.ndarray
+        Input frame.
+    mesh_size : Tuple[int, int]
+        Number of control points for the BSpline mesh.
+
+    Returns
+    -------
+    param : np.ndarray
+        Fixed parameters of a BSpline transform.
+    """
     return sitk.BSplineTransformInitializer(
         image1=sitk.GetImageFromArray(img), transformDomainMeshSize=mesh_size
     ).GetFixedParameters()
 
 
-def get_mesh_size(fm):
+def get_mesh_size(fm: np.ndarray) -> np.ndarray:
+    """
+    Compute suitable mesh size given a frame.
+
+    The computed mesh size will result in approximately 100 pixels per
+    patch/control point in each direction.
+
+    Parameters
+    ----------
+    fm : np.ndarray
+        The input frame.
+
+    Returns
+    -------
+    mesh_size : np.ndarray
+        The auto determined mesh size.
+    """
     return (int(np.around(fm.shape[0] / 100)), int(np.around(fm.shape[1] / 100)))
