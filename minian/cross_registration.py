@@ -3,18 +3,78 @@ import itertools as itt
 import dask as da
 import numpy as np
 import pandas as pd
+import xarray as xr
+from typing import Iterable
 
 from .visualization import centroid
 
 
-def calculate_centroids(A, window):
+def calculate_centroids(A: xr.DataArray, window: xr.DataArray) -> pd.DataFrame:
+    """
+    Calculate centroids of spatial footprints for cells inside a window.
+
+    Parameters
+    ----------
+    A : xr.DataArray
+        the input spatial footprints of cells
+    window : xr.DataArray
+        a boolean mask with dimensions "height" and "width", only sptial
+        footprints of cells within this window will be included in the result
+
+    Returns
+    -------
+    cents : pd.DataFrame
+        resulting centroids dataframe
+
+    See Also
+    --------
+    minian.visualization.centroid
+    """
     A = A.where(window, 0)
     return centroid(A, verbose=True)
 
 
 def calculate_centroid_distance(
-    cents, by="session", index_dim=["animal"], tile=(50, 50)
-):
+    cents: pd.DataFrame, by="session", index_dim=["animal"], tile=(50, 50)
+) -> pd.DataFrame:
+    """
+    Calculate pairwise distance between centroids across all pairs of sessions.
+
+    To avoid calculating distance between centroids that are very far away, a 2d
+    rolling window is applied to spatial coordinates, and only pairs of
+    centroids within the rolling windows are considered for calculation.
+
+    Parameters
+    ----------
+    cents : pd.DataFrame
+        dataframe of centroid locations as returned by
+        :func:`calculate_centroids`
+    by : str, optional
+        name of column by which cells from sessions will be grouped together, by
+        default "session"
+    index_dim : list, optional
+        additional metadata columns by which data should be grouped together,
+        pairs of sessions within such groups (but not across groups) will be
+        used for calculation, by default ["animal"]
+    tile : tuple, optional
+        size of the rolling window to constrain caculation, specified in pixels
+        and in the order ("height", "width"), by default (50, 50)
+
+    Returns
+    -------
+    res_df : pd.DataFrame
+        pairwise distance between centroids across all pairs of sessions, where
+        each row represent a specific pair of cells across specific sessions,
+        the dataframe contains a two-level :doc:`MultiIndex
+        <pandas:user_guide/advanced>` as column names, the top level contains
+        three labels: "session", "variable" and "meta", each session will have a
+        column under the "session" label, with values indicating the "unit_id"
+        of the cell pair if either cell is in the corresponding session, and
+        `NaN` otherwise, "variable" contains a single column "distance"
+        indicating the distance of centroids for the cell pair, "meta" contains
+        all additional metadata dimensions specified in `index_dim` as columns
+        so that cell pairs can be uniquely identified
+    """
     res_list = []
 
     def cent_pair(grp):
@@ -66,7 +126,25 @@ def calculate_centroid_distance(
     return res_df
 
 
-def subset_pairs(A, B, tile):
+def subset_pairs(A: pd.DataFrame, B: pd.DataFrame, tile: tuple) -> set:
+    """
+    Return all pairs of cells within certain window given two sets of centroid
+    locations.
+
+    Parameters
+    ----------
+    A : pd.DataFrame
+        input centroid locations, should have columns "height" and "width"
+    B : pd.DataFrame
+        input centroid locations, should have columns "height" and "width"
+    tile : tuple
+        window size
+
+    Returns
+    -------
+    pairs : set
+        set of all cell pairs represented as tuple
+    """
     Ah, Aw, Bh, Bw = A["height"], A["width"], B["height"], B["width"]
     hh = (min(Ah.min(), Bh.min()), max(Ah.max(), Bh.max()))
     ww = (min(Aw.min(), Bw.min()), max(Aw.max(), Bw.max()))
@@ -82,25 +160,110 @@ def subset_pairs(A, B, tile):
     return pairs
 
 
-def pd_dist(A, B):
+def pd_dist(A: pd.DataFrame, B: pd.DataFrame) -> pd.Series:
+    """
+    Compute euclidean distance between two sets of matching centroid locations.
+
+    Parameters
+    ----------
+    A : pd.DataFrame
+        input centroid locations, should have columns "height" and "width"
+    B : pd.DataFrame
+        input centroid locations, should have columns "height" and "width" and
+        same row index as `A`, such that distance between corresponding rows
+        will be calculated
+
+    Returns
+    -------
+    dist : pd.Series
+        distance between centroid locations, has same row index as `A` and `B`
+    """
     return np.sqrt(
         ((A[["height", "width"]] - B[["height", "width"]]) ** 2).sum("columns")
     )
 
 
-def cartesian(*args):
+def cartesian(*args: Iterable) -> np.ndarray:
+    """
+    Computes cartesian product of inputs.
+
+    Parameters
+    ----------
+    *args : array_like
+        inputs that can be interpreted as array
+
+    Returns
+    -------
+    product : np.ndarray
+        k x n array representing cartesian product of inputs, with k number of
+        unique combinations for n inputs
+    """
     n = len(args)
     return np.array(np.meshgrid(*args)).T.reshape((-1, n))
 
 
-def group_by_session(df):
+def group_by_session(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Add grouping information based on sessions involved in each row/mapping.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        input dataframe with rows representing mappings, should be in two-level
+        column format like those returned by :func:`calculate_centroid_distance`
+        or :func:`calculate_mapping` etc.
+
+    Returns
+    -------
+    df : pd.DataFrame
+        the input `df` with an additional ("group", "group") column, whose
+        values are tuples indicating which sessions are involved (have non-NaN
+        values) in the mappings represented by each row
+
+    See Also
+    --------
+    resolve_mapping : for example usage
+    """
     ss = df["session"].notnull()
     grp = ss.apply(lambda r: tuple(r.index[r].tolist()), axis=1)
     df["group", "group"] = grp
     return df
 
 
-def calculate_mapping(dist):
+def calculate_mapping(dist: pd.DataFrame) -> pd.DataFrame:
+    """
+    Calculate mappings from cell pair distances with mutual nearest-neighbor criteria.
+
+    This function takes in distance between cell pairs and filter them based on
+    mutual nearest-neighbor criteria, where a cell pair is considered a valid
+    mapping only when either cell is the nearest neighbor to the other (among
+    all cell pairs presented in input `dist`). The result is hence a subset of
+    input `dist` dataframe and rows are considered mapping between cells in
+    pairs of sessions.
+
+    Parameters
+    ----------
+    dist : pd.DataFrame
+        the distances between cell pairs, should be in two-level column format
+        as returned by :func:`calculate_centroid_distance`, and should also
+        contains a ("group", "group") column as returned by :func:`group_by_session`
+
+    Returns
+    -------
+    mapping : pd.DataFrame
+        the mapping of cells across sessions, where each row represent a mapping
+        of cells across specific sessions, the dataframe contains a two-level
+        :doc:`MultiIndex <pandas:user_guide/advanced>` as column names, the top
+        level contains three labels: "session", "variable" and "meta", each
+        session will have a column under the "session" label, with values
+        indicating the "unit_id" of the cell in that session involved in the
+        mapping, or `NaN` if the mapping does not involve the session,
+        "variable" contains a single column "distance" indicating the distance
+        of centroids for the cell pair if the mapping involve only two cells,
+        and `NaN` otherwise, "meta" contains all additional metadata dimensions
+        specified in `index_dim` as columns so that cell pairs can be uniquely
+        identified
+    """
     map_idxs = set()
     try:
         for anm, grp in dist.groupby(dist["meta", "animal"]):
@@ -110,7 +273,27 @@ def calculate_mapping(dist):
     return dist.loc[list(map_idxs)]
 
 
-def mapping(dist):
+def mapping(dist: pd.DataFrame) -> pd.DataFrame:
+    """
+    Calculate mappings from cell pair distances for a single group.
+
+    This function is called by :func:`calculate_mapping` for each group defined
+    by metadata.
+
+    Parameters
+    ----------
+    dist : pd.DataFrame
+        the distances between cell pairs, should be in two-level column format
+
+    Returns
+    -------
+    mapping : pd.DataFrame
+        the mapping of cells across sessions
+
+    See Also
+    --------
+    calculate_mapping
+    """
     map_list = set()
     for sess, grp in dist.groupby(dist["group", "group"]):
         minidx_list = []
@@ -124,7 +307,82 @@ def mapping(dist):
     return map_list
 
 
-def resolve_mapping(mapping):
+def resolve_mapping(mapping: pd.DataFrame) -> pd.DataFrame:
+    """
+    Extend and resolve mappings of pairs of sessions into mappings across
+    multiple sessions.
+
+    This function try to transitively extend any mappings that share common
+    cells. If such mappings are consistent with each other, they will be merged
+    into a single mapping that maps a single cell across all sessions. Otherwise
+    if any of the mappings introduce conflicts, then all of the relevant
+    mappings will be dropped.
+
+    Parameters
+    ----------
+    mapping : pd.DataFrame
+        input mappings dataframe, should be in two-level column format as
+        returned by :func:`calculate_mapping`, and should also contains a
+        ("group", "group") column as returned by :func:`group_by_session`
+
+    Returns
+    -------
+    mapping : pd.DataFrame
+        output mappings with extended and resolved mappings, should be in the
+        same two-level column format as input
+
+    Examples
+    --------
+    Suppose we have two mappings sharing a common cell in "session2":
+
+    >>> mapping = pd.DataFrame(
+    ...     {
+    ...         ("meta", "animal"): ["m1", "m1"],
+    ...         ("session", "session1"): [0, None],
+    ...         ("session", "session2"): [1, 1],
+    ...         ("session", "session3"): [None, 2],
+    ...     }
+    ... )
+    >>> mapping = group_by_session(mapping)
+    >>> mapping # doctest: +NORMALIZE_WHITESPACE
+        meta  session                                   group
+      animal session1 session2 session3                 group
+    0     m1      0.0        1      NaN  (session1, session2)
+    1     m1      NaN        1      2.0  (session2, session3)
+
+    Then they will be extended and merged as a single mapping:
+
+    >>> resolve_mapping(mapping) # doctest: +NORMALIZE_WHITESPACE
+        meta  session                                             group variable
+      animal session1 session2 session3                           group distance
+    0     m1      0.0        1      2.0  (session1, session2, session3)      NaN
+
+    However, if our mappings contains an additional entry that conflicts with
+    the extended mapping like the following:
+
+    >>> mapping = pd.DataFrame(
+    ...     {
+    ...         ("meta", "animal"): ["m1", "m1", "m1"],
+    ...         ("session", "session1"): [0, None, 0],
+    ...         ("session", "session2"): [1, 1, None],
+    ...         ("session", "session3"): [None, 2, 5],
+    ...     }
+    ... )
+    >>> mapping = group_by_session(mapping)
+    >>> mapping # doctest: +NORMALIZE_WHITESPACE
+        meta  session                                   group
+      animal session1 session2 session3                 group
+    0     m1      0.0      1.0      NaN  (session1, session2)
+    1     m1      NaN      1.0      2.0  (session2, session3)
+    2     m1      0.0      NaN      5.0  (session1, session3)
+
+    Then all of them will be dropped:
+
+    >>> resolve_mapping(mapping) # doctest: +NORMALIZE_WHITESPACE +ELLIPSIS
+    Empty DataFrame
+    Columns: [(meta, animal), ... (variable, distance)]
+    Index: []
+    """
     map_list = []
     try:
         for anm, grp in mapping.groupby(mapping["meta", "animal"]):
@@ -134,7 +392,28 @@ def resolve_mapping(mapping):
     return pd.concat(map_list, ignore_index=True)
 
 
-def resolve(mapping):
+def resolve(mapping: pd.DataFrame) -> pd.DataFrame:
+    """
+    Extend and resolve mappings.
+
+    This function is called by :func:`resolve_mapping` for each group defined by
+    metadata
+
+    Parameters
+    ----------
+    mapping : pd.DataFrame
+        input mappings dataframe, should be in two-level column format
+
+    Returns
+    -------
+    mapping : pd.DataFrame
+        output mappings with extended and resolved mappings, should be in the
+        same two-level column format as input
+
+    See Also
+    --------
+    resolve_mapping
+    """
     mapping = mapping.reset_index(drop=True)
     map_ss = mapping["session"]
     for ss in map_ss.columns:
@@ -160,7 +439,31 @@ def resolve(mapping):
     return group_by_session(mapping)
 
 
-def fill_mapping(mappings, cents):
+def fill_mapping(mappings: pd.DataFrame, cents: pd.DataFrame) -> pd.DataFrame:
+    """
+    Fill mappings with rows representing unmatched cells.
+
+    This function takes all cells in `cents` and check to see if they appear in
+    any rows in `mappings`. If a cell is not involved in any mappings, then a
+    row will be appended to `mappings` with the cell's "unit_id" in the session
+    column contatining the cell and `NaN` in all other "session" columns.
+
+    Parameters
+    ----------
+    mappings : pd.DataFrame
+        input mappings dataframe, should be in two-level column format as
+        returned by :func:`calculate_mapping`, and should also contains a
+        ("group", "group") column as returned by :func:`group_by_session`
+    cents : pd.DataFrame
+        dataframe of centroid locations as returned by
+        :func:`calculate_centroids`
+
+    Returns
+    -------
+    mappings : pd.DataFrame
+        output mappings with unmatched cells
+    """
+
     def fill(cur_grp, cur_cent):
         fill_ls = []
         for cur_ss in list(cur_grp["session"]):
