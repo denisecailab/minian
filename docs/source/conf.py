@@ -79,6 +79,8 @@ intersphinx_mapping = {
     "dask": ("https://docs.dask.org/en/latest/", None),
     "distributed": ("https://distributed.dask.org/en/latest/", None),
     "ffmpeg": ("https://kkroening.github.io/ffmpeg-python/", None),
+    "skimage": ("https://scikit-image.org/docs/0.18.x/", None),
+    "simpleitk": ("https://simpleitk.readthedocs.io/en/v2.0.0/", None),
 }
 
 ref_aliases = {
