@@ -1580,7 +1580,7 @@ def centroid(A: xr.DataArray, verbose=False) -> pd.DataFrame:
     -------
     cents_df : pd.DataFrame
         centroid of spatial footprints for each cell, has columns "unit_id",
-        "height" and "width"
+        "height", "width" and any other additional metadata dimension
     """
 
     def rel_cent(im):
