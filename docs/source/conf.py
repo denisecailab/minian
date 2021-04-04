@@ -81,6 +81,7 @@ intersphinx_mapping = {
     "ffmpeg": ("https://kkroening.github.io/ffmpeg-python/", None),
     "skimage": ("https://scikit-image.org/docs/0.18.x/", None),
     "simpleitk": ("https://simpleitk.readthedocs.io/en/v2.0.0/", None),
+    "medpy": ("https://loli.github.io/medpy/", None),
 }
 
 ref_aliases = {
@@ -90,6 +91,7 @@ ref_aliases = {
     "pd.DataFrame": ("pandas.DataFrame", "pd.DataFrame"),
     "pd.Series": ("pandas.Series", "pd.Series"),
     "nx.Graph": ("networkx.Graph", "nx.Graph"),
+    "darr.Array": ("dask.array.Array", "darr.Array"),
 }
 
 
