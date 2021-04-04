@@ -1737,7 +1737,7 @@ def graph_optimize_corr(
     """
     # a heuristic to make number of partitions scale with nodes
     n_cuts, membership = pymetis.part_graph(
-        max(int(G.number_of_nodes() / chunk), 1), adjacency=adj_list(G)
+        max(int(np.ceil(G.number_of_nodes() / chunk)), 1), adjacency=adj_list(G)
     )
     nx.set_node_attributes(
         G, {k: {"part": v} for k, v in zip(sorted(G.nodes), membership)}
