@@ -59,6 +59,12 @@ jobs:
     - name: Run tests and collect coverage
       run: |
         $CONDA/bin/pytest -v --color=yes --cov=minian --cov-append --pyargs minian
+    - name: Run doctest
+      run: |
+        $CONDA/bin/pip install -r requirements/requirements-doc.txt
+        cd docs
+        make doctest
+        cd ../
     - name: Generate xml coverage report
       run: |
         $CONDA/bin/coverage xml

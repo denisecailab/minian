@@ -42,6 +42,7 @@ author = "Denise J. Cai"
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
 extensions = [
+    "sphinx.ext.doctest",
     "sphinx.ext.napoleon",
     "sphinx.ext.intersphinx",
     "sphinx.ext.viewcode",
@@ -57,6 +58,12 @@ napoleon_use_ivar = True
 autodoc_typehints = "none"
 autodoc_member_order = "groupwise"
 autoclass_content = "both"
+
+doctest_global_setup = """
+import numpy as np
+import pandas as pd
+from minian.cross_registration import *
+"""
 
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3/", None),

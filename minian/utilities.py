@@ -530,7 +530,7 @@ def save_minian(
     ...     var.rename("important_array"),
     ...     "/spatial_memory/alpha/learning1/minian",
     ...     {-1: "session", -2: "animal", -3: "experiment"},
-    ... )
+    ... ) # doctest: +SKIP
     """
     dpath = os.path.normpath(dpath)
     Path(dpath).mkdir(parents=True, exist_ok=True)
