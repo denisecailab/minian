@@ -34,7 +34,7 @@ dependencies:
   - param=1.9.3
   - pip=20.0.2
   - pyfftw=0.12.0
-  - pytest-cov==2.9.0
+  - pytest-cov=2.9.0
   - python=3.8.1
   - scikit-image=0.18.1
   - scikit-learn=0.22.1
@@ -49,6 +49,6 @@ dependencies:
   - zarr=2.4.0
   - sparse=0.11.2
   - pymetis=2020.1
-  - rechunker==0.3.3
+  - rechunker=0.3.3
   - pip:
       - medpy==0.4.0
