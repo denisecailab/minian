@@ -1776,12 +1776,11 @@ def graph_optimize_corr(
         npxs.append(len(pixels))
     pixels = set()
     eg_ls = []
-    for _, eg_sub in egd_diff.sort_values("source").groupby(
-        np.arange(len(egd_diff)) // step_size
-    ):
+    grp = np.arange(len(egd_diff)) // step_size
+    for igrp, eg_sub in egd_diff.sort_values("source").groupby(grp):
         pixels = pixels | set(eg_sub["source"]) | set(eg_sub["target"])
         eg_ls.append(eg_sub)
-        if len(pixels) > chunk - step_size / 2:
+        if (len(pixels) > chunk - step_size / 2) or igrp == max(grp):
             pixels = list(pixels)
             edf = pd.concat(eg_ls)
             corr_ls.append(construct_comput(edf, pixels))
