@@ -45,44 +45,44 @@ def load_videos(
     Load videos from the folder specified in `vpath` and according to the regex
     `pattern`, then concatenate them together and return a `xr.DataArray`
     representation of the concatenated videos. The videos are sorted by
-    filenames with `natsort` before concatenation. Optionally the data can be
-    downsampled, and the user can pass in a custom callable to post-process the
-    result.
+    filenames with :func:`natsort.natsorted` before concatenation. Optionally
+    the data can be downsampled, and the user can pass in a custom callable to
+    post-process the result.
 
     Parameters
     ----------
     vpath : str
-        the path containing the videos to load
+        The path containing the videos to load.
     pattern : regexp, optional
-        the regexp matching the filenames of the videso, by default
-        r"msCam[0-9]+\.avi$", which can be interpreted as filenames starting
-        with "msCam" followed by at least a number, and then followed by ".avi"
+        The regexp matching the filenames of the videso. By default
+        `r"msCam[0-9]+\.avi$"`, which can be interpreted as filenames starting
+        with "msCam" followed by at least a number, and then followed by ".avi".
     dtype : Union[str, type], optional
-        datatype of the resulting DataArray, by default np.float64
+        Datatype of the resulting DataArray, by default `np.float64`.
     downsample : dict, optional
-        a dictionary mapping dimension names to an integer downsampling factor,
-        the dimension names should be one of "height", "width" or "frame", by
-        default None
+        A dictionary mapping dimension names to an integer downsampling factor.
+        The dimension names should be one of "height", "width" or "frame". By
+        default `None`.
     downsample_strategy : str, optional
-        how the downsampling should be done, only used if `downsample` is not
-        `None`, either "subset" where data points are taken at an interval
-        specified in `downsample`, or "mean" where mean will be taken over data
-        within each interval, by default "subset"
+        How the downsampling should be done. Only used if `downsample` is not
+        `None`. Either `"subset"` where data points are taken at an interval
+        specified in `downsample`, or `"mean"` where mean will be taken over
+        data within each interval. By default `"subset"`.
     post_process : Callable, optional
-        an user-supplied custom function to post-process the resulting array,
-        four arguments will be passed to the function: the resulting DataArray
+        An user-supplied custom function to post-process the resulting array.
+        Four arguments will be passed to the function: the resulting DataArray
         `varr`, the input path `vpath`, the list of matched video filenames
-        `vlist`, and the list of DataArray before concatenation `varr_list`, the
-        function should output another valide DataArray, in other words, the
+        `vlist`, and the list of DataArray before concatenation `varr_list`. The
+        function should output another valide DataArray. In other words, the
         function should have signature `f(varr: xr.DataArray, vpath: str, vlist:
-        List[str], varr_list: List[xr.DataArray]) -> xr.DataArray`, by default
-        None
+        List[str], varr_list: List[xr.DataArray]) -> xr.DataArray`. By default
+        `None`
 
     Returns
     -------
     varr : xr.DataArray
-        the resulting array representation of the input movie, should have
-        dimensions ("frame", "height", "width")
+        The resulting array representation of the input movie. Should have
+        dimensions ("frame", "height", "width").
 
     Raises
     ------
@@ -148,12 +148,12 @@ def load_tif_lazy(fname: str) -> darr.array:
     Parameters
     ----------
     fname : str
-        the filename of the tif stack to load
+        The filename of the tif stack to load.
 
     Returns
     -------
     arr : darr.array
-        resulting dask array representation of the tif stack
+        Resulting dask array representation of the tif stack.
     """
     data = TiffFile(fname)
     f = len(data.pages)
@@ -176,36 +176,19 @@ def load_tif_perframe(fname: str, fid: int) -> np.ndarray:
     Parameters
     ----------
     fname : str
-        the filename of the tif stack
+        The filename of the tif stack.
     fid : int
-        the index of the image to load
+        The index of the image to load.
 
     Returns
     -------
     arr : np.ndarray
-        array representation of the image
+        Array representation of the image.
     """
     return imread(fname, key=fid)
 
 
 def load_avi_lazy_framewise(fname: str) -> darr.array:
-    """
-    Lazy load an avi video frame by frame with seeking using `opencv`.
-
-    .. deprecated:: 1.0.0
-        `load_avi_lazy_framewise` will be removed in the future in favor of the
-        more efficient `load_avi_lazy`.
-
-    Parameters
-    ----------
-    fname : str
-        the filename of the video to load
-
-    Returns
-    -------
-    arr : darr.array
-        the array representation of the video
-    """
     cap = cv2.VideoCapture(fname)
     f = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     fmread = da.delayed(load_avi_perframe)
@@ -228,12 +211,12 @@ def load_avi_lazy(fname: str) -> darr.array:
     Parameters
     ----------
     fname : str
-        the filename of the video to load
+        The filename of the video to load.
 
     Returns
     -------
     arr : darr.array
-        the array representation of the video
+        The array representation of the video.
     """
     probe = ffmpeg.probe(fname)
     video_info = next(s for s in probe["streams"] if s["codec_type"] == "video")
@@ -255,18 +238,18 @@ def load_avi_ffmpeg(fname: str, h: int, w: int, f: int) -> np.ndarray:
     Parameters
     ----------
     fname : str
-        the filename of the video to load
+        The filename of the video to load.
     h : int
-        the height of the video
+        The height of the video.
     w : int
-        the width of the video
+        The width of the video.
     f : int
-        the number of frames in the video
+        The number of frames in the video.
 
     Returns
     -------
     arr : np.ndarray
-        the resulting array, has shape (`f`, `h`, `w`)
+        The resulting array. Has shape (`f`, `h`, `w`).
     """
     out_bytes, err = (
         ffmpeg.input(fname)
@@ -277,25 +260,6 @@ def load_avi_ffmpeg(fname: str, h: int, w: int, f: int) -> np.ndarray:
 
 
 def load_avi_perframe(fname: str, fid: int) -> np.ndarray:
-    """
-    Load a single frame in a video with seeking using `opencv`
-
-    .. deprecated:: 1.0.0
-        `load_avi_lazy_framewise` will be removed in the future in favor of the
-        more efficient `load_avi_lazy`.
-
-    Parameters
-    ----------
-    fname : str
-        the filename to the video
-    fid : int
-        the index of frame to load
-
-    Returns
-    -------
-    arr : np.ndarray
-        the resulting array
-    """
     cap = cv2.VideoCapture(fname)
     h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -324,26 +288,26 @@ def open_minian(
     Parameters
     ----------
     dpath : str
-        the path to the minian dataset that should be loaded
+        The path to the minian dataset that should be loaded.
     post_process : Callable, optional
-        user-supplied function to post process the dataset, only used if
-        `return_dict` is `False`, two arguments will be passed to the function:
-        the resulting dataset `ds` and the data path `dpath`, in other words the
+        User-supplied function to post process the dataset. Only used if
+        `return_dict` is `False`. Two arguments will be passed to the function:
+        the resulting dataset `ds` and the data path `dpath`. In other words the
         function should have signature `f(ds: xr.Dataset, dpath: str) ->
-        xr.Dataset`, by default None
+        xr.Dataset`. By default `None`.
     return_dict : bool, optional
-        whether to combine the DataArray as dictionary, the `.name` attribute
-        will be used as key, otherwise the DataArray will be combined using
-        `xr.merge(..., compat="no_conflicts")`, which will implicitly align the
-        DataArray over all dimensions, so it is important to make sure the
-        coordinates are compatible and will not result in creation of large
-        NaN-padded results, by default False
+        Whether to combine the DataArray as dictionary, where the `.name`
+        attribute will be used as key. Otherwise the DataArray will be combined
+        using `xr.merge(..., compat="no_conflicts")`, which will implicitly
+        align the DataArray over all dimensions, so it is important to make sure
+        the coordinates are compatible and will not result in creation of large
+        NaN-padded results. By default `False`.
 
     Returns
     -------
     ds : Union[dict, xr.Dataset]
-        the resulting dataset, if `return_dict` is `True` it will be a `dict`,
-        otherwise a `xr.Dataset`
+        The resulting dataset. If `return_dict` is `True` it will be a `dict`,
+        otherwise a `xr.Dataset`.
 
     See Also
     -------
@@ -383,53 +347,49 @@ def open_minian_mf(
     This function recursively walks through directories under `dpath` and try to
     load minian datasets from all directories matching `pattern`. It will then
     combine them based on `index_dims` into either a `xr.Dataset` object or a
-    `pd.DataFrame`. Optionally a subset of paths can be specified, so that
-    they can either be excluded or white-listed. Additional keyword arguments
-    will be passed directly to `open_minian`.
+    `pd.DataFrame`. Optionally a subset of paths can be specified, so that they
+    can either be excluded or white-listed. Additional keyword arguments will be
+    passed directly to :func:`open_minian`.
 
     Parameters
     ----------
     dpath : str
-        the root folder containing all datasets to be loaded
+        The root folder containing all datasets to be loaded.
     index_dims : List[str]
-        list of dimensions that can be used to index and merge multiple
-        datasets, all loaded datasets should have unique coordinates in the
-        listed dimensions
+        List of dimensions that can be used to index and merge multiple
+        datasets. All loaded datasets should have unique coordinates in the
+        listed dimensions.
     result_format : str, optional
-        if "xarray", the result will be merged together recursively along each
-        dimensions listed in `index_dims`, users should make sure the
+        If `"xarray"`, the result will be merged together recursively along each
+        dimensions listed in `index_dims`. Users should make sure the
         coordinates are compatible and the merging will not cause generation of
-        large NaN-padded results, if "pandas", then a `pd.DataFrame` is
+        large NaN-padded results. If `"pandas"`, then a `pd.DataFrame` is
         returned, with columns corresponding to `index_dims` uniquely identify
         each dataset, and an additional column named "minian" of object dtype
-        pointing to the loaded minian dataset objects, by default "xarray"
+        pointing to the loaded minian dataset objects. By default `"xarray"`.
     pattern : regexp, optional
-        pattern of minian dataset directory names, by default r"minian$"
+        Pattern of minian dataset directory names. By default `r"minian$"`.
     sub_dirs : List[str], optional
-        a list of sub-directories under `dpath`, useful if only a subset of
-        datasets under `dpath` should be recursively loaded, by default []
+        A list of sub-directories under `dpath`. Useful if only a subset of
+        datasets under `dpath` should be recursively loaded. By default `[]`.
     exclude : bool, optional
-        whether to exclude directories listed under `sub_dirs`, if `True`, then
-        any minian datasets under those specified in `sub_dirs` will be ignored,
-        if `False`, then **only** the datasets under those specified in
-        `sub_dirs` will be loaded (they still have to be under `dpath` though),
-        by default True
+        Whether to exclude directories listed under `sub_dirs`. If `True`, then
+        any minian datasets under those specified in `sub_dirs` will be ignored.
+        If `False`, then **only** the datasets under those specified in
+        `sub_dirs` will be loaded (they still have to be under `dpath` though).
+        by default `True`.
 
     Returns
     -------
     ds : Union[xr.Dataset, pd.DataFrame]
-        the resulting combined datasets, if `result_format` is "xarray", then a
-        `xr.Dataset` will be returned, otherwise a `pd.DataFrame` will be
-        returned
+        The resulting combined datasets. If `result_format` is `"xarray"`, then
+        a `xr.Dataset` will be returned, otherwise a `pd.DataFrame` will be
+        returned.
 
     Raises
     ------
     NotImplementedError
         if `result_format` is not "xarray" or "pandas"
-
-    See Also
-    -------
-    open_minian
     """
     minian_dict = dict()
     for nextdir, dirlist, filelist in os.walk(dpath, topdown=False):
@@ -482,42 +442,44 @@ def save_minian(
     backend. A separate folder will be created under `dpath`, with folder name
     `var.name + ".zarr"`. Optionally metadata can be retrieved from directory
     hierarchy and added as coordinates of the `xr.DataArray`. In addition, an
-    on-disk rechunking of the result can be performed using `rechunker` if
-    `chunks` are given.
+    on-disk rechunking of the result can be performed using
+    :func:`rechunker.rechunk` if `chunks` are given.
 
     Parameters
     ----------
     var : xr.DataArray
-        the array to be saved
+        The array to be saved.
     dpath : str
-        the path to the minian dataset directory
+        The path to the minian dataset directory.
     meta_dict : dict, optional
-        how metadata should be retrieved from directory hierarchy, the keys
+        How metadata should be retrieved from directory hierarchy. The keys
         should be negative integers representing directory level relative to
         `dpath` (so `-1` means the immediate parent directory of `dpath`), and
         values should be the name of dimensions represented by the corresponding
-        level of directory, the actual coordinate value of the dimensions will
-        be the directory name of corresponding level, by default None
+        level of directory. The actual coordinate value of the dimensions will
+        be the directory name of corresponding level. By default `None`.
     overwrite : bool, optional
-        whether to overwrite the result on disk, by default False
+        Whether to overwrite the result on disk. By default `False`.
     chunks : dict, optional
-        a dictionary specifying the desired chunk size, the chunk size should be
+        A dictionary specifying the desired chunk size. The chunk size should be
         specified using :doc:`dask:array-chunks` convention, except the "auto"
-        specifiication is not supported, the rechunking operation will be
-        carried out with on-disk algorithms using `rechunker`, by default None
+        specifiication is not supported. The rechunking operation will be
+        carried out with on-disk algorithms using :func:`rechunker.rechunk`. By
+        default `None`.
     compute : bool, optional
-        whether to compute `var` and save it immediately, by default True
+        Whether to compute `var` and save it immediately. By default `True`.
     mem_limit : str, optional
-        the memory limit for the on-disk rechunking algorithm, only used if
-        `chunks` is not `None`, by default "500MB"
+        The memory limit for the on-disk rechunking algorithm, passed to
+        :func:`rechunker.rechunk`. Only used if `chunks` is not `None`. By
+        default `"500MB"`.
 
     Returns
     -------
     var : xr.DataArray
-        the array representation of saving result, if `compute` is `True`, then
+        The array representation of saving result. If `compute` is `True`, then
         the returned array will only contain delayed task of loading the on-disk
-        `zarr` arrays, otherwise all computation leading to the input `var` will
-        be preserved in the result
+        `zarr` arrays. Otherwise all computation leading to the input `var` will
+        be preserved in the result.
 
     Examples
     -------
@@ -584,18 +546,19 @@ def xrconcat_recursive(var: Union[dict, list], dims: List[str]) -> xr.Dataset:
     Parameters
     ----------
     var : Union[dict, list]
-        either a `dict` or a `list` of `xr.DataArray` to be concatenated, if a
+        Either a `dict` or a `list` of `xr.DataArray` to be concatenated. If a
         `dict` then keys should be `tuple`, with length same as the length of
         `dims` and values corresponding to the coordinates that uniquely
-        identify each `xr.DataArray`, if a `list` then each `xr.DataArray`
-        should contain valid coordinates for each dimensions specified in `dims`
+        identify each `xr.DataArray`. If a `list` then each `xr.DataArray`
+        should contain valid coordinates for each dimensions specified in
+        `dims`.
     dims : List[str]
-        dimensions to be concatenated over
+        Dimensions to be concatenated over.
 
     Returns
     -------
     ds : xr.Dataset
-        the concatenated dataset
+        The concatenated dataset.
 
     Raises
     ------
@@ -661,12 +624,12 @@ def get_chk(arr: xr.DataArray) -> dict:
     Parameters
     ----------
     arr : xr.DataArray
-        the input `xr.DataArray`
+        The input `xr.DataArray`
 
     Returns
     -------
     chk : dict
-        dictionary mapping dimension names to chunks
+        Dictionary mapping dimension names to chunks.
     """
     return {d: c for d, c in zip(arr.dims, arr.chunks)}
 
@@ -678,14 +641,14 @@ def rechunk_like(x: xr.DataArray, y: xr.DataArray) -> xr.DataArray:
     Parameters
     ----------
     x : xr.DataArray
-        the array to be rechunked
+        The array to be rechunked.
     y : xr.DataArray
-        the array where chunk information are extracted
+        The array where chunk information are extracted.
 
     Returns
     -------
     x_chk : xr.DataArray
-        the rechunked `x`
+        The rechunked `x`.
     """
     try:
         dst_chk = get_chk(y)
@@ -714,25 +677,25 @@ def get_optimal_chk(
     Parameters
     ----------
     arr : xr.DataArray
-        the input array to estimate for chunk size
+        The input array to estimate for chunk size.
     dim_grp : list, optional
-        list of tuples specifying which dimensions are usually chunked together
-        during computation, for each tuple in the list, it is assumed that only
+        List of tuples specifying which dimensions are usually chunked together
+        during computation. For each tuple in the list, it is assumed that only
         dimensions in the tuple will be chunked while all other dimensions in
-        the input `arr` will not be chunked, each dimensions in the input `arr`
-        should appear once and only once across the list, by default
-        [("frame",), ("height", "width")]
+        the input `arr` will not be chunked. Each dimensions in the input `arr`
+        should appear once and only once across the list. By default
+        `[("frame",), ("height", "width")]`.
     csize : int, optional
-        the desired space each chunk should occupy, specified in "MB", by
-        default 256
+        The desired space each chunk should occupy, specified in MB. By default
+        `256`.
     dtype : type, optional
-        the datatype of `arr` during actual computation in case that will be
-        different from the current `arr.dtype`, by default None
+        The datatype of `arr` during actual computation in case that will be
+        different from the current `arr.dtype`. By default `None`.
 
     Returns
     -------
     chk : dict
-        dictionary mapping dimension names to chunk sizes
+        Dictionary mapping dimension names to chunk sizes.
     """
     if dtype is not None:
         arr = arr.astype(dtype)
@@ -767,12 +730,12 @@ def get_chunksize(arr: xr.DataArray) -> dict:
     Parameters
     ----------
     arr : xr.DataArray
-        the input `xr.DataArray`
+        The input `xr.DataArray`.
 
     Returns
     -------
     chk : dict
-        dictionary mapping dimension names to chunk sizes
+        Dictionary mapping dimension names to chunk sizes.
     """
     dims = arr.dims
     sz = arr.data.chunksize
@@ -786,12 +749,12 @@ def factors(x: int) -> List[int]:
     Parameters
     ----------
     x : int
-        input
+        Input
 
     Returns
     -------
     factors : List[int]
-        list of factors of `x`
+        List of factors of `x`.
     """
     return [i for i in range(1, x + 1) if x % i == 0]
 
@@ -885,27 +848,27 @@ def custom_arr_optimize(
     Parameters
     ----------
     dsk : dict
-        input dask task graph
+        Input dask task graph.
     keys : list
-        output task keys
+        Output task keys.
     fast_funcs : list, optional
-        list of fast functions to be inlined, by default :const:`FAST_FUNCTIONS`
+        List of fast functions to be inlined. By default :const:`FAST_FUNCTIONS`.
     inline_patterns : list, optional
-        list of patterns of task keys to be inlined, by default []
+        List of patterns of task keys to be inlined. By default `[]`.
     rename_dict : dict, optional
-        dict mapping old task keys to new ones, only used during fusing of
-        tasks, by default None
+        Dictionary mapping old task keys to new ones. Only used during fusing of
+        tasks. By default `None`.
     rewrite_dict : dict, optional
-        dict mapping old task key substrings to new ones, applied at the end of
-        optimization to all task keys, by default None
+        Dictionary mapping old task key substrings to new ones. Applied at the
+        end of optimization to all task keys. By default `None`.
     keep_patterns : list, optional
-        list of patterns of task keys that should be preserved during
-        optimization, by default []
+        List of patterns of task keys that should be preserved during
+        optimization. By default `[]`.
 
     Returns
     -------
     dsk : dict
-        optimized dask graph
+        Optimized dask graph.
 
     See Also
     -------
@@ -949,15 +912,15 @@ def rewrite_key(key: Union[str, tuple], rwdict: dict) -> str:
     Parameters
     ----------
     key : Union[str, tuple]
-        input task key
+        Input task key.
     rwdict : dict
-        dictionary mapping old task key substring to new ones, all keys in this
-        dictionary that exists in input `key` will be substituted
+        Dictionary mapping old task key substring to new ones. All keys in this
+        dictionary that exists in input `key` will be substituted.
 
     Returns
     -------
     key : str
-        the new key
+        The new key.
 
     Raises
     ------
@@ -992,17 +955,17 @@ def custom_fused_keys_renamer(
     Parameters
     ----------
     keys : list
-        list of task keys that should be fused together
+        List of task keys that should be fused together.
     max_fused_key_length : int, optional
-        used to limit the maximum string length for each renamed key, if `None`,
-        there is no limit, by default 120
+        Used to limit the maximum string length for each renamed key. If `None`,
+        there is no limit. By default `120`.
     rename_dict : dict, optional
-        dictionary used to rename keys during fuse, by default None
+        Dictionary used to rename keys during fuse. By default `None`.
 
     Returns
     -------
     fused_key : str
-        the fused task key
+        The fused task key.
 
     See Also
     -------
@@ -1049,14 +1012,14 @@ def split_key(key: Union[tuple, str], rename_dict: Optional[dict] = None) -> str
     Parameters
     ----------
     key : Union[tuple, str]
-        the input task key
+        The input task key.
     rename_dict : dict, optional
-        dictionary used to rename keys, by default None
+        Dictionary used to rename keys. By default `None`.
 
     Returns
     -------
     new_key : str
-        new key
+        New key.
     """
     if type(key) is tuple:
         key = key[0]
@@ -1077,14 +1040,14 @@ def check_key(key: Union[str, tuple], pat: str) -> bool:
     Parameters
     ----------
     key : Union[str, tuple]
-        input key, if `tuple` then the first element will be used to check
+        Input key. If a `tuple` then the first element will be used to check.
     pat : str
-        pattern to check
+        Pattern to check.
 
     Returns
     -------
     bool
-        whether `key` contains pattern
+        Whether `key` contains pattern.
     """
     try:
         return bool(re.search(pat, key))
@@ -1099,14 +1062,14 @@ def check_pat(key: Union[str, tuple], pat_ls: List[str]) -> bool:
     Parameters
     ----------
     key : Union[str, tuple]
-        input key, if `tuple` then the first element will be used to check
+        Input key. If a `tuple` then the first element will be used to check.
     pat_ls : List[str]
-        list of pattern to check
+        List of pattern to check.
 
     Returns
     -------
     bool
-        whether `key` contains any pattern in the list
+        Whether `key` contains any pattern in the list.
     """
     for pat in pat_ls:
         if check_key(key, pat):
@@ -1121,16 +1084,16 @@ def inline_pattern(dsk: dict, pat_ls: List[str], inline_constants: bool) -> dict
     Parameters
     ----------
     dsk : dict
-        input dask graph
+        Input dask graph.
     pat_ls : List[str]
-        list of patterns to check
+        List of patterns to check.
     inline_constants : bool
-        whether to inline constants
+        Whether to inline constants.
 
     Returns
     -------
     dsk : dict
-        dask graph with keys inlined
+        Dask graph with keys inlined.
 
     See Also
     -------
@@ -1157,18 +1120,18 @@ def custom_delay_optimize(
     Parameters
     ----------
     dsk : dict
-        input dask task graph
+        Input dask task graph.
     keys : list
-        output task keys
+        Output task keys.
     fast_functions : list, optional
-        list of fast functions to be inlined, by default []
+        List of fast functions to be inlined. By default `[]`.
     inline_patterns : list, optional
-        list of patterns of task keys to be inlined, by default []
+        List of patterns of task keys to be inlined. By default `[]`.
 
     Returns
     -------
     dsk : dict
-        optimized dask graph
+        Optimized dask graph.
     """
     dsk, _ = fuse(ensure_dict(dsk), rename_keys=custom_fused_keys_renamer)
     if inline_patterns:
@@ -1192,12 +1155,12 @@ def unique_keys(keys: list) -> np.ndarray:
     Parameters
     ----------
     keys : list
-        list of dask keys
+        List of dask keys.
 
     Returns
     -------
     unique : np.ndarray
-        unique keys
+        Unique keys.
     """
     new_keys = []
     for k in keys:
@@ -1215,18 +1178,18 @@ def get_keys_pat(pat: str, keys: list, return_all=False) -> Union[list, str]:
     Parameters
     ----------
     pat : str
-        pattern to check
+        Pattern to check.
     keys : list
-        list of keys to be filtered
+        List of keys to be filtered.
     return_all : bool, optional
-        whether to return all keys matching `pat`, if `False` then only the
-        first match will be returned, by default False
+        Whether to return all keys matching `pat`. If `False` then only the
+        first match will be returned. By default `False`.
 
     Returns
     -------
     keys : Union[list, str]
-        if `return_all` is `True` then a list of keys will be returned,
-        otherwise only one key will be returned
+        If `return_all` is `True` then a list of keys will be returned.
+        Otherwise only one key will be returned.
     """
     keys_filt = list(filter(lambda k: check_key(k, pat), list(keys)))
     if return_all:
@@ -1242,14 +1205,14 @@ def optimize_chunk(arr: xr.DataArray, chk: dict) -> xr.DataArray:
     Parameters
     ----------
     arr : xr.DataArray
-        the array to be rechunked
+        The array to be rechunked.
     chk : dict
-        the desired chunk size
+        The desired chunk size.
 
     Returns
     -------
     arr_chk : xr.DataArray
-        the rechunked array
+        The rechunked array.
     """
     fast_funcs = FAST_FUNCTIONS + [darr.core.concatenate3]
     arr_chk = arr.chunk(chk)
@@ -1270,21 +1233,21 @@ def local_extreme(fm: np.ndarray, k: np.ndarray, etype="max", diff=0) -> np.ndar
     Parameters
     ----------
     fm : np.ndarray
-        the input 2d array
+        The input 2d array.
     k : np.ndarray
-        structuring element defining the locality of the result, passed as
-        `kernel` to `cv2.erode` and `cv2.dilate`
+        Structuring element defining the locality of the result, passed as
+        `kernel` to :func:`cv2.erode` and :func:`cv2.dilate`.
     etype : str, optional
-        type of local extreme, either "min" or "max", by default "max"
+        Type of local extreme. Either `"min"` or `"max"`. By default `"max"`.
     diff : int, optional
-        threshold of difference between local extreme and its neighbours, by
-        default 0
+        Threshold of difference between local extreme and its neighbours. By
+        default `0`.
 
     Returns
     -------
     fm_ext : np.ndarray
-        the returned 2d array whose non-zero elements represent the location of
-        local extremes
+        The returned 2d array whose non-zero elements represent the location of
+        local extremes.
 
     Raises
     ------

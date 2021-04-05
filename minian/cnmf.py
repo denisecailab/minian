@@ -54,18 +54,18 @@ def get_noise_fft(
     Parameters
     ----------
     varr : xr.DataArray
-        input data, should have a "frame" dimension
+        Input data, should have a "frame" dimension.
     noise_range : tuple, optional
-        range of noise frequency to be aggregated as a fraction of sampling
-        frequency, by default (0.25, 0.5)
+        Range of noise frequency to be aggregated as a fraction of sampling
+        frequency. By default `(0.25, 0.5)`.
     noise_method : str, optional
-        method of aggreagtion for noise, should be one of "mean" "median"
-        "logmexp" or "sum", by default "logmexp"
+        Method of aggreagtion for noise. Should be one of `"mean"` `"median"`
+        `"logmexp"` or `"sum"`. By default `"logmexp"`.
 
     Returns
     -------
     sn : xr.DataArray
-        spectral density of the noise. Same shape as `varr` with the "frame"
+        Spectral density of the noise. Same shape as `varr` with the "frame"
         dimension removed.
     """
     try:
@@ -100,20 +100,20 @@ def noise_fft(
     Parameters
     ----------
     px : np.ndarray
-        input data
+        Input data.
     noise_range : tuple, optional
-        range of noise frequency to be aggregated as a fraction of sampling
-        frequency, by default (0.25, 0.5)
+        Range of noise frequency to be aggregated as a fraction of sampling
+        frequency. By default `(0.25, 0.5)`.
     noise_method : str, optional
-        method of aggreagtion for noise, should be one of "mean" "median"
-        "logmexp" or "sum", by default "logmexp"
+        Method of aggreagtion for noise. Should be one of `"mean"` `"median"`
+        `"logmexp"` or `"sum"`. By default "logmexp".
     threads : int, optional
-        number of threads to use for pyfftw, by default 1
+        Number of threads to use for pyfftw. By default `1`.
 
     Returns
     -------
     noise : float
-        the estimated noise level of input
+        The estimated noise level of input.
 
     See Also
     -------
@@ -148,18 +148,18 @@ def get_noise_welch(
     Parameters
     ----------
     varr : xr.DataArray
-        input data, should have a "frame" dimension
+        Input data. Should have a "frame" dimension.
     noise_range : tuple, optional
-        range of noise frequency to be aggregated as a fraction of sampling
-        frequency, by default (0.25, 0.5)
+        Range of noise frequency to be aggregated as a fraction of sampling
+        frequency. By default `(0.25, 0.5)`.
     noise_method : str, optional
-        method of aggreagtion for noise, should be one of "mean" "median"
-        "logmexp" or "sum", by default "logmexp"
+        Method of aggreagtion for noise. Should be one of `"mean"` `"median"`
+        `"logmexp"` or `"sum"`. By default `"logmexp"`.
 
     Returns
     -------
     sn : xr.DataArray
-        spectral density of the noise. Same shape as `varr` with the "frame"
+        Spectral density of the noise. Same shape as `varr` with the "frame"
         dimension removed.
 
     See Also
@@ -190,20 +190,20 @@ def noise_welch(
     Parameters
     ----------
     px : np.ndarray
-        input data
+        Input data.
     noise_range : tuple, optional
-        range of noise frequency to be aggregated as a fraction of sampling
-        frequency, by default (0.25, 0.5)
+        Range of noise frequency to be aggregated as a fraction of sampling
+        frequency. By default `(0.25, 0.5)`.
     noise_method : str, optional
-        method of aggreagtion for noise, should be one of "mean" "median"
-        "logmexp" or "sum", by default "logmexp"
+        Method of aggreagtion for noise. Should be one of `"mean"` `"median"`
+        `"logmexp"` or `"sum"`. By default `"logmexp"`.
     threads : int, optional
-        number of threads to use for pyfftw, by default 1
+        Number of threads to use for pyfftw. By default `1`.
 
     Returns
     -------
     noise : float
-        the estimated noise level of input
+        The estimated noise level of input.
 
     See Also
     -------
@@ -259,53 +259,55 @@ def update_spatial(
     Parameters
     ----------
     Y : xr.DataArray
-        input movie data, should have dimensions "height", "width" and "frame"
+        Input movie data. Should have dimensions "height", "width" and "frame".
     A : xr.DataArray
-        previous estimation of spatial footprints, should have dimension
-        "height", "width" and "unit_id"
+        Previous estimation of spatial footprints. Should have dimension
+        "height", "width" and "unit_id".
     b : xr.DataArray
-        previous estimation of spatial footprint of background, should have
-        dimension "height" and "width"
+        Previous estimation of spatial footprint of background. Fhould have
+        dimension "height" and "width".
     C : xr.DataArray
-        estimation of temporal component for each cell, should have dimension
-        "frame" and "unit_id"
+        Estimation of temporal component for each cell. Should have dimension
+        "frame" and "unit_id".
     f : xr.DataArray
-        estimation of temporal dynamic of background, should have dimension
-        "frame"
+        Estimation of temporal dynamic of background. Should have dimension
+        "frame".
     sn : xr.DataArray
-        estimation of noise level for each pixel, should have dimension "height"
-        and "width"
+        Estimation of noise level for each pixel. Should have dimension "height"
+        and "width".
     dl_wnd : int, optional
-        window of morphological dilation in pixel when computing the subsetting
-        matrix, by default 5
+        Window of morphological dilation in pixel when computing the subsetting
+        matrix. By default `5`.
     sparse_penal : float, optional
-        global scalar controlling sparsity of the result, the higher the value,
-        the sparser the spatial footprints, by default 0.5
+        Global scalar controlling sparsity of the result. The higher the value,
+        the sparser the spatial footprints. By default `0.5`.
     update_background : bool, optional
-        whether to update the spatial footprint of background, by default True
+        Whether to update the spatial footprint of background. By default
+        `True`.
     normalize : bool, optional
-        whether to normalize resulting spatial footprints of each cell to unit
-        sum, by default True
+        Whether to normalize resulting spatial footprints of each cell to unit
+        sum. By default `True`
     size_thres : tuple, optional
-        the range of size in pixel allowed for the resulting spatial footprints,
-        if `None`, then no filtering will be done, by default (9, None)
+        The range of size in pixel allowed for the resulting spatial footprints.
+        If `None`, then no filtering will be done. By default `(9, None)`.
     in_memory : bool, optional
-        whether to load `C` into memory before spatial update, by default False
+        Whether to load `C` into memory before spatial update. By default
+        `False`.
 
     Returns
     -------
     A_new : xr.DataArray
-        new estimation of spatial footprints, same shape as `A` except the
-        "unit_id" dimension might be smaller due to filtering
+        New estimation of spatial footprints. Same shape as `A` except the
+        "unit_id" dimension might be smaller due to filtering.
     b_new : xr.DataArray
-        new estimation of spatial footprint of background, same shape as `b`
+        New estimation of spatial footprint of background. Same shape as `b`.
     f_new : xr.DataArray
-        new estimation of temporal dynamic of background, computed as the
-        `Y.tensordot(b_new)`, same shape as `f`
+        New estimation of temporal dynamic of background. Computed as the
+        `Y.tensordot(b_new)`. Same shape as `f`.
     mask : xr.DataArray
-        boolean mask of whether a cell passed size filtering, has dimension
-        "unit_id" that is same as input `A`, useful for subsetting other
-        variables based on the result of spatial update
+        Boolean mask of whether a cell passed size filtering. Has dimension
+        "unit_id" that is same as input `A`. Useful for subsetting other
+        variables based on the result of spatial update.
 
     Notes
     -------
@@ -459,12 +461,12 @@ def sps_any(x: sparse.COO) -> np.ndarray:
     Parameters
     ----------
     x : sparse.COO
-        input sparse array
+        Input sparse array.
 
     Returns
     -------
     x_any : np.ndarray
-        2d boolean numpy array
+        2d boolean numpy array.
     """
     return np.atleast_2d(x.nnz > 0)
 
@@ -479,7 +481,7 @@ def update_spatial_perpx(
     """
     Update spatial footprints across all the cells for a single pixel.
 
-    This function use LassoLars model from scikit-learn to solve the
+    This function use :class:`sklearn.linear_model.LassoLars` to solve the
     optimization problem. `C_store` can either be a in-memory numpy array, or a
     zarr array, in which case it will be lazy-loaded. If `f` is not `None`, then
     `sub[-1]` is expected to be the subsetting mask for background, and the last
@@ -488,24 +490,24 @@ def update_spatial_perpx(
     Parameters
     ----------
     y : np.ndarray
-        input fluorescent trace for the given pixel
+        Input fluorescent trace for the given pixel.
     alpha : float
-        parameter of the optimization problem controlling sparsity
+        Parameter of the optimization problem controlling sparsity.
     sub : sparse.COO
-        subsetting matrix
+        Subsetting matrix.
     C_store : Union[np.ndarray, zarr.core.Array]
-        estimation of temporal dynamics of cells
+        Estimation of temporal dynamics of cells.
     f : np.ndarray, optional
-        temporal dynamic of background
+        Temporal dynamic of background.
 
     Returns
     -------
     A_px : sparse.COO
-        spatial footprint values across all cells for the given pixel
+        Spatial footprint values across all cells for the given pixel.
 
     See Also
     -------
-    update_spatial
+    update_spatial : for more explanation of parameters
     """
     if f is not None:
         idx = sub[:-1].nonzero()[0]
@@ -533,24 +535,25 @@ def update_spatial_block(
     """
     Carry out spatial update for each 3d block of data.
 
-    This function wraps around `update_spatial_perpx` so that it can be applied
-    to 3d blocks of data. Keyword arguments are passed to `update_spatial_perpx`.
+    This function wraps around :func:`update_spatial_perpx` so that it can be
+    applied to 3d blocks of data. Keyword arguments are passed to
+    :func:`update_spatial_perpx`.
 
     Parameters
     ----------
     y : np.ndarray
-        input data, should have dimension (height, width, frame)
+        Input data, should have dimension (height, width, frame).
     alpha : np.ndarray
-        alpha parameter for the optimization problem, should have dimension
-        (height, width)
+        Alpha parameter for the optimization problem. Should have dimension
+        (height, width).
     sub : sparse.COO
-        subsetting matrix, should have dimension (height, width, unit_id)
+        Subsetting matrix. Should have dimension (height, width, unit_id).
 
     Returns
     -------
     A_blk : sparse.COO
-        resulting spatial footprints, should have dimension (height, width,
-        unit_id)
+        Resulting spatial footprints. Should have dimension (height, width,
+        unit_id).
 
     See Also
     -------
@@ -598,21 +601,21 @@ def compute_trace(
     Parameters
     ----------
     Y : xr.DataArray
-        input movie data, should have dimensions ("frame", "height", "width")
+        Input movie data. Should have dimensions ("frame", "height", "width").
     A : xr.DataArray
-        spatial footprints of cells, should have dimensions ("unit_id", "height",
-        "width")
+        Spatial footprints of cells. Should have dimensions ("unit_id", "height",
+        "width").
     b : xr.DataArray
-        spatial footprint of background, should have dimensions ("height", "width")
+        Spatial footprint of background. Should have dimensions ("height", "width").
     C : xr.DataArray
-        temporal components of cells, should have dimensions ("frame", "unit_id")
+        Temporal components of cells. Should have dimensions ("frame", "unit_id").
     f : xr.DataArray
-        temporal dynamic of background, should have dimension "frame"
+        Temporal dynamic of background. Should have dimension "frame".
 
     Returns
     -------
     YrA : xr.DataArray
-        residule traces for each cell, should have dimensions("frame", "unit_id")
+        Residule traces for each cell. Should have dimensions("frame", "unit_id").
     """
     fms = Y.coords["frame"]
     uid = A.coords["unit_id"]
@@ -708,114 +711,114 @@ def update_temporal(
     Parameters
     ----------
     A : xr.DataArray
-        estimation of spatial footprints for each cell, should have dimensions
-        ("unit_id", "height", "width")
+        Estimation of spatial footprints for each cell. Should have dimensions
+        ("unit_id", "height", "width").
     C : xr.DataArray
-        previous estimation of calcium dynamic of cells, should have dimensions
-        ("frame", "unit_id"), only used if `warm_start = True` or if `YrA is
-        None`
+        Previous estimation of calcium dynamic of cells. Should have dimensions
+        ("frame", "unit_id"). Only used if `warm_start = True` or if `YrA is
+        None`.
     b : xr.DataArray, optional
-        estimation of spatial footprint of background, should have dimensions
-        ("height", "width"), only used if `YrA is None`, by default None
+        Estimation of spatial footprint of background. Should have dimensions
+        ("height", "width"). Only used if `YrA is None`. By default `None`.
     f : xr.DataArray, optional
-        estimation of temporal dynamic of background, should have dimension
-        "frame", only used if `YrA is None`, by default None
+        Estimation of temporal dynamic of background. Should have dimension
+        "frame". Only used if `YrA is None`. By default `None`.
     Y : xr.DataArray, optional
-        input movie data, should have dimensions ("frame", "height", "width"),
-        only used if `YrA is None`, by default None
+        Input movie data. Should have dimensions ("frame", "height", "width").
+        Only used if `YrA is None`. By default `None`.
     YrA : xr.DataArray, optional
-        estimation of residule traces for each cell, should have dimensions
-        ("frame", "unit_id"), if `None` then one will be computed using
-        `computea_trace` with relevant inputs, by default None
+        Estimation of residule traces for each cell. Should have dimensions
+        ("frame", "unit_id"). If `None` then one will be computed using
+        `computea_trace` with relevant inputs. By default `None`.
     noise_freq : float, optional
-        frequency cut-off for both the estimation of noise level and the
-        optional smoothing, specified as a fraction of sampling frequency, by
-        default 0.25
+        Frequency cut-off for both the estimation of noise level and the
+        optional smoothing, specified as a fraction of sampling frequency. By
+        default `0.25`.
     p : int, optional
-        order of the AR process, by default 2
+        Order of the AR process. By default `2`.
     add_lag : str, optional
-        additional number of timesteps in covariance to use for the estimation
-        of AR coefficients, if 0, then only the first `p` number of timesteps
-        will be used to estimate the `p` number of AR coefficients, if greater
-        than 0, then the system is over-determined and least square will be used
-        to estimate AR coefficients,  if "p", then `p` number of additional
-        timesteps will be used, by default "p"
+        Additional number of timesteps in covariance to use for the estimation
+        of AR coefficients. If `0`, then only the first `p` number of timesteps
+        will be used to estimate the `p` number of AR coefficients. If greater
+        than `0`, then the system is over-determined and least square will be
+        used to estimate AR coefficients. If `"p"`, then `p` number of
+        additional timesteps will be used. By default `"p"`.
     jac_thres : float, optional
-        threshold for Jaccard Index, cells whose overlap in spatial footprints
+        Threshold for Jaccard Index. Cells whose overlap in spatial footprints
         (number of common pixels divided by number of total pixels) exceeding
         this threshold will be grouped together transitively for temporal
-        update, by default 0.1
+        update. By default `0.1`.
     sparse_penal : int, optional
-        global scalar controlling sparsity of the result, the higher the value,
-        the sparser the deconvolved spikes, by default 1
+        Global scalar controlling sparsity of the result. The higher the value,
+        the sparser the deconvolved spikes. By default `1`.
     bseg : np.ndarray, optional
         1d vector with length "frame" representing segments for which baseline
-        should be estimated independently, an independent baseline will be
-        estimated for frames corresponding to each unique label in this vector,
-        if `None` then a single scalar baseline will be estimated for each cell,
-        by default None
+        should be estimated independently. An independent baseline will be
+        estimated for frames corresponding to each unique label in this vector.
+        If `None` then a single scalar baseline will be estimated for each cell.
+        By default `None`.
     zero_thres : float, optional
-        threshold to filter out small values in the result, any values smaller
-        than this threshold will be set to zero, by default 1e-8
+        Threshold to filter out small values in the result. Any values smaller
+        than this threshold will be set to zero. By default `1e-8`.
     max_iters : int, optional
-        maximum number of iterations for optimization, can be increased to get
-        around sub-optimal results, by default 200
+        Maximum number of iterations for optimization. Can be increased to get
+        around sub-optimal results. By default `200`.
     use_smooth : bool, optional
-        whether to smooth the `YrA` for the estimation of AR coefficients, if
-        True, then a smoothed version of `YrA` will be computed by low-pass
+        Whether to smooth the `YrA` for the estimation of AR coefficients. If
+        `True`, then a smoothed version of `YrA` will be computed by low-pass
         filter with `noise_freq` and used for the estimation of AR coefficients
-        only, by default True
+        only. By default `True`.
     normalize : bool, optional
-        whether to normalize `YrA` for each cell to unit sum such that sparse
-        penalty has simlar effect for all the cells, each group of cell will be
+        Whether to normalize `YrA` for each cell to unit sum such that sparse
+        penalty has simlar effect for all the cells. Each group of cell will be
         normalized together (with mean of the sum for each cell) to preserve
-        relative amplitude of fluorescence between overlapping cells, by default
-        True
+        relative amplitude of fluorescence between overlapping cells. By default
+        `True`.
     warm_start : bool, optional
-        whether to use previous estimation of `C` to warm start the
-        optimization, can lead to faster convergence in theory, experimental, by
-        default False
+        Whether to use previous estimation of `C` to warm start the
+        optimization. Can lead to faster convergence in theory. Experimental. By
+        default `False`.
     post_scal : bool, optional
-        whether to apply the post-hoc scaling process, where a scalar will be
+        Whether to apply the post-hoc scaling process, where a scalar will be
         estimated with least square for each cell to scale the amplitude of
-        temporal component to `YrA`, useful to get around unwanted dampening of
+        temporal component to `YrA`. Useful to get around unwanted dampening of
         result values caused by high `sparse_penal` or to revert the per-cell
-        normalization, by default True
+        normalization. By default `True`.
     scs_fallback : bool, optional
-        whether to fall back to `scs` solver if the default `ecos` solver fails,
-        by default False
+        Whether to fall back to `scs` solver if the default `ecos` solver fails.
+        By default `False`.
     concurrent_update : bool, optional
-        whether to update a group of cells as a single optimization problem,
-        yields slightly more accurate estimation when cross-talk between cells
+        Whether to update a group of cells as a single optimization problem.
+        Yields slightly more accurate estimation when cross-talk between cells
         are severe, but significantly increase convergence time and memory
-        demand, by default False
+        demand. By default `False`.
 
     Returns
     -------
     C_new : xr.DataArray
-        new estimation of the calcium dynamic for each cell, should have same
+        New estimation of the calcium dynamic for each cell. Should have same
         shape as `C` except the "unit_id" dimension might be smaller due to
-        dropping of cells and filtering
+        dropping of cells and filtering.
     S_new : xr.DataArray
-        new estimation of the deconvolved spikes for each cell, should have
-        dimensions ("frame", "unit_id") and same shape as `C_new`
+        New estimation of the deconvolved spikes for each cell. Should have
+        dimensions ("frame", "unit_id") and same shape as `C_new`.
     b0_new : xr.DataArray
-        new estimation of baseline fluorescence for each cell, should have
-        dimensions ("frame", "unit_id") and same shape as `C_new`, each cell
-        should only have one unique value if `bseg is None`
+        New estimation of baseline fluorescence for each cell. Should have
+        dimensions ("frame", "unit_id") and same shape as `C_new`. Each cell
+        should only have one unique value if `bseg is None`.
     c0_new : xr.DataArray
-        new estimation of a initial calcium decay, in theory triggered by
-        calcium events happened before the recording starts, should have
-        dimensions ("frame", "unit_id") and same shape as `C_new`
+        New estimation of a initial calcium decay, in theory triggered by
+        calcium events happened before the recording starts. Should have
+        dimensions ("frame", "unit_id") and same shape as `C_new`.
     g : xr.DataArray
-        estimation of AR coefficient for each cell, useful for visualizing
-        modeled calcium dynamic, should have dimensions ("lag", "unit_id") with
-        "lag" having length `p`
+        Estimation of AR coefficient for each cell. Useful for visualizing
+        modeled calcium dynamic. Should have dimensions ("lag", "unit_id") with
+        "lag" having length `p`.
     mask : xr.DataArray
-        boolean mask of whether a cell has any temporal dynamic after the update
-        and optional filtering, has dimension "unit_id" that is same as input
-        `C`, useful for subsetting other variables based on the result of
-        temporal update
+        Boolean mask of whether a cell has any temporal dynamic after the update
+        and optional filtering. Has dimension "unit_id" that is same as input
+        `C`. Useful for subsetting other variables based on the result of
+        temporal update.
 
 
     Notes
@@ -1021,14 +1024,14 @@ def lstsq_vec(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     Parameters
     ----------
     a : np.ndarray
-        source of the scaling
+        Source of the scaling.
     b : np.ndarray
-        target of the scaling
+        Target of the scaling.
 
     Returns
     -------
     scale : np.ndarray
-        a scaler that scales `a` to `b`
+        A scaler that scales `a` to `b`.
     """
     a = a.reshape((-1, 1))
     return np.linalg.lstsq(a, b.squeeze(), rcond=-1)[0]
@@ -1043,21 +1046,21 @@ def get_ar_coef(
     Parameters
     ----------
     y : np.ndarray
-        input timeseries
+        Input timeseries.
     sn : float
-        estimated noise level of the input `y`
+        Estimated noise level of the input `y`.
     p : int
-        order of the autoregressive process
+        Order of the autoregressive process.
     add_lag : int
-        additional number of timesteps of covariance to use for the estimation
+        Additional number of timesteps of covariance to use for the estimation.
     pad : int, optional
-        length of the output, if not `None` then the resulting coefficients will
-        be zero-padded to this length,  by default None
+        Length of the output. If not `None` then the resulting coefficients will
+        be zero-padded to this length. By default `None`.
 
     Returns
     -------
     g : np.ndarray
-        the estimated AR coefficients
+        The estimated AR coefficients.
     """
     if add_lag == "p":
         max_lag = p * 2
@@ -1099,49 +1102,49 @@ def update_temporal_block(
     """
     Update temporal components given residule traces of a group of cells.
 
-    This function wraps around `update_temporal_cvxpy`, but also carry out
+    This function wraps around :func:`update_temporal_cvxpy`, but also carry out
     additional initial steps given `YrA` of a group of cells. Additional keyword
-    arguments are passed through to `update_temporal_cvxpy`.
+    arguments are passed through to :func:`update_temporal_cvxpy`.
 
     Parameters
     ----------
     YrA : np.ndarray
-        residule traces of a group of cells, should have dimension ("unit_id",
-        "frame")
+        Residule traces of a group of cells. Should have dimension ("unit_id",
+        "frame").
     noise_freq : float
-        frequency cut-off for both the estimation of noise level and the
-        optional smoothing, specified as a fraction of sampling frequency
+        Frequency cut-off for both the estimation of noise level and the
+        optional smoothing. Specified as a fraction of sampling frequency.
     p : int
-        order of the AR process
+        Order of the AR process.
     add_lag : str, optional
-        additional number of timesteps in covariance to use for the estimation
-        of AR coefficients, by default "p"
+        Additional number of timesteps in covariance to use for the estimation
+        of AR coefficients. By default "p".
     normalize : bool, optional
-        whether to normalize `YrA` for each cell to unit sum, by default True
+        Whether to normalize `YrA` for each cell to unit sum. By default `True`.
     use_smooth : bool, optional
-        whether to smooth the `YrA` for the estimation of AR coefficients, by
-        default True
+        Whether to smooth the `YrA` for the estimation of AR coefficients. By
+        default `True`.
     concurrent : bool, optional
-        whether to update a group of cells as a single optimization problem, by
-        default False
+        Whether to update a group of cells as a single optimization problem. By
+        default `False`.
 
     Returns
     -------
     c : np.ndarray
-        new estimation of the calcium dynamic of the group of cells, should have
-        dimensions ("unit_id", "frame") and same shape as `YrA`
+        New estimation of the calcium dynamic of the group of cells. Should have
+        dimensions ("unit_id", "frame") and same shape as `YrA`.
     s : np.ndarray
-        new estimation of the deconvolved spikes of the group of cells, should
-        have dimensions ("unit_id", "frame") and same shape as `c`
+        New estimation of the deconvolved spikes of the group of cells. Should
+        have dimensions ("unit_id", "frame") and same shape as `c`.
     b : np.ndarray
-        new estimation of baseline fluorescence of the group of cells, should
-        have dimensions ("unit_id", "frame") and same shape as `c`
+        New estimation of baseline fluorescence of the group of cells. Should
+        have dimensions ("unit_id", "frame") and same shape as `c`.
     c0 : np.ndarray
-        new estimation of a initial calcium decay of the group of cells, should
-        have dimensions ("unit_id", "frame") and same shape as `c`
+        New estimation of a initial calcium decay of the group of cells. Should
+        have dimensions ("unit_id", "frame") and same shape as `c`.
     g : np.ndarray
-        estimation of AR coefficient for each cell, should have dimensions
-        ("unit_id", "lag") with "lag" having length `p`
+        Estimation of AR coefficient for each cell. Should have dimensions
+        ("unit_id", "lag") with "lag" having length `p`.
 
     See Also
     -------
@@ -1195,52 +1198,52 @@ def update_temporal_cvxpy(
     y: np.ndarray, g: np.ndarray, sn: np.ndarray, A=None, bseg=None, **kwargs
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
-    solve the temporal update optimization problem using `cvxpy`
+    Solve the temporal update optimization problem using `cvxpy`
 
     Parameters
     ----------
     y : np.ndarray
-        input residule trace of one or more cells
+        Input residule trace of one or more cells.
     g : np.ndarray
-        estimated AR coefficients of one or more cells
+        Estimated AR coefficients of one or more cells.
     sn : np.ndarray
-        noise level of one or more cells
+        Noise level of one or more cells.
     A : np.ndarray, optional
-        spatial footprint of one or more cells, not used, by default None
+        Spatial footprint of one or more cells. Not used. By default `None`.
     bseg : np.ndarray, optional
         1d vector with length "frame" representing segments for which baseline
-        should be estimated independently, by default None
+        should be estimated independently. By default `None`.
 
     Returns
     -------
     c : np.ndarray
-        new estimation of the calcium dynamic of the group of cells, should have
-        dimensions ("unit_id", "frame") and same shape as `y`
+        New estimation of the calcium dynamic of the group of cells. Should have
+        dimensions ("unit_id", "frame") and same shape as `y`.
     s : np.ndarray
-        new estimation of the deconvolved spikes of the group of cells, should
-        have dimensions ("unit_id", "frame") and same shape as `c`
+        New estimation of the deconvolved spikes of the group of cells. Should
+        have dimensions ("unit_id", "frame") and same shape as `c`.
     b : np.ndarray
-        new estimation of baseline fluorescence of the group of cells, should
-        have dimensions ("unit_id", "frame") and same shape as `c`
+        New estimation of baseline fluorescence of the group of cells. Should
+        have dimensions ("unit_id", "frame") and same shape as `c`.
     c0 : np.ndarray
-        new estimation of a initial calcium decay of the group of cells, should
-        have dimensions ("unit_id", "frame") and same shape as `c`
+        New estimation of a initial calcium decay of the group of cells. Should
+        have dimensions ("unit_id", "frame") and same shape as `c`.
 
     Other Parameters
     -------
     sparse_penal : float
-        sparse penalty parameter for all the cells
+        Sparse penalty parameter for all the cells.
     max_iters : int
-        maximum number of iterations
+        Maximum number of iterations.
     use_cons : bool, optional
-        whether to try constrained version of the problem first, by default
-        False
+        Whether to try constrained version of the problem first. By default
+        `False`.
     scs_fallback : bool
-        whether to fall back to `scs` solver if the default `ecos` solver fails
+        Whether to fall back to `scs` solver if the default `ecos` solver fails.
     c_last : np.ndarray, optional
-        initial estimation of calcium traces for each cell used to warm start
+        Initial estimation of calcium traces for each cell used to warm start.
     zero_thres : float
-        threshold to filter out small values in the result
+        Threshold to filter out small values in the result.
 
     See Also
     -------
@@ -1403,28 +1406,29 @@ def unit_merge(
     Parameters
     ----------
     A : xr.DataArray
-        spatial footprints of the cells
+        Spatial footprints of the cells.
     C : xr.DataArray
-        temporal component of cells
+        Temporal component of cells.
     add_list : List[xr.DataArray], optional
-        list of additional variables to be merged, by default None
+        List of additional variables to be merged. By default `None`.
     thres_corr : float, optional
-        the threshold of correlation, any pair of spatially overlapping cells
+        The threshold of correlation. Any pair of spatially overlapping cells
         with correlation higher than this threshold will be transitively grouped
-        together and merged. by default 0.9
+        together and merged. By default `0.9`.
     noise_freq : float, optional
-        the cut-off frequency used to smooth `C` before calculation of
-        correlation, if `None` then no smoothing will be done, by default None
+        The cut-off frequency used to smooth `C` before calculation of
+        correlation. If `None` then no smoothing will be done. By default
+        `None`.
 
     Returns
     -------
     A_merge : xr.DataArray
-        merged spatial footprints of cells
+        Merged spatial footprints of cells.
     C_merge : xr.DataArray
-        merged temporal components of cells
+        Merged temporal components of cells.
     add_list : List[xr.DataArray], optional
-        list of additional merged variables, only returned if input `add_list`
-        is not None
+        List of additional merged variables. Only returned if input `add_list`
+        is not `None`.
     """
     print("computing spatial overlap")
     with da.config.set(
@@ -1486,16 +1490,17 @@ def label_connected(adj: np.ndarray, only_connected=False) -> np.ndarray:
     Parameters
     ----------
     adj : np.ndarray
-        adjacency matrix, should be 2d symmetric matrix
+        Adjacency matrix. Should be 2d symmetric matrix.
     only_connected : bool, optional
-        whether to keep only the labels of connected components, if `True`, then
+        Whether to keep only the labels of connected components. If `True`, then
         all components with only one node (isolated) will have their labels set
-        to -1, otherwise all components will have unique label, by default False
+        to -1. Otherwise all components will have unique label. By default
+        `False`.
 
     Returns
     -------
     labels : np.ndarray
-        the labels for each components, should have length `adj.shape[0]`
+        The labels for each components. Should have length `adj.shape[0]`.
     """
     try:
         np.fill_diagonal(adj, 0)
@@ -1522,21 +1527,22 @@ def smooth_sig(
     Parameters
     ----------
     sig : xr.DataArray
-        the input timeseries, should have dimension "frame"
+        The input timeseries. Should have dimension "frame".
     freq : float
-        the cut-off frequency
+        The cut-off frequency.
     method : str, optional
-        method used for filtering, either "fft" or "butter", if "fft", the
-        filtering is carried out with zero-ing fft signal, if "butter", the
-        fiilterings carried out with `scipy.signal.butter`, by default "fft"
+        Method used for filtering. Either `"fft"` or `"butter"`. If `"fft"`, the
+        filtering is carried out with zero-ing fft signal. If `"butter"`, the
+        fiilterings carried out with :func:`scipy.signal.butter`. By default
+        "fft".
     btype : str, optional
-        either "low" or "high" specify low or high pass filtering, by default
-        "low"
+        Either `"low"` or `"high"` specify low or high pass filtering. By
+        default `"low"`.
 
     Returns
     -------
     sig_smth : xr.DataArray
-        the filtered signal, has same shape as input `sig`
+        The filtered signal. Has same shape as input `sig`.
 
     Raises
     ------
@@ -1567,16 +1573,16 @@ def filt_fft(x: np.ndarray, freq: float, btype: str) -> np.ndarray:
     Parameters
     ----------
     x : np.ndarray
-        input timeseries
+        Input timeseries.
     freq : float
-        cut-off frequency
+        Cut-off frequency.
     btype : str
-        either "low" or "high" specify low or high pass filtering
+        Either `"low"` or `"high"` specify low or high pass filtering.
 
     Returns
     -------
     x_filt : np.ndarray
-        filtered timeseries
+        Filtered timeseries.
     """
     _T = len(x)
     if btype == "low":
@@ -1590,25 +1596,22 @@ def filt_fft(x: np.ndarray, freq: float, btype: str) -> np.ndarray:
 
 def filt_butter(x: np.ndarray, freq: float, btype: str) -> np.ndarray:
     """
-    Filter 1d timeseries with Butterworth filter using `scipy.signal.butter`.
+    Filter 1d timeseries with Butterworth filter using
+    :func:`scipy.signal.butter`.
 
     Parameters
     ----------
     x : np.ndarray
-        input timeseries
+        Input timeseries.
     freq : float
-        cut-off frequency
+        Cut-off frequency.
     btype : str
-        either "low" or "high" specify low or high pass filtering
+        Either "low" or "high" specify low or high pass filtering.
 
     Returns
     -------
     x_filt : np.ndarray
-        filtered timeseries
-
-    See Also
-    -------
-    scipy.signal.butter
+        Filtered timeseries.
     """
     but_b, but_a = butter(2, freq * 2, btype=btype, analog=False)
     return lfilter(but_b, but_a, x)
@@ -1616,26 +1619,22 @@ def filt_butter(x: np.ndarray, freq: float, btype: str) -> np.ndarray:
 
 def filt_fft_vec(x: np.ndarray, freq: float, btype: str) -> np.ndarray:
     """
-    Vectorized wrapper of `filt_fft`.
+    Vectorized wrapper of :func:`filt_fft`.
 
     Parameters
     ----------
     x : np.ndarray
-        input timeseries, should have 2 dimensions, and the filtering will be
-        applied along the last dimension
+        Input timeseries. Should have 2 dimensions, and the filtering will be
+        applied along the last dimension.
     freq : float
-        cut-off frequency
+        Cut-off frequency.
     btype : str
-        either "low" or "high" specify low or high pass filtering
+        Either `"low"` or `"high"` specify low or high pass filtering.
 
     Returns
     -------
     x_filt : np.ndarray
-        filtered timeseries
-
-    See Also
-    -------
-    filt_fft
+        Filtered timeseries
     """
     for ix, xx in enumerate(x):
         x[ix, :] = filt_fft(xx, freq, btype)
@@ -1653,17 +1652,17 @@ def compute_AtC(A: xr.DataArray, C: xr.DataArray) -> xr.DataArray:
     Parameters
     ----------
     A : xr.DataArray
-        spatial footprints of cells, should have dimensions ("unit_id",
-        "height", "width")
+        Spatial footprints of cells. Should have dimensions ("unit_id",
+        "height", "width").
     C : xr.DataArray
-        temporal components of cells, should have dimensions "frame" and
-        "unit_id"
+        Temporal components of cells. Should have dimensions "frame" and
+        "unit_id".
 
     Returns
     -------
     AtC : xr.DataArray
-        the outer product representing estimated movie data, has dimensions
-        ("frame", "height", "width")
+        The outer product representing estimated movie data. Has dimensions
+        ("frame", "height", "width").
     """
     fm, h, w = (
         C.coords["frame"].values,
@@ -1708,32 +1707,32 @@ def graph_optimize_corr(
     Parameters
     ----------
     varr : xr.DataArray
-        input timeseries, should have "frame" dimension in addition to those
-        specified in `idx_dims`
+        Input timeseries. Should have "frame" dimension in addition to those
+        specified in `idx_dims`.
     G : nx.Graph
-        graph representing computation to be carried out, should be undirected
-        and un-weighted, each node should have unique attributes with keys
+        Graph representing computation to be carried out. Should be undirected
+        and un-weighted. Each node should have unique attributes with keys
         specified in `idx_dims`, which will be used to index the timeseries in
-        `varr`, each edge represent a desired correlation
+        `varr`. Each edge represent a desired correlation.
     freq : float
-        cut-off frequency for the optional smoothing, if `None` then no
-        smoothing will be done
+        Cut-off frequency for the optional smoothing. If `None` then no
+        smoothing will be done.
     idx_dims : list, optional
-        the dimension used to index the timeseries in `varr`, by default
-        ["height", "width"]
+        The dimension used to index the timeseries in `varr`. By default
+        `["height", "width"]`.
     chunk : int, optional
-        chunk size of each computation, by default 600
+        Chunk size of each computation. By default `600`.
     step_size : int, optional
-        step size to iterate through all edges, if too small then the iteration
-        will take a long time, if too large then the variances in the actual
-        chunksize of computation will be large, by default 50
+        Step size to iterate through all edges. If too small then the iteration
+        will take a long time. If too large then the variances in the actual
+        chunksize of computation will be large. By default `50`.
 
     Returns
     -------
     eg_df : pd.DataFrame
-        dataframe representation of edge list, has column "source" and "target"
+        Dataframe representation of edge list. Has column "source" and "target"
         representing the node index of the edge (correlation), and column "corr"
-        with computed value of correlation
+        with computed value of correlation.
     """
     # a heuristic to make number of partitions scale with nodes
     n_cuts, membership = pymetis.part_graph(
@@ -1803,33 +1802,29 @@ def adj_corr(
     Compute correlation in an optimized fashion given an adjacency matrix and
     node attributes.
 
-    Wraps around `graph_optimize_corr` and construct computation graph from
-    `adj` and `nod_df`. Also convert the result into a sparse matrix with same
-    shape as `adj`.
+    Wraps around :func:`graph_optimize_corr` and construct computation graph
+    from `adj` and `nod_df`. Also convert the result into a sparse matrix with
+    same shape as `adj`.
 
     Parameters
     ----------
     varr : xr.DataArray
-        input time series, should have "frame" dimension in addition to column
-        names of `nod_df`
+        Input time series. Should have "frame" dimension in addition to column
+        names of `nod_df`.
     adj : np.ndarray
-        adjacency matrix
+        Adjacency matrix.
     nod_df : pd.DataFrame
-        dataframe containing node attributes, should have length `adj.shape[0]`
-        and only contain columns relevant to index the time series
+        Dataframe containing node attributes. Should have length `adj.shape[0]`
+        and only contain columns relevant to index the time series.
     freq : float
-        cut-off frequency for the optional smoothing, if `None` then no
-        smoothing will be done
+        Cut-off frequency for the optional smoothing. If `None` then no
+        smoothing will be done.
 
     Returns
     -------
     adj_corr : scipy.sparse.csr_matrix
-        sparse matrix of the same shape as `adj` but with values corresponding
-        the computed correlation
-
-    See Also
-    -------
-    graph_optimize_corr
+        Sparse matrix of the same shape as `adj` but with values corresponding
+        the computed correlation.
     """
     G = nx.Graph()
     G.add_nodes_from([(i, d) for i, d in enumerate(nod_df.to_dict("records"))])
@@ -1847,12 +1842,12 @@ def adj_list(G: nx.Graph) -> List[np.ndarray]:
     Parameters
     ----------
     G : nx.Graph
-        the input graph
+        The input graph.
 
     Returns
     -------
     adj_ls : List[np.ndarray]
-        the adjacency list representation of graph
+        The adjacency list representation of graph.
     """
     gdict = nx.to_dict_of_dicts(G)
     return [np.array(list(gdict[k].keys())) for k in sorted(gdict.keys())]
@@ -1863,29 +1858,24 @@ def smooth_corr(
     X: np.ndarray, ridx: np.ndarray, cidx: np.ndarray, freq: float
 ) -> np.ndarray:
     """
-    Wraps around `filt_fft_vec` and `idx_corr` to carry out both smoothing and
-    computation of partial correlation.
+    Wraps around :func:`filt_fft_vec` and :func:`idx_corr` to carry out both
+    smoothing and computation of partial correlation.
 
     Parameters
     ----------
     X : np.ndarray
-        input time series
+        Input time series.
     ridx : np.ndarray
-        row index of the resulting correlation
+        Row index of the resulting correlation.
     cidx : np.ndarray
-        column index of the resulting correlation
+        Column index of the resulting correlation.
     freq : float
-        cut-off frequency for the smoothing
+        Cut-off frequency for the smoothing.
 
     Returns
     -------
     corr : np.ndarray
-        resulting partial correlation
-
-    See Also
-    -------
-    filt_fft_vec
-    idx_corr
+        Resulting partial correlation.
     """
     if freq:
         X = filt_fft_vec(X, freq, "low")
@@ -1906,17 +1896,17 @@ def idx_corr(X: np.ndarray, ridx: np.ndarray, cidx: np.ndarray) -> np.ndarray:
     Parameters
     ----------
     X : np.ndarray
-        input time series, should have 2 dimensions, where the last dimension
-        should be the time dimension
+        Input time series. Should have 2 dimensions, where the last dimension
+        should be the time dimension.
     ridx : np.ndarray
-        row index of the correlation
+        Row index of the correlation.
     cidx : np.ndarray
-        column index of the correlation
+        Column index of the correlation.
 
     Returns
     -------
     res : np.ndarray
-        flattened resulting correlations, has same shape as `ridx` or `cidx`
+        Flattened resulting correlations. Has same shape as `ridx` or `cidx`.
     """
     res = np.zeros(ridx.shape[0])
     std = np.zeros(X.shape[0])

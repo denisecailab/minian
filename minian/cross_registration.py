@@ -16,15 +16,15 @@ def calculate_centroids(A: xr.DataArray, window: xr.DataArray) -> pd.DataFrame:
     Parameters
     ----------
     A : xr.DataArray
-        the input spatial footprints of cells
+        The input spatial footprints of cells.
     window : xr.DataArray
-        a boolean mask with dimensions "height" and "width", only sptial
-        footprints of cells within this window will be included in the result
+        Boolean mask with dimensions "height" and "width". Only sptial
+        footprints of cells within this window will be included in the result.
 
     Returns
     -------
     cents : pd.DataFrame
-        resulting centroids dataframe
+        Resulting centroids dataframe.
 
     See Also
     --------
@@ -47,33 +47,33 @@ def calculate_centroid_distance(
     Parameters
     ----------
     cents : pd.DataFrame
-        dataframe of centroid locations as returned by
-        :func:`calculate_centroids`
+        Dataframe of centroid locations as returned by
+        :func:`calculate_centroids`.
     by : str, optional
-        name of column by which cells from sessions will be grouped together, by
-        default "session"
+        Name of column by which cells from sessions will be grouped together. By
+        default `"session"`.
     index_dim : list, optional
-        additional metadata columns by which data should be grouped together,
-        pairs of sessions within such groups (but not across groups) will be
-        used for calculation, by default ["animal"]
+        Additional metadata columns by which data should be grouped together.
+        Pairs of sessions within such groups (but not across groups) will be
+        used for calculation. By default `["animal"]`.
     tile : tuple, optional
-        size of the rolling window to constrain caculation, specified in pixels
-        and in the order ("height", "width"), by default (50, 50)
+        Size of the rolling window to constrain caculation, specified in pixels
+        and in the order ("height", "width"). By default `(50, 50)`.
 
     Returns
     -------
     res_df : pd.DataFrame
-        pairwise distance between centroids across all pairs of sessions, where
-        each row represent a specific pair of cells across specific sessions,
-        the dataframe contains a two-level :doc:`MultiIndex
-        <pandas:user_guide/advanced>` as column names, the top level contains
-        three labels: "session", "variable" and "meta", each session will have a
+        Pairwise distance between centroids across all pairs of sessions, where
+        each row represent a specific pair of cells across specific sessions.
+        The dataframe contains a two-level :doc:`MultiIndex
+        <pandas:user_guide/advanced>` as column names. The top level contains
+        three labels: "session", "variable" and "meta". Each session will have a
         column under the "session" label, with values indicating the "unit_id"
         of the cell pair if either cell is in the corresponding session, and
-        `NaN` otherwise, "variable" contains a single column "distance"
-        indicating the distance of centroids for the cell pair, "meta" contains
+        `NaN` otherwise. "variable" contains a single column "distance"
+        indicating the distance of centroids for the cell pair. "meta" contains
         all additional metadata dimensions specified in `index_dim` as columns
-        so that cell pairs can be uniquely identified
+        so that cell pairs can be uniquely identified.
     """
     res_list = []
 
@@ -134,16 +134,16 @@ def subset_pairs(A: pd.DataFrame, B: pd.DataFrame, tile: tuple) -> set:
     Parameters
     ----------
     A : pd.DataFrame
-        input centroid locations, should have columns "height" and "width"
+        Input centroid locations. Should have columns "height" and "width".
     B : pd.DataFrame
-        input centroid locations, should have columns "height" and "width"
+        Input centroid locations. Should have columns "height" and "width".
     tile : tuple
-        window size
+        Window size.
 
     Returns
     -------
     pairs : set
-        set of all cell pairs represented as tuple
+        Set of all cell pairs represented as tuple.
     """
     Ah, Aw, Bh, Bw = A["height"], A["width"], B["height"], B["width"]
     hh = (min(Ah.min(), Bh.min()), max(Ah.max(), Bh.max()))
@@ -167,16 +167,16 @@ def pd_dist(A: pd.DataFrame, B: pd.DataFrame) -> pd.Series:
     Parameters
     ----------
     A : pd.DataFrame
-        input centroid locations, should have columns "height" and "width"
+        Input centroid locations. Should have columns "height" and "width".
     B : pd.DataFrame
-        input centroid locations, should have columns "height" and "width" and
+        Input centroid locations. Should have columns "height" and "width" and
         same row index as `A`, such that distance between corresponding rows
-        will be calculated
+        will be calculated.
 
     Returns
     -------
     dist : pd.Series
-        distance between centroid locations, has same row index as `A` and `B`
+        Distance between centroid locations. Has same row index as `A` and `B`.
     """
     return np.sqrt(
         ((A[["height", "width"]] - B[["height", "width"]]) ** 2).sum("columns")
@@ -190,13 +190,13 @@ def cartesian(*args: Iterable) -> np.ndarray:
     Parameters
     ----------
     *args : array_like
-        inputs that can be interpreted as array
+        Inputs that can be interpreted as array.
 
     Returns
     -------
     product : np.ndarray
         k x n array representing cartesian product of inputs, with k number of
-        unique combinations for n inputs
+        unique combinations for n inputs.
     """
     n = len(args)
     return np.array(np.meshgrid(*args)).T.reshape((-1, n))
@@ -209,20 +209,20 @@ def group_by_session(df: pd.DataFrame) -> pd.DataFrame:
     Parameters
     ----------
     df : pd.DataFrame
-        input dataframe with rows representing mappings, should be in two-level
+        Input dataframe with rows representing mappings. Should be in two-level
         column format like those returned by :func:`calculate_centroid_distance`
         or :func:`calculate_mapping` etc.
 
     Returns
     -------
     df : pd.DataFrame
-        the input `df` with an additional ("group", "group") column, whose
+        The input `df` with an additional ("group", "group") column, whose
         values are tuples indicating which sessions are involved (have non-NaN
-        values) in the mappings represented by each row
+        values) in the mappings represented by each row.
 
     See Also
     --------
-    resolve_mapping : for example usage
+    resolve_mapping : for example usages
     """
     ss = df["session"].notnull()
     grp = ss.apply(lambda r: tuple(r.index[r].tolist()), axis=1)
@@ -232,7 +232,8 @@ def group_by_session(df: pd.DataFrame) -> pd.DataFrame:
 
 def calculate_mapping(dist: pd.DataFrame) -> pd.DataFrame:
     """
-    Calculate mappings from cell pair distances with mutual nearest-neighbor criteria.
+    Calculate mappings from cell pair distances with mutual nearest-neighbor
+    criteria.
 
     This function takes in distance between cell pairs and filter them based on
     mutual nearest-neighbor criteria, where a cell pair is considered a valid
@@ -244,25 +245,26 @@ def calculate_mapping(dist: pd.DataFrame) -> pd.DataFrame:
     Parameters
     ----------
     dist : pd.DataFrame
-        the distances between cell pairs, should be in two-level column format
+        The distances between cell pairs. Should be in two-level column format
         as returned by :func:`calculate_centroid_distance`, and should also
-        contains a ("group", "group") column as returned by :func:`group_by_session`
+        contains a ("group", "group") column as returned by
+        :func:`group_by_session`.
 
     Returns
     -------
     mapping : pd.DataFrame
-        the mapping of cells across sessions, where each row represent a mapping
-        of cells across specific sessions, the dataframe contains a two-level
-        :doc:`MultiIndex <pandas:user_guide/advanced>` as column names, the top
-        level contains three labels: "session", "variable" and "meta", each
+        The mapping of cells across sessions, where each row represent a mapping
+        of cells across specific sessions. The dataframe contains a two-level
+        :doc:`MultiIndex <pandas:user_guide/advanced>` as column names. The top
+        level contains three labels: "session", "variable" and "meta". Each
         session will have a column under the "session" label, with values
         indicating the "unit_id" of the cell in that session involved in the
-        mapping, or `NaN` if the mapping does not involve the session,
+        mapping, or `NaN` if the mapping does not involve the session.
         "variable" contains a single column "distance" indicating the distance
         of centroids for the cell pair if the mapping involve only two cells,
-        and `NaN` otherwise, "meta" contains all additional metadata dimensions
+        and `NaN` otherwise. "meta" contains all additional metadata dimensions
         specified in `index_dim` as columns so that cell pairs can be uniquely
-        identified
+        identified.
     """
     map_idxs = set()
     meta_cols = list(filter(lambda c: c[0] == "meta", dist.columns))
@@ -284,12 +286,12 @@ def cal_mapping(dist: pd.DataFrame) -> pd.DataFrame:
     Parameters
     ----------
     dist : pd.DataFrame
-        the distances between cell pairs, should be in two-level column format
+        The distances between cell pairs. Should be in two-level column format.
 
     Returns
     -------
     mapping : pd.DataFrame
-        the mapping of cells across sessions
+        The mapping of cells across sessions.
 
     See Also
     --------
@@ -322,15 +324,15 @@ def resolve_mapping(mapping: pd.DataFrame) -> pd.DataFrame:
     Parameters
     ----------
     mapping : pd.DataFrame
-        input mappings dataframe, should be in two-level column format as
+        Input mappings dataframe. Should be in two-level column format as
         returned by :func:`calculate_mapping`, and should also contains a
-        ("group", "group") column as returned by :func:`group_by_session`
+        ("group", "group") column as returned by :func:`group_by_session`.
 
     Returns
     -------
     mapping : pd.DataFrame
-        output mappings with extended and resolved mappings, should be in the
-        same two-level column format as input
+        Output mappings with extended and resolved mappings. Should be in the
+        same two-level column format as input.
 
     Examples
     --------
@@ -404,13 +406,13 @@ def resolve(mapping: pd.DataFrame) -> pd.DataFrame:
     Parameters
     ----------
     mapping : pd.DataFrame
-        input mappings dataframe, should be in two-level column format
+        Input mappings dataframe. Should be in two-level column format.
 
     Returns
     -------
     mapping : pd.DataFrame
-        output mappings with extended and resolved mappings, should be in the
-        same two-level column format as input
+        Output mappings with extended and resolved mappings. Should be in the
+        same two-level column format as input.
 
     See Also
     --------
@@ -453,17 +455,17 @@ def fill_mapping(mappings: pd.DataFrame, cents: pd.DataFrame) -> pd.DataFrame:
     Parameters
     ----------
     mappings : pd.DataFrame
-        input mappings dataframe, should be in two-level column format as
+        Input mappings dataframe. Should be in two-level column format as
         returned by :func:`calculate_mapping`, and should also contains a
-        ("group", "group") column as returned by :func:`group_by_session`
+        ("group", "group") column as returned by :func:`group_by_session`.
     cents : pd.DataFrame
-        dataframe of centroid locations as returned by
-        :func:`calculate_centroids`
+        Dataframe of centroid locations as returned by
+        :func:`calculate_centroids`.
 
     Returns
     -------
     mappings : pd.DataFrame
-        output mappings with unmatched cells
+        Output mappings with unmatched cells.
     """
 
     def fill(cur_grp, cur_cent):
