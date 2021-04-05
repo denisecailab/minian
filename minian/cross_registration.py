@@ -265,15 +265,16 @@ def calculate_mapping(dist: pd.DataFrame) -> pd.DataFrame:
         identified
     """
     map_idxs = set()
-    try:
-        for anm, grp in dist.groupby(dist["meta", "animal"]):
-            map_idxs.update(mapping(grp))
-    except KeyError:
-        map_idxs = mapping(dist)
+    meta_cols = list(filter(lambda c: c[0] == "meta", dist.columns))
+    if meta_cols:
+        for _, grp in dist.groupby(meta_cols):
+            map_idxs.update(cal_mapping(grp))
+    else:
+        map_idxs = cal_mapping(dist)
     return dist.loc[list(map_idxs)]
 
 
-def mapping(dist: pd.DataFrame) -> pd.DataFrame:
+def cal_mapping(dist: pd.DataFrame) -> pd.DataFrame:
     """
     Calculate mappings from cell pair distances for a single group.
 
@@ -384,10 +385,11 @@ def resolve_mapping(mapping: pd.DataFrame) -> pd.DataFrame:
     Index: []
     """
     map_list = []
-    try:
-        for anm, grp in mapping.groupby(mapping["meta", "animal"]):
+    meta_cols = list(filter(lambda c: c[0] == "meta", mapping.columns))
+    if meta_cols:
+        for _, grp in mapping.groupby(meta_cols):
             map_list.append(resolve(grp))
-    except KeyError:
+    else:
         map_list = [resolve(mapping)]
     return pd.concat(map_list, ignore_index=True)
 
