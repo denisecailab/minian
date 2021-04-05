@@ -2,7 +2,6 @@ Cross Registration
 ==================
 
 .. toctree::
-   :maxdepth: 4
-   :caption: Contents:
+   :maxdepth: 1
 
    cross-registration

@@ -1,0 +1,23 @@
+.container-xl {
+  max-width: none;
+}
+
+.bd-sidebar {
+  flex: 0 0 15%;
+}
+
+.bd-content {
+  max-width: 70%;
+  flex: 0 0 70%;
+}
+
+.bd-toc {
+  flex: 0 0 15%;
+}
+
+cite {
+  padding: 0.2em 0.4em;
+  margin: 0;
+  background-color: rgba(27, 31, 35, 0.05);
+  border-radius: 3px;
+}

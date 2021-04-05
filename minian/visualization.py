@@ -2,6 +2,7 @@ import functools as fct
 import itertools as itt
 import os
 from collections import OrderedDict
+from typing import Callable, List, Optional, Tuple, Union
 from uuid import uuid4
 
 import colorcet as cc
@@ -14,6 +15,8 @@ import numpy as np
 import pandas as pd
 import panel as pn
 import param
+import scipy.sparse as scisps
+import sklearn.mixture
 import skvideo.io
 import xarray as xr
 from bokeh.palettes import Category10_10, Viridis256
@@ -38,35 +41,95 @@ from scipy.spatial import cKDTree
 
 from .cnmf import compute_AtC
 from .motion_correction import apply_shifts
-from .utilities import rechunk_like
+from .utilities import custom_arr_optimize, rechunk_like
 
 
 class VArrayViewer:
     """
-    This function creates an interactive figure where the data array is displayed as a movie. In the interactive figure, the user can draw an arbitrary box in the field of view and record this box as a mask using the "save mask" button
-        Args:
-            varr (xarray.DataArray): xarray.DataArray a labeled 3-d array representation of the videos with dimensions: frame, height and width.
-            framerate (int, optional): Acquisition frame rate. Defaults to 30.
-            rerange (dict, optional): the range by which the array will be color-mapped. Useful if the movie is visually too dim. Defaults to None. which would use the full range of the array.
-            summary (list, optional): [operation to perform on the data]. Defaults to ["mean"].
-            meta_dims (list, optional): List of metadata dimensions that defines each array if a list of arrays is passed in as `varr`. Defaults to None.
-            datashading (bool, optional): Use datashading yes or no. Defaults to True (yes).
-            layout (bool, optional): If set the output image will be boxed. Defaults to False.
+    Interactive visualization for movie data arrays.
 
-        Raises:
-            NotImplementedError
+    Hint
+    ----
+    .. figure:: img/vaviewer.png
+        :width: 500px
+        :align: left
+
+    The visualization contains following panels from top to bottom:
+
+    Play Toolbar
+        A toolbar that controls playback of the video. Additionally, when the
+        button "Update Mask" is clicked, the coordinates of the box drawn in
+        *Current Frame* panel will be used to update the `mask` attribute of the
+        `VArrayViewer` instance, which can be later used to subset the data. If
+        multiple arrays are visualized and `layout` is `False`, then drop-down
+        lists corresponding to each metadata dimensions will show up so the user
+        can select which array to visualize.
+    Current Frame
+        Images of the current frame. If multiple movie array are passed in,
+        multiple frames will be labeled and shown. To the side of each frame
+        there is a histogram of intensity values. The "Box Select" tool can be
+        used on the histogram to limit the range of intensity used for
+        color-mapping. Additionally, the "Box Edit Tool" is available for use on
+        the frame image, where you can hold "Shift" and draw a box, whose
+        coordinates can be used to update the `mask` attribute of the
+        `VarrayViewer` instance (remember to click "Update Mask" after drawing).
+    Summary
+        Summary statistics of each frame across time. Only shown if `summary` is
+        not empty. The red vertical line indicate current frame.
+
+    Attributes
+    ----------
+    mask : dict
+        Instance attribute that can be retrieved and used to subset data later.
+        Keys are `tuple` with values corresponding to each `meta_dims` and
+        uniquely identify each input array. If `meta_dims` is empty then keys
+        will be empty `tuple` as well. Values are `dict` mapping dimension names
+        (of the arrays) to subsetting slices. The slices are in the plotting
+        coorandinates and can be directly passed to `xr.DataArray.sel` method to
+        subset data.
     """
 
     def __init__(
         self,
-        varr,
+        varr: Union[xr.DataArray, List[xr.DataArray], xr.Dataset],
         framerate=30,
-        rerange=None,
         summary=["mean"],
-        meta_dims=None,
+        meta_dims: List[str] = None,
         datashading=True,
         layout=False,
     ):
+        """
+        Parameters
+        ----------
+        varr : Union[xr.DataArray, List[xr.DataArray], xr.Dataset]
+            Input array, list of arrays, or dataset to be visualized. Each array
+            should contain dimensions "height", "width" and "frame". If a
+            dataset, then the dimensions specified in `meta_dims` will be used
+            as metadata dimensions that can uniquely identify each array. If a
+            list, then a dimension "data_var" will be constructed and used as
+            metadata dimension, and the `.name` attribute of each array will be
+            used to identify each array.
+        framerate : int, optional
+            The framerate of playback when using the toolbar. By default `30`.
+        summary : list, optional
+            List of summary statistics to plot. The statistics should be one of
+            `{"mean", "max", "min", "diff"}`. By default `["mean"]`.
+        meta_dims : List[str], optional
+            List of dimension names that can uniquely identify each input array
+            in `varr`. Only used if `varr` is a `xr.Dataset`. By default `None`.
+        datashading : bool, optional
+            Whether to use datashading on the summary statistics. By default
+            `True`.
+        layout : bool, optional
+            Whether to visualize all arrays together as layout. If `False` then
+            only one array will be visualized and user can switch array using
+            drop-down lists below the *Play Toolbar*. By default `False`.
+
+        Raises
+        ------
+        NotImplementedError
+            if `varr` is not a `xr.DataArray`, a `xr.Dataset` or a list of `xr.DataArray`
+        """
         if isinstance(varr, list):
             for iv, v in enumerate(varr):
                 varr[iv] = v.assign_coords(data_var=v.name)
@@ -97,7 +160,6 @@ class VArrayViewer:
         self._h = self.ds.sizes["height"]
         self._w = self.ds.sizes["width"]
         self.mask = dict()
-        self.rerange = rerange
         CStream = Stream.define(
             "CStream",
             f=param.Integer(
@@ -149,8 +211,6 @@ class VArrayViewer:
             im = hv.DynamicMap(fim, streams=[self.strm_f]).opts(
                 frame_width=500, aspect=self._w / self._h, cmap="Viridis"
             )
-            if self.rerange:
-                im = im.redim.range(**{vname: self.rerange})
             self.xyrange = RangeXY(source=im).rename(x_range="w", y_range="h")
             if not self._layout:
                 hv_box = hv.Polygons([]).opts(
@@ -207,17 +267,19 @@ class VArrayViewer:
             summ = (hvsum * vl).map(
                 lambda p: p.opts(frame_width=500, aspect=3), [hv.RGB, hv.Curve]
             )
+            hvobj = (ims + summ).cols(1)
         else:
-            summ = hv.Div("")
-        hvobj = (ims + summ).cols(1)
+            hvobj = ims
         return hvobj
 
-    def show(self):
+    def show(self) -> pn.layout.Column:
         """
-        Refreshes viewer content with the new frame
+        Return visualizations that can be directly displayed.
 
-        Returns:
-            panel.layout.Column
+        Returns
+        -------
+        pn.layout.Column
+            Resulting visualizations containing both plots and toolbars.
         """
         return pn.layout.Column(self.widgets, self.pnplot)
 
@@ -276,18 +338,115 @@ class VArrayViewer:
 
 class CNMFViewer:
     """
-    This class creates a figure to visualize the results of the CNMF
+    Interactive visualization for CNMF results.
 
-    Args:
-        minian (string, optional): folder under which the actual code of minian (.py files) reside. Defaults to None.
-        A (xarray.DataArray, optional): spatial footprint of each unit. Defaults to None.
-        C (xarray.DataArray, optional): temporal activity of a unit, i.e. neuron. Defaults to None.
-        S (xarray.DataArray, optional): . Defaults to None.
-        org (xarray.DataArray, optional): raw video after pre-processing and motion correction. Defaults to None.
-        sortNN (bool, optional): whether to sort cells based on nearest neighbor, so that cells that are spatially together will likely be displayed together. Defaults to True.
+    Hint
+    ----
+    .. figure:: img/cnmfviewer.png
+        :width: 1000px
+
+    The visualization can be divided into two parts vertically:
+
+    Spatial
+        Top part of the visualization. Shows spatial plots at a given time. From
+        left to right:
+
+        Spatial Footprints
+            Shows the spatial footprints of all cells. The "Box Select" tool can
+            be used in this panel to select a subset of cells to visualize for
+            both the *Isolated Activities* panel and the *Temporal Activities*
+            panel.
+        Isolated Activities
+            Shows activities of selected cells only. If the "UseAC" checkbox
+            under *General Toolbox* is enabled, then the `AtC` variable computed
+            with the selected cells will be visualized at the given frame (See
+            :func:`minian.cnmf.compute_AtC`). Otherwise the spatial footprints
+            of the cells will be plotted, which would be invariant across time.
+            The "unit_id" coordinates for each cell are shown on top of each
+            cell.
+        Original Movie
+            Shows a single frame of an arbitrary movie data supplied in `org`.
+
+    Temporal
+        Bottom part of the visualization. Shows temporal activities across time
+        and various toolboxes. From left to right:
+
+        General Toolbox
+            Contains the following tools:
+
+            * "Refresh" button, will refresh all visualization when clicked.
+            * "Load Data" button, will load all data in memory for faster
+              visualization, can be very memory-demanding.
+            * "UseAC" checkbox, whether to plot spatial-temporal activities for
+              the *Isolated Activities* panel.
+            * "ShowC", "ShowS", "Normalize" checkboxes, whether to show the
+              calcium traces, the spike signals, or to normalize both traces
+              to unit range for each cell.
+            * "Group" dropbox, "Previous Group" and "Next Group" buttons, select
+              the group of cells to visualize. The grouping is controled by
+              `sortNN` parameter.
+            * Playback toolbar, used to control which timepoint is visualized.
+            * Additional metadata dropdown, if the input dataset contains
+              additional metadata dimensions then dropdown will show up so
+              user can select which dataset to visualize.
+        Temporal Activities
+            Shows temporal activities of selected subset of cells. The red
+            vertical line indicate current frame. Additionally user can
+            double-click anywhere in the plot to move current frame to that
+            location.
+        Manual Label
+            Shows tools to carry out manual labeling of cells. User can either
+            manually assign unit label using the dropdown for each cell, or
+            select some cells with the checkboxes corresponding to the
+            "unit_id", and then merge or discard the units using the buttons.
+            The "Unit Label" dropdowns should update and refelect the merging or
+            discarding actions.
+
+    Attributes
+    ----------
+    unit_labels : xr.DataArray
+        1d array whose values represent the result of manual refinement of
+        cells. The "unit_id" coordinate of this array is identical to input
+        data. The values of this array can be interpreted as new "unit_id" after
+        the manual refinement, where duplicated values indicate merged cells,
+        and values of -1 indicate discarded cells.
     """
 
-    def __init__(self, minian=None, A=None, C=None, S=None, org=None, sortNN=True):
+    def __init__(
+        self,
+        minian: Optional[xr.Dataset] = None,
+        A: Optional[xr.DataArray] = None,
+        C: Optional[xr.DataArray] = None,
+        S: Optional[xr.DataArray] = None,
+        org: Optional[xr.DataArray] = None,
+        sortNN=True,
+    ):
+        """
+        Parameters
+        ----------
+        minian : xr.Dataset, optional
+            Input minian dataset containing all necessary variables. If `None`
+            then all other arguments should be supplied. By default `None`.
+        A : xr.DataArray, optional
+            Spatial footprints of cells. If `None` then it will be retrieved as
+            `minian["A"]`. By default `None`.
+        C : xr.DataArray, optional
+            Calcium dynamic of cells. If `None` then it will be retrieved as
+            `minian["C"]`. By default `None`.
+        S : xr.DataArray, optional
+            Deconvolved spikes of cells. If `None` then it will be retrieved as
+            `minian["S"]`. By default `None`.
+        org : xr.DataArray, optional
+            Arbitrary movie data to be visualized along with results of CNMF. If
+            `None` then it will be retrieved as `minian["org"]`. If this array
+            contains dimensions other than "height", "width" or "frame" then
+            they will be used as metadata dimensions. By default `None`.
+        sortNN : bool, optional
+            Whether to sort the units using :func:`NNsort` so that cells close
+            together will appear in same group for visualization. If `False`
+            then cells are simply grouped in 5 by ascending "unit_id". By
+            default `True`.
+        """
         self._A = A if A is not None else minian["A"]
         self._C = C if C is not None else minian["C"]
         self._S = S if S is not None else minian["S"]
@@ -469,7 +628,15 @@ class CNMFViewer:
             *(list(wgt_meta.values()) + [wgt_update, wgt_load]), width=150
         )
 
-    def show(self):
+    def show(self) -> pn.layout.Column:
+        """
+        Return visualizations that can be directly displayed.
+
+        Returns
+        -------
+        pn.layout.Column
+            Resulting visualizations containing both plots and toolboxes.
+        """
         return pn.layout.Column(
             self.spatial_all,
             pn.layout.Row(
@@ -636,7 +803,7 @@ class CNMFViewer:
                 options=usub + [-1] + ulabs.tolist(),
                 value=ulb,
                 height=50,
-                width=100,
+                width=80,
             )
             for uid, ulb in zip(usub, ulabs)
         }
@@ -665,7 +832,7 @@ class CNMFViewer:
             cb = fct.partial(callback_chk, uid=uid)
             chk.param.watch(cb, "value")
         wgt_discard = pnwgt.Button(
-            name="Discard Selected", button_type="primary", width=200
+            name="Discard Selected", button_type="primary", width=180
         )
 
         def callback_discard(clicks):
@@ -674,7 +841,7 @@ class CNMFViewer:
 
         wgt_discard.param.watch(callback_discard, "clicks")
         wgt_merge = pnwgt.Button(
-            name="Merge Selected", button_type="primary", width=200
+            name="Merge Selected", button_type="primary", width=180
         )
 
         def callback_merge(clicks):
@@ -798,22 +965,65 @@ class CNMFViewer:
 
 
 class AlignViewer:
-    def __init__(self, minian_ds, cents, mappings, shiftds, brt_offset=0) -> None:
+    """
+    Interactive visualization of cross-registration resuls.
+
+    Hint
+    ----
+    .. image:: img/alignviewer.png
+        :width: 700px
+
+    This class visualize the result of cross-registration by color-mapping
+    spatial footprints of cells from three selected sessions as red, green and
+    blue channel and show an overlay image. In addition to the overlay image,
+    following tools are available:
+
+    Channel Selector
+        Contains "sessionR", "sessionG", and "sessionB" dropdowns, allowing the
+        user to select which sessions are colormapped to each channel.
+    Display Settings
+        Contains the following tools:
+
+        * "erode" dropdown, set window size of an optional erode operation
+          applied to the spatial footprints for display to reduce overlaps.
+        * "show matched" and "show unmatched" checkboxes, set whether to show
+          cells that are matched or not matched across all three selected sessions.
+    Metadata Selector
+        If additional metadata are present, dropdowns corresponding to each
+        metadata dimensions will be shown.
+
+    """
+
+    def __init__(
+        self,
+        minian_ds: xr.Dataset,
+        cents: pd.DataFrame,
+        mappings: pd.DataFrame,
+        shiftds: xr.Dataset,
+        brt_offset=0,
+    ) -> None:
+        """
+        Parameters
+        ----------
+        minian_ds : xr.Dataset
+            Input dataset. Should contain `minian_ds["A"]`.
+        cents : pd.DataFrame
+            Input centroids of cells.
+        mappings : pd.DataFrame
+            Input mappings of cells.
+        shiftds : xr.Dataset
+            Input dataset of shift results. Should contain `shiftds["shifts"]`.
+        brt_offset : int, optional
+            Brightness offset added on top of the color-mapped image. Useful to
+            make the image visually brighter. By default `0`.
+        """
         # init
         self.minian_ds = minian_ds
         self.cents = cents
         self.mappings = mappings
         self.shiftds = shiftds
         self.brt_offset = brt_offset
-        A = self.minian_ds["A"].chunk(
-            {
-                "animal": 1,
-                "session": "auto",
-                "height": -1,
-                "width": -1,
-                "unit_id": "auto",
-            }
-        )
+        A = self.minian_ds["A"]
         self.shifts = rechunk_like(self.shiftds["shifts"], A)
         self.Ash = apply_shifts(A, self.shifts, fill=0)
         # option widgets
@@ -829,16 +1039,23 @@ class AlignViewer:
         self.wgt_opt = pn.layout.WidgetBox(wgt_er, wgt_ma, wgt_uma)
         self.processA()
         # handling meta
-        self.meta_dict = {
-            col: c.unique().tolist() for col, c in mappings["meta"].iteritems()
-        }
-        self.meta = {d: v[0] for d, v in self.meta_dict.items()}
-        wgt_meta = [
-            pnwgt.Select(name=dim, options=vals) for dim, vals in self.meta_dict.items()
-        ]
-        for w in wgt_meta:
-            w.param.watch(lambda v, n=w.name: self.cb_update_meta(n, v), "value")
-        self.wgt_meta = pn.layout.WidgetBox(*wgt_meta)
+        try:
+            self.meta_dict = {
+                col: c.unique().tolist() for col, c in mappings["meta"].iteritems()
+            }
+        except KeyError:
+            self.meta_dict = None
+        if self.meta_dict:
+            self.meta = {d: v[0] for d, v in self.meta_dict.items()}
+            wgt_meta = [
+                pnwgt.Select(name=dim, options=vals)
+                for dim, vals in self.meta_dict.items()
+            ]
+            for w in wgt_meta:
+                w.param.watch(lambda v, n=w.name: self.cb_update_meta(n, v), "value")
+            self.wgt_meta = pn.layout.WidgetBox(*wgt_meta)
+        else:
+            self.wgt_meta = None
         self.update_meta()
         # sessionRGB
         sess = list(mappings["session"].columns)
@@ -917,15 +1134,31 @@ class AlignViewer:
             "frame_height": self.curA.sizes["height"],
             "frame_width": self.curA.sizes["width"],
         }
-        return pn.panel(hv.RGB(im_ovly, kdims=["width", "height"]).opts(**im_opts))
+        return pn.panel(
+            hv.RGB(
+                (
+                    im_ovly.coords["width"],
+                    im_ovly.coords["height"],
+                    im_ovly[:, :, 0],
+                    im_ovly[:, :, 1],
+                    im_ovly[:, :, 2],
+                    im_ovly[:, :, 3],
+                ),
+                kdims=["width", "height"],
+            ).opts(**im_opts)
+        )
 
     def update_meta(self):
-        self.curA = self.dataA.sel(**self.meta).persist()
-        self.curmap = (
-            self.mappings.set_index([("meta", d) for d in self.meta.keys()])
-            .loc[tuple(self.meta.values())]
-            .reset_index()
-        )
+        if self.meta_dict:
+            self.curA = self.dataA.sel(**self.meta).persist()
+            self.curmap = (
+                self.mappings.set_index([("meta", d) for d in self.meta.keys()])
+                .loc[tuple(self.meta.values())]
+                .reset_index()
+            )
+        else:
+            self.curA = self.dataA.persist()
+            self.curmap = self.mappings
 
     def cb_update_erd(self, val):
         self.erode = val.new
@@ -950,7 +1183,15 @@ class AlignViewer:
         self.show_uma = val.new
         self.plot.object = self.update_plot().object
 
-    def show(self):
+    def show(self) -> pn.layout.Row:
+        """
+        Return visualizations that can be directly displayed.
+
+        Returns
+        -------
+        pn.layout.Row
+            Resulting visualizations containing both plots and toolbars.
+        """
         return pn.layout.Row(
             self.plot, pn.layout.Column(self.wgt_meta, self.wgt_rgb, self.wgt_opt)
         )
@@ -972,27 +1213,52 @@ def write_vid_blk(arr, vpath, options):
 
 
 def write_video(
-    arr, vname=None, vpath=".", norm=True, options={"crf": "18", "preset": "ultrafast"}
-):
+    arr: xr.DataArray,
+    vname: Optional[str] = None,
+    vpath: Optional[str] = ".",
+    norm=True,
+    options={"crf": "18", "preset": "ultrafast"},
+) -> str:
     """
-    This function writes video to disk
+    Write a video from a movie array using `python-ffmpeg`.
 
-    Args:
-        arr (xarray.DataArray): data
-        vname (str, optional): name of the video. Defaults to None.
-        vpath (str, optional): path to the target location. Defaults to ".".
-        options (dict, optional): saving options. Defaults to {'crf': '18', 'preset': 'ultrafast'}.
+    Parameters
+    ----------
+    arr : xr.DataArray
+        Input movie array. Should have dimensions: ("frame", "height", "width")
+        and should only be chunked along the "frame" dimension.
+    vname : str, optional
+        The name of output video. If `None` then a random one will be generated
+        using :func:`uuid4.uuid`. By default `None`.
+    vpath : str, optional
+        The path to the folder containing the video. By default `"."`.
+    norm : bool, optional
+        Whether to normalize the values of the input array such that they span
+        the full pixel depth range (0, 255). By default `True`.
+    options : dict, optional
+        Optional output arguments passed to `ffmpeg`. By default `{"crf": "18",
+        "preset": "ultrafast"}`.
 
-    Returns:
-        string: absolute path to the file
+    Returns
+    -------
+    fname : str
+        The absolute path to the video file.
+
+    See Also
+    --------
+    ffmpeg.output
     """
     if not vname:
         vname = "{}.mp4".format(uuid4())
     fname = os.path.join(vpath, vname)
     if norm:
-        arr = arr.astype(np.float32)
-        arr_max = arr.max().compute().values
-        arr_min = arr.min().compute().values
+        arr_opt = fct.partial(
+            custom_arr_optimize, rename_dict={"rechunk": "merge_restricted"}
+        )
+        with dask.config.set(array_optimize=arr_opt):
+            arr = arr.astype(np.float32)
+            arr_max = arr.max().compute().values
+            arr_min = arr.min().compute().values
         den = arr_max - arr_min
         arr -= arr_min
         arr /= den
@@ -1030,33 +1296,81 @@ def concat_video_recursive(vlist, vname=None):
 
 
 def generate_videos(
-    varr,
-    Y,
-    A=None,
-    C=None,
-    AC=None,
+    varr: xr.DataArray,
+    Y: xr.DataArray,
+    A: Optional[xr.DataArray] = None,
+    C: Optional[xr.DataArray] = None,
+    AC: Optional[xr.DataArray] = None,
+    nfm_norm=200,
+    gain=1.5,
     vpath=".",
     vname="minian.mp4",
     options={"crf": "18", "preset": "ultrafast"},
-):
+) -> str:
     """
-    This function outputs a video that can help us quickly visualize the results of the CNMF. The resulting video will have six quadrants: Top Left: spatial footprints of all cells (projection of the sum); Top Middle: if UseAC, shows the dot product of A (spatial footprint) and C (temporal activities) matrix of selected neurons, if UseAC is False shows the spatial footprints of selected neurons (a sum projection); Top Right shows the raw video after pre-processing and motion correction, which is the movie that's fed in as org to CNMFViewer; Bottom Left Controller Panel has several features: Load Data (loads the data into memory), Refresh (refreshes the data when you switch to a new group of units), UseAC check box (controls the option of the top middle panel), Normalize (normalizes the bottom middle trace and spike plot for each unit to itself), ShowC (shows calcium traces for each unit across time in the bottom middle plot), ShowS (shows spikes for each unit across time in the bottom middle plot), Previous and Next Group buttons (allows to go backward/forward to another group of units), Video Play Panel (allows to play the top middle and right panel in real time); Bottom Middle Panel contains plots of units along the time axis; Bottom Right contains a labeling tool for the user to manually exclude unwanted units by labelling them (they will be demarcated with a -1).
-    Args:
-        minian (xarray.DataArray): input data
-        varr (xarray.DataArray): input data
-        vpath (str, optional): path to the video. Defaults to ".".
-        vname (str, optional): video name. Defaults to "minian.mp4".
-        scale (str, optional): scale dimensions. Defaults to "auto".
-        options (dict, optional): export options. Defaults to {'crf': '18', 'preset': 'ultrafast'}.
+    Generate a video visualizaing the result of minian pipeline.
 
-    Returns:
-        string: absolute path to the generated video
+    The resulting video contains four parts: Top left is a original reference
+    movie supplied as `varr`; Top right is the input to CNMF algorithm supplied
+    as `Y`; Bottom right is a movie `AC` representing cellular activities as
+    computed by :func:`minian.cnmf.compute_AtC`; Bottom left is a residule movie
+    computed as the difference between `Y` and `AC`. Since the CNMF algorithm
+    contains various arbitrary scaling process, a normalizing scalar is computed
+    with least square using a subset of frames from `Y` and `AC` such that their
+    numerical values matches.
+
+    Parameters
+    ----------
+    varr : xr.DataArray
+        Input reference movie data. Should have dimensions ("frame", "height",
+        "width"), and should only be chunked along "frame" dimension.
+    Y : xr.DataArray
+        Movie data representing input to CNMF algorithm. Should have dimensions
+        ("frame", "height", "width"), and should only be chunked along "frame"
+        dimension.
+    A : xr.DataArray, optional
+        Spatial footprints of cells. Only used if `AC` is `None`. By default
+        `None`.
+    C : xr.DataArray, optional
+        Temporal activities of cells. Only used if `AC` is `None`. By default
+        `None`.
+    AC : xr.DataArray, optional
+        Spatial-temporal activities of cells. Should have dimensions ("frame",
+        "height", "width"), and should only be chunked along "frame" dimension.
+        If `None` then both `A` and `C` should be supplied and
+        :func:`minian.cnmf.compute_AtC` will be used to compute this variable.
+        By default `None`.
+    nfm_norm : int, optional
+        Number of frames to randomly draw from `Y` and `AC` to compute the
+        normalizing factor with least square. By default `200`.
+    gain : float, optional
+        A gain factor multiplied to `Y`. Useful to make the results visually
+        brighter. By default `1.5`.
+    vpath : str, optional
+        Desired folder containing the resulting video. By default `"."`.
+    vname : str, optional
+        Desired name of the video. By default `"minian.mp4"`.
+    options : dict, optional
+        Output options for `ffmpeg`, passed directly to :func:`write_video`. By
+        default `{"crf": "18", "preset": "ultrafast"}`.
+
+    Returns
+    -------
+    fname : str
+        Absolute path of the resulting video.
     """
     if AC is None:
         print("generating traces")
         AC = compute_AtC(A, C)
-    Y = Y * 255 / Y.max().compute().values
-    AC = AC * 255 / AC.max().compute().values
+    print("normalizing")
+    Y = Y * 255 / Y.max().compute().values * gain
+    norm_idx = np.random.randint(0, Y.sizes["frame"], nfm_norm)
+    Y_sub = Y.isel(frame=norm_idx).values.reshape(-1)
+    AC_sub = scisps.csc_matrix(AC.isel(frame=norm_idx).values.reshape((-1, 1)))
+    lsqr = scisps.linalg.lsqr(AC_sub, Y_sub)
+    norm_factor = lsqr[0].item()
+    del Y_sub, AC_sub
+    AC = AC * norm_factor
     res = Y - AC
     print("writing videos")
     vid = xr.concat(
@@ -1070,7 +1384,28 @@ def generate_videos(
     return write_video(vid, vname, vpath, norm=False, options=options)
 
 
-def datashade_ndcurve(ovly, kdim=None, spread=False):
+def datashade_ndcurve(
+    ovly: hv.NdOverlay, kdim: Optional[Union[str, List[str]]] = None, spread=False
+) -> hv.Overlay:
+    """
+    Apply datashading to an overlay of curves with legends.
+
+    Parameters
+    ----------
+    ovly : hv.NdOverlay
+        The input overlay of curves.
+    kdim : Union[str, List[str]], optional
+        Key dimensions of the overlay. If `None` then the first key dimension of
+        `ovly` will be used. By default `None`.
+    spread : bool, optional
+        Whether to apply :func:`holoviews.operation.datashader.dynspread` to the
+        result. By default `False`.
+
+    Returns
+    -------
+    hvres : hv.Overlay
+        Resulting overlay of datashaded curves and points (for legends).
+    """
     if not kdim:
         kdim = ovly.kdims[0].name
     var = np.unique(ovly.dimension_values(kdim)).tolist()
@@ -1093,7 +1428,28 @@ def datashade_ndcurve(ovly, kdim=None, spread=False):
     return ds_ovly * color_pts
 
 
-def construct_G(g, T):
+def construct_G(g: np.ndarray, T: np.ndarray) -> np.ndarray:
+    """
+    Construct a convolving matrix from AR coefficients.
+
+    Parameters
+    ----------
+    g : np.ndarray
+        Input AR coefficients.
+    T : np.ndarray
+        Number of time samples of the AR process.
+
+    Returns
+    -------
+    G : np.ndarray
+        A `T` x `T` matrix that can be used to multiply with a timeseries to
+        convolve the AR process.
+
+    See Also
+    --------
+    minian.cnmf.update_temporal :
+        for more background on the role of AR process in the pipeline
+    """
     cur_c, cur_r = np.zeros(T), np.zeros(T)
     cur_c[0] = 1
     cur_r[0] = 1
@@ -1101,11 +1457,38 @@ def construct_G(g, T):
     return linalg.toeplitz(cur_c, cur_r)
 
 
-def normalize(a):
+def normalize(a: np.ndarray) -> np.ndarray:
+    """
+    Normalize an input array to range (0, 1) using :func:`numpy.interp`.
+
+    Parameters
+    ----------
+    a : np.ndarray
+        Input array.
+
+    Returns
+    -------
+    a_norm : np.ndarray
+        Normalized array.
+    """
     return np.interp(a, (np.nanmin(a), np.nanmax(a)), (0, +1))
 
 
-def norm(a):
+def norm(a: np.ndarray) -> np.ndarray:
+    """
+    Normalize an input array to range (0, 1) avoiding division-by-zero.
+
+    Parameters
+    ----------
+    a : np.ndarray
+        Input array.
+
+    Returns
+    -------
+    a_norm : np.ndarray
+        Normalized array. If there is only one unique value in `a` then it is
+        returned unchanged.
+    """
     amax = np.nanmax(a)
     amin = np.nanmin(a)
     diff = amax - amin
@@ -1115,7 +1498,30 @@ def norm(a):
         return a
 
 
-def convolve_G(s, g):
+def convolve_G(s: np.ndarray, g: np.ndarray) -> np.ndarray:
+    """
+    Convolve an AR process to input timeseries.
+
+    Despite the name, only AR coefficients are needed as input. The convolving
+    matrix will be computed using :func:`construct_G`.
+
+    Parameters
+    ----------
+    s : np.ndarray
+        The input timeseries, presumably representing spike signals.
+    g : np.ndarray
+        The AR coefficients.
+
+    Returns
+    -------
+    c : np.ndarray
+        Convolved timeseries, presumably representing calcium dynamics.
+
+    See Also
+    --------
+    minian.cnmf.update_temporal :
+        for more background on the role of AR process in the pipeline
+    """
     G = construct_G(g, len(s))
     try:
         c = np.linalg.inv(G).dot(s)
@@ -1124,14 +1530,56 @@ def convolve_G(s, g):
     return c
 
 
-def construct_pulse_response(g, length=500):
+def construct_pulse_response(
+    g: np.ndarray, length=500
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Construct a model pulse response corresponding to certain AR coefficients.
+
+    Parameters
+    ----------
+    g : np.ndarray
+        The AR coefficients.
+    length : int, optional
+        Number of timepoints in output. By default `500`.
+
+    Returns
+    -------
+    s : np.ndarray
+        Model spike with shape `(length,)`, zero everywhere except the first
+        timepoint.
+    c : np.ndarray
+        Model convolved calcium response, with same shape as `s`.
+
+    See Also
+    --------
+    minian.cnmf.update_temporal :
+        for more background on the role of AR process in the pipeline
+    """
     s = np.zeros(length)
     s[np.arange(0, length, 500)] = 1
     c = convolve_G(s, g)
     return s, c
 
 
-def centroid(A, verbose=False):
+def centroid(A: xr.DataArray, verbose=False) -> pd.DataFrame:
+    """
+    Compute centroids of spatial footprint of each cell.
+
+    Parameters
+    ----------
+    A : xr.DataArray
+        Input spatial footprints.
+    verbose : bool, optional
+        Whether to print message and progress bar. By default `False`.
+
+    Returns
+    -------
+    cents_df : pd.DataFrame
+        Centroid of spatial footprints for each cell. Has columns "unit_id",
+        "height", "width" and any other additional metadata dimension.
+    """
+
     def rel_cent(im):
         im_nan = np.isnan(im)
         if im_nan.all():
@@ -1174,17 +1622,36 @@ def centroid(A, verbose=False):
     return cents_df
 
 
-def visualize_preprocess(fm, fn=None, include_org=True, **kwargs):
+def visualize_preprocess(
+    fm: xr.DataArray, fn: Optional[Callable] = None, include_org=True, **kwargs
+) -> hv.HoloMap:
     """
-    This function allows the visualization of preprocessed data
+    Generalized visualization of preprocessing functions.
 
-    Args:
-        fm (xarray.DataArray): input data
-        fn (tuple, optional): the function to apply to each frame (i.e. the function whose parameters needs exploration). Defaults to None.
-        include_org (bool, optional): Whether to include the original frame. Defaults to True.
+    This function facilitates parameter exploration of preprocessing functions
+    by plotting a single frame before and after the application of the function,
+    along with a contour plot. All keyword arguments not listed below are passed
+    directly to `fn`.
 
-    Returns:
-        image
+    Parameters
+    ----------
+    fm : xr.DataArray
+        The input frame.
+    fn : Callable, optional
+        The function to apply. If `None` then the original frame are visualized
+        unchanged. By default `None`.
+    include_org : bool, optional
+        Whether to include the original frame in the visualization. By default
+        `True`.
+
+    Returns
+    -------
+    hvres : hv.HoloMap
+        The resulting visualization containing images and contour plots.
+
+    See Also
+    --------
+    minian.preprocessing
     """
     fh, fw = fm.sizes["height"], fm.sizes["width"]
     asp = fw / fh
@@ -1245,18 +1712,33 @@ def visualize_preprocess(fm, fn=None, include_org=True, **kwargs):
         return im + cnt
 
 
-def visualize_seeds(max_proj, seeds, mask=None):
+def visualize_seeds(
+    max_proj: xr.DataArray, seeds: pd.DataFrame, mask: Optional[str] = None
+) -> hv.Overlay:
     """
-    This function allows the overlay of the seeds’ centroids over the maximum intensity projection
+    Visualization of seeds.
 
-    Args:
-        max_proj (array): maximum intensity projection
-        seeds (dict): seeds
-        mask (array, optional): spatial mask of the Region of Interest. Defaults to None.
-        datashade (bool, optional): Use datashading yes o no. Defaults to False (no).
+    This function plot seeds on top of a max projection. It can also visualize
+    certain refining step of seeds by coloring the filtered-out seeds in red.
 
-    Returns:
-        holoviews.core.overlay.Overlay: visualization object
+    Parameters
+    ----------
+    max_proj : xr.DataArray
+        Max projection used as the background of the plot.
+    seeds : pd.DataFrame
+        The seed dataframe.
+    mask : str, optional
+        The name of the mask of seeds to visualize. If specified, then `seeds`
+        must contain a boolean column with the same name. By default `None`.
+
+    Returns
+    -------
+    hvres : hv.Overlay
+        The resuling overlay of seeds and max projection.
+
+    See Also
+    --------
+    minian.initialization
     """
     h, w = max_proj.sizes["height"], max_proj.sizes["width"]
     asp = w / h
@@ -1282,17 +1764,32 @@ def visualize_seeds(max_proj, seeds, mask=None):
     return im.opts(**opts_im) * pts.opts(**opts_pts)
 
 
-def visualize_gmm_fit(values, gmm, bins):
+def visualize_gmm_fit(
+    values: np.ndarray, gmm: sklearn.mixture.GaussianMixture, bins: int
+) -> hv.Overlay:
     """
-    This function allows the visualization of the Gaussian mixture model fit
+    Visualization of the Gaussian mixture model fit.
 
-    Args:
-        values (array): peak to noise ratio
-        gmm (dict): gaussian model fit
-        bins (tuple): number of bins
+    This function visualize GMM fit by plotting the fitted gaussian curves on
+    top of the histograms of values.
 
-    Returns:
-        holoviews.core.overlay.Overlay: visualization object
+    Parameters
+    ----------
+    values : np.ndarray
+        The raw values to which GMM is fitted.
+    gmm : sklearn.mixture.GaussianMixture
+        The fitted GMM model object.
+    bins : int
+        Number of bins when plotting the histogram.
+
+    Returns
+    -------
+    hvres : hv.Overlay
+        The resulting visualization.
+
+    See Also
+    --------
+    minian.initialization.gmm_refine
     """
 
     def gaussian(x, mu, sig):
@@ -1311,19 +1808,53 @@ def visualize_gmm_fit(values, gmm, bins):
     ).opts(plot=dict(height=350, width=500))
 
 
-def visualize_spatial_update(A_dict, C_dict, kdims=None, norm=True, datashading=True):
+def visualize_spatial_update(
+    A_dict: dict,
+    C_dict: dict,
+    kdims: Optional[Union[str, List[str]]] = None,
+    norm=True,
+    datashading=True,
+) -> hv.HoloMap:
     """
-    This function launches the visualizer to explore the parameters of the spatial noise estimation. This step precedes the CNMF and is used to estimate the noise introduced by motion.
+    Visualization of spatial update.
 
-    Args:
-        A_dict (dict): input spatial footprints
-        C_dict (dict): temporal activity of each unit
-        kdims (tuple, optional): dimension of the footprints (e.g. 'width', 'height'). Defaults to None.
-        norm (bool, optional): normalization (True/False). Defaults to True.
-        datashading (bool, optional): Use datashading yes or no. Defaults to True (yes).
+    This function facilitates parameter exploration for spatial update by
+    plotting the resulting spatial footprints and binarized spatial footprints
+    from different runs of spatial update for a subset of cells, along with
+    their corresponding temporal activities.
 
-    Returns:
-        holoviews.core.layout.Layout
+    Parameters
+    ----------
+    A_dict : dict
+        A dictionary containing resulting spatial footprints from different runs
+        of spatial update. Keys should be tuple containing the values of
+        parameters that uniquely identify each run. Values should be spatial
+        footprints of type `xr.DataArray`.
+    C_dict : dict
+        A dictionary containing temporal activities of each cells in the same
+        format as `A_dict`. The temporal activities of cells are not expected to
+        change across different runs of spatial update, except the number of
+        cells may be different due to dropping of cells in the update process.
+    kdims : Union[str, List[str]], optional
+        Names of key dimensions identifying the parameter space. Should have
+        same length as the keys in `A_dict` and `C_dict`. If `None` then a
+        dimension names "dummy" will be created and the visualization can be
+        used to visualize restults across cells. By default `None`.
+    norm : bool, optional
+        Whether to normalize the temporal activities of each cell to range (0,
+        1) for visualization. By default `True`.
+    datashading : bool, optional
+        Whether to apply datashading to temporal activities of cells. By default
+        `True`.
+
+    Returns
+    -------
+    hvres : hv.HoloMap
+        Resulting visualization.
+
+    See Also
+    --------
+    minian.cnmf.update_spatial
     """
     if not kdims:
         A_dict = dict(dummy=A_dict)
@@ -1376,38 +1907,84 @@ def visualize_spatial_update(A_dict, C_dict, kdims=None, norm=True, datashading=
         lambda cr: cr.opts(frame_width=500, frame_height=50),
         hv.RGB if datashading else hv.Curve,
     )
-    return hv.NdLayout(
-        {"pseudo-color": (hv_pts * hv_A), "binary": (hv_pts * hv_Ab)},
-        kdims="Spatial Matrix",
-    ).cols(1) + hv_C.relabel("Temporal Components")
+    return (
+        hv.NdLayout(
+            {"pseudo-color": (hv_pts * hv_A), "binary": (hv_pts * hv_Ab)},
+            kdims="Spatial Matrix",
+        ).cols(1)
+        + hv_C.relabel("Temporal Components")
+    )
 
 
 def visualize_temporal_update(
-    YA_dict,
-    C_dict,
-    S_dict,
-    g_dict,
-    sig_dict,
-    A_dict,
-    kdims=None,
+    YA_dict: dict,
+    C_dict: dict,
+    S_dict: dict,
+    g_dict: dict,
+    sig_dict: dict,
+    A_dict: dict,
+    kdims: Optional[Union[str, List[str]]] = None,
     norm=True,
     datashading=True,
-):
-    """This function launches the visualizer for the exploration of the fluorescence time series
+) -> hv.HoloMap:
+    """
+    Visualization of temporal update.
 
-    Args:
-        YA_dict (dict): spatial footprints
-        C_dict (dict): temporal activity of each unit
-        S_dict ([type]): [the dictionary containing the resulting `S` from runs with different parameters]
-        g_dict ([type]): [description]
-        sig_dict ([type]): [description]
-        A_dict ([type]): [description]
-        kdims (list, optional): [description]. Defaults to None.
-        norm (bool, optional): Normalize yes or no. Defaults to True (yes).
-        datashading (bool, optional): Use datashading yes or no. Defaults to True (yes).
+    This function facilitates parameter exploration for temporal update by
+    plotting various temporal traces along with a model calcium response and the
+    spatial footprint for each cell across different runs of temporal update.
+    Four traces are plotted: "Raw Signal" correspond to the `YrA` variable,
+    "Fitted Calcium Trace" correspond to `C` after update, "Fitted Spikes"
+    correspond to `S` after update, and "Fitted Signal" correspond to `C + b0 +
+    c0` after update. See :func:`minian.cnmf.update_temporal` for interpretation
+    of each variable.
 
-    Returns:
-        holoviews.core.layout.Layout
+    Parameters
+    ----------
+    YA_dict : dict
+        A dictionary containing the `YrA` variables in the same format as
+        `C_dict`. The `YrA` variable is not updated and is not expected to be
+        different across different runs of temporal update.
+    C_dict : dict
+        A dictionary containing resulting calcium traces (`C_new`) from
+        different runs of temporal update. Keys should be tuple containing the
+        values of parameters that uniquely identify each run. Values should be
+        temporal traces of type `xr.DataArray`.
+    S_dict : dict
+        A dictionary containing resulting deconvolved spike traces (`S_new`)
+        from different runs of temporal update, in the same format as `C_dict`.
+    g_dict : dict
+        A dictionary containing resulting AR coefficients (`g`) from different
+        runs of temporal update, in the same format as `C_dict`.
+    sig_dict : dict
+        A dictionary containing resulting fitted signals (`C_new + b0_new +
+        c0_new`) from different runs of temporal update, in the same format as
+        `C_dict`.
+    A_dict : dict
+        A dictionary containing spatial footprint of cells in the same format as
+        `C_dict`. The spatial footprints of cells are note expected to change
+        across different runs of temporal update, except the number of cells may
+        be different due to dropping of cells in the update process.
+    kdims : Union[str, List[str]], optional
+        Names of key dimensions identifying the parameter space. Should have
+        same length as the keys in `C_dict` etc. If `None` then a dimension
+        names "dummy" will be created and the visualization can be used to
+        visualize restults across cells. By default `None`.
+    norm : bool, optional
+        Whether to normalize the temporal activities of each cell to range (0,
+        1) for visualization. By default `True`.
+    datashading : bool, optional
+        Whether to apply datashading to temporal activities of cells. By default
+        `True`.
+
+    Returns
+    -------
+    hvres : hv.HoloMap
+        Resulting visualization.
+
+    See Also
+    --------
+    minian.cnmf.update_temporal
     """
     inputs = [YA_dict, C_dict, S_dict, sig_dict, g_dict]
     if not kdims:
@@ -1511,7 +2088,24 @@ def visualize_temporal_update(
     ).cols(1)
 
 
-def NNsort(cents):
+def NNsort(cents: pd.DataFrame) -> pd.Series:
+    """
+    Sort centroids of cells into close-by groups.
+
+    Walk through centroids of cells using a nearest neighbors tree such that the
+    resulting walk order can be used to sort cells into close-by groups.
+
+    Parameters
+    ----------
+    cents : pd.DataFrame
+        Input centroids of cells. Should contain column "height" and "width".
+
+    Returns
+    -------
+    result : pd.Series
+        A series with same index as input `cents` whose values represent the
+        order of nearest-neighbor walk.
+    """
     cents_hw = cents[["height", "width"]]
     kdtree = cKDTree(cents_hw)
     idu_start = cents_hw.sum(axis="columns").idxmin()
@@ -1534,3 +2128,63 @@ def NNsort(cents):
                 NNord = NNord + 1
                 break
     return result
+
+
+def visualize_motion(motion: xr.DataArray) -> Union[hv.Layout, hv.NdOverlay]:
+    """
+    Visualize result of motion estimation.
+
+    This function plot motions across time. If the input has two dimensions,
+    they are interpreted as rigid shifts along the "height" and "width"
+    dimension of the movie, and plotted as curves across time. If the input has
+    more than two dimensions, it is assumed that non-rigid motion estimation was
+    enabled and each frame is split into several patches that will each have
+    their own shifts. The separate shifts for patches within each frame are
+    flattened into a column, then shifts along "height" and "width" dimensions
+    are separately plotted as 2d images across time, whose columns represent
+    frames and colors represent degree of shift.
+
+    Parameters
+    ----------
+    motion : xr.DataArray
+        Estimated motion.
+
+    Returns
+    -------
+    Union[hv.Layout, hv.NdOverlay]
+        If `motion` contains rigid shifts, then an overlay of two curves are
+        returned. Otherwise two images representing non-rigid motions are
+        returned.
+    """
+    if motion.ndim > 2:
+        opts_im = {
+            "frame_width": 500,
+            "aspect": 3,
+            "cmap": "RdBu",
+            "symmetric": True,
+            "colorbar": True,
+        }
+        mheight = motion.sel(shift_dim="height").stack(grid=["grid0", "grid1"])
+        mwidth = motion.sel(shift_dim="width").stack(grid=["grid0", "grid1"])
+        mheight = mheight.assign_coords(grid=np.arange(mheight.sizes["grid"]))
+        mwidth = mwidth.assign_coords(grid=np.arange(mwidth.sizes["grid"]))
+        return (
+            (
+                hv.Image(mheight.rename("height_motion"), kdims=["frame", "grid"]).opts(
+                    title="height_motion", **opts_im
+                )
+                + hv.Image(mwidth.rename("width_motion"), kdims=["frame", "grid"]).opts(
+                    title="width_motion", **opts_im
+                )
+            )
+            .cols(1)
+            .opts(show_title=True)
+        )
+    else:
+        opts_cv = {"frame_width": 500, "tools": ["hover"], "aspect": 2}
+        return hv.NdOverlay(
+            dict(
+                width=hv.Curve(motion.sel(shift_dim="width")).opts(**opts_cv),
+                height=hv.Curve(motion.sel(shift_dim="height")).opts(**opts_cv),
+            )
+        )

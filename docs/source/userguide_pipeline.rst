@@ -2,7 +2,6 @@ Pipeline
 ========
 
 .. toctree::
-   :maxdepth: 4
-   :caption: Contents:
+   :maxdepth: 1
 
    pipeline_noted

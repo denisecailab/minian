@@ -7,16 +7,8 @@ Welcome to minian's documentation!
 ==================================
 
 .. toctree::
-   :maxdepth: 4
-   :caption: Contents:
+   :maxdepth: 2
 
-   userguide
-   referenceguide
-
-
-Indices and tables
-==================
-
-* :ref:`genindex`
-* :ref:`modindex`
-* :ref:`search`
+   userguide_pipeline
+   userguide_crossregistration
+   api/index

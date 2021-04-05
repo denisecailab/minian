@@ -47,15 +47,25 @@ jobs:
       run: |
         # $CONDA is an environment variable pointing to the root of the miniconda directory
         $CONDA/bin/conda env update --file environment.yml --name base
+        $CONDA/bin/conda install -c conda-forge black==20.8b1 pytest pytest-cov
+        $CONDA/bin/pip install nbval
     - name: Lint with black
       run: |
-        $CONDA/bin/conda install -c conda-forge black==19.10b0
         # stop the build if there are Python syntax errors or undefined names
         $CONDA/bin/black --check minian
+    - name: Run pipeline and collect coverage
+      run: |
+        $CONDA/bin/pytest -v --color=yes --cov=minian --nbval-lax pipeline.ipynb
     - name: Run tests and collect coverage
       run: |
-        conda install pytest pytest-cov
-        $CONDA/bin/pytest -v --color=yes --cov=minian --pyargs --cov-report=xml minian
+        $CONDA/bin/pytest -v --color=yes --cov=minian --cov-append --pyargs minian
+    - name: Run doctest
+      run: |
+        $CONDA/bin/pip install -r requirements/requirements-doc.txt
+        $CONDA/bin/sphinx-build -M doctest docs/source docs/build
+    - name: Generate xml coverage report
+      run: |
+        $CONDA/bin/coverage xml
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v1
       with:

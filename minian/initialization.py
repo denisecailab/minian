@@ -1,29 +1,30 @@
+import functools as fct
 import itertools as itt
 import os
+from typing import Union, Tuple, Optional
 
 import cv2
-import dask
-import dask.array as da
+import dask as da
+import dask.array as darr
+import networkx as nx
 import numpy as np
 import pandas as pd
-import scipy.sparse
 import sparse
 import xarray as xr
-from dask.delayed import delayed
 from scipy.ndimage.filters import median_filter
 from scipy.ndimage.measurements import label
 from scipy.signal import butter, lfilter
 from scipy.stats import kstest, zscore
 from skimage.morphology import disk
 from sklearn.mixture import GaussianMixture
-from sklearn.neighbors import kneighbors_graph
+from sklearn.neighbors import KDTree, radius_neighbors_graph
 
-from .cnmf import label_connected, smooth_sig
-from .utilities import save_minian
+from .cnmf import adj_corr, graph_optimize_corr, label_connected
+from .utilities import custom_arr_optimize, local_extreme, save_minian
 
 
 def seeds_init(
-    varr,
+    varr: xr.DataArray,
     wnd_size=500,
     method="rolling",
     stp_size=200,
@@ -32,19 +33,51 @@ def seeds_init(
     diff_thres=2,
 ):
     """
-    This function computes the maximum intensity projection of a subset of frames and finds the local maxima. The set of local maxima constitutes  an overly-complete set of local maxima, which are the putative locations of cells, which we call seeds.
+    Generate over-complete set of seeds by finding local maxima across frames.
 
-    Args:
-        varr (xarray.DataArray): input data
-        wnd_size (int, optional): size of the temporal window in which the maximum intensity projection will be computed, i.e. number of frames. Defaults to 500.
-        method (str, optional): proceeds through the data in temporal order, alternative is randomly. Defaults to 'rolling'.
-        stp_size (int, optional): only if the method is rolling, defines the step size. Defaults to 200.
-        nchunk (int, optional): only if the method is random, defines the number of chunks randomly picked. Defaults to 100.
-        max_wnd (int, optional): max size (in pixel) of the diameter for cell detection. Defaults to 10.
-        diff_thres (int, optional): minimal fluorescence difference of a seed across frames. Defaults to 2.
+    This function computes the maximum intensity projection of a subset of
+    frames and finds the local maxima. The subsetting use either a rolling
+    window or random sampling of frames. `wnd_size` `stp_size` and `nchunk`
+    controls different aspects of the subsetting. `max_wnd` and `diff_thres`
+    controls how local maxima are computed. The set of all local maxima found in
+    this process constitutes  an overly-complete set of seeds, representing
+    putative locations of cells.
 
-    Returns:
-        pandas.core.frame.DataFrame: matrix of seeds
+    Parameters
+    ----------
+    varr : xr.DataArray
+        Input movie data. Should have dimensions "frame", "height" and "width".
+    wnd_size : int, optional
+        Number of frames in each chunk, for which a max projection will be
+        calculated. By default `500`.
+    method : str, optional
+        Either `"rolling"` or `"random"`. Controls whether to use rolling window
+        or random sampling of frames to construct chunks. By default
+        `"rolling"`.
+    stp_size : int, optional
+        Number of frames between the center of each chunk when stepping through
+        the data with rolling windows. Only used if `method is "rolling"`. By
+        default `200`.
+    nchunk : int, optional
+        Number of chunks to sample randomly. Only used if `method is "random"`.
+        By default `100`.
+    max_wnd : int, optional
+        Radius (in pixels) of the disk window used for computing local maxima.
+        Local maximas are defined as pixels with maximum intensity in such a
+        window. By default `10`.
+    diff_thres : int, optional
+        Intensity threshold for the difference between local maxima and its
+        neighbours. Any local maxima that is not birghter than its neighbor
+        (defined by the same disk window) by `diff_thres` intensity values will
+        be filtered out. By default `2`.
+
+    Returns
+    -------
+    seeds : pd.DataFrame
+        Seeds dataframe with each seed as a row. Has column "height" and "width"
+        which are location of the seeds. Also has column "seeds" which is an
+        integer showing how many chunks where the seed is considered a local
+        maxima.
     """
     int_path = os.environ["MINIAN_INTERMEDIATE"]
     print("constructing chunks")
@@ -85,15 +118,59 @@ def seeds_init(
     return seeds[["height", "width", "seeds"]]
 
 
-def max_proj_frame(varr, idx):
+def max_proj_frame(varr: xr.DataArray, idx: np.ndarray) -> xr.DataArray:
+    """
+    Compute max projection on a given subset of frames.
+
+    Parameters
+    ----------
+    varr : xr.DataArray
+        The input movie data containing all frames.
+    idx : np.ndarray
+        The subset of frames to use to compute max projection.
+
+    Returns
+    -------
+    max_proj : xr.DataArray
+        The max projection.
+    """
     return varr.isel(frame=idx).max("frame")
 
 
-def local_max_roll(fm, k0, k1, diff):
+def local_max_roll(
+    fm: np.ndarray, k0: int, k1: int, diff: Union[int, float]
+) -> np.ndarray:
+    """
+    Compute local maxima of a frame with a range of kernel size.
+
+    This function wraps around :func:`minian.utilities.local_extreme` and
+    compute local maxima of the input frame with kernels of size ranging from
+    `k0` to `k1`. It then takes the union of all the local maxima, and
+    additionally merge all the connecting local maxima by using the middle
+    pixel.
+
+    Parameters
+    ----------
+    fm : np.ndarray
+        The input frame.
+    k0 : int
+        The lower bound (inclusive) of the range of kernel sizes.
+    k1 : int
+        The upper bound (inclusive) of the range of kernel sizes.
+    diff : Union[int, float]
+        Intensity threshold for the difference between local maxima and its
+        neighbours, passed to :func:`minian.utilities.local_extreme`.
+
+    Returns
+    -------
+    max_res : np.ndarray
+        The image of local maxima. Has same shape as `fm`, and 1 at local
+        maxima.
+    """
     max_ls = []
     for ksize in range(k0, k1):
         selem = disk(ksize)
-        fm_max = local_max(fm, selem, diff)
+        fm_max = local_extreme(fm, selem, diff=diff)
         max_ls.append(fm_max)
     lmax = (np.stack(max_ls, axis=0).sum(axis=0) > 0).astype(np.uint8)
     nlab, max_lab = cv2.connectedComponents(lmax)
@@ -108,30 +185,61 @@ def local_max_roll(fm, k0, k1, diff):
     return max_res
 
 
-def local_max(fm, k, diff=0):
-    fm_max = cv2.dilate(fm, k)
-    fm_min = cv2.erode(fm, k)
-    fm_diff = ((fm_max - fm_min) > diff).astype(np.uint8)
-    fm_max = (fm == fm_max).astype(np.uint8)
-    return cv2.bitwise_and(fm_max, fm_diff).astype(np.uint8)
-
-
 def gmm_refine(
-    varr, seeds, q=(0.1, 99.9), n_components=2, valid_components=1, mean_mask=True
-):
+    varr: xr.DataArray,
+    seeds: pd.DataFrame,
+    q=(0.1, 99.9),
+    n_components=2,
+    valid_components=1,
+    mean_mask=True,
+) -> Tuple[pd.DataFrame, xr.DataArray, GaussianMixture]:
     """
-    Estimate the initial parameters to estimate the distribution of fluorescence intensity using Gaussian mixture model
+    Filter seeds by fitting a GMM to peak-to-peak values.
 
-    Args:
-        varr (xarray.DataArray): input data
-        seeds (dict): seeds value
-        q (tuple, optional): the quantile of signal of each seed, from which the peak-to-peak values are calculated. i.e., a value of (0,1) will be equivalent to defining the peak-to-peak value as the difference between minimum and maximum. However it’s usually useful to not use the absolute minimum and maximum so that the algorithm is more resilient to outliers. Defaults to (0.1, 99.9).
-        n_components (int, optional): number of mixture components. Defaults to 2.
-        valid_components (int, optional): number of mixture components to be considered signal. Defaults to 1.
-        mean_mask (bool, optional): whether to apply additional criteria where a seed is valid only if its peak-to-peak value exceeds the mean of the lowest gaussian distribution, only useful in corner cases where the distribution of the gaussian heavily overlap. Defaults to True.
+    This function assume that the distribution of peak-to-peak values of
+    fluorescence across all seeds can be model by a Gaussian Mixture Model (GMM)
+    with different means. It computes peak-to-peak value for all the seeds, then
+    fit a GMM with `n_components` to the distribution, and filter out the seeds
+    belonging to the `n_components - valid_components` number of gaussians with
+    lower means.
 
-    Returns:
-        [dict]: [seeds, signal range]
+    Parameters
+    ----------
+    varr : xr.DataArray
+        The input movie data. Should have dimension "spatial" and "frame".
+    seeds : pd.DataFrame
+        The input over-complete set of seeds to be filtered.
+    q : tuple, optional
+        Percentile to use to compute the peak-to-peak values. For a given seed
+        with corresponding fluorescent fluctuation `f`, the peak-to-peak value
+        for that seed is computed as `np.percentile(f, q[1]) - np.percentile(f,
+        q[0])`. By default `(0.1, 99.9)`.
+    n_components : int, optional
+        Number of components (Gaussians) in the GMM model. By default `2`.
+    valid_components : int, optional
+        Number of components (Gaussians) to be considered as modeling the
+        distribution of peak-to-peak values of valid seeds. Should be smaller
+        than `n_components`. By default `1`.
+    mean_mask : bool, optional
+        Whether to apply additional criteria where a seed is valid only if its
+        peak-to-peak value exceeds the mean of the lowest gaussian distribution.
+        Only useful in corner cases where the distribution of the gaussian
+        heavily overlap. By default `True`.
+
+    Returns
+    -------
+    seeds : pd.DataFrame
+        The resulting seeds dataframe with an additional column "mask_gmm",
+        indicating whether the seed is considered valid by this function. If the
+        column already exists in input `seeds` it will be overwritten.
+    varr_pv : xr.DataArray
+        The computed peak-to-peak values for each seeds.
+    gmm : GaussianMixture
+        The fitted GMM model object.
+
+    See Also
+    -------
+    sklearn.mixture.GaussianMixture
     """
     print("selecting seeds")
     varr_sub = varr.sel(spatial=[tuple(hw) for hw in seeds[["height", "width"]].values])
@@ -167,27 +275,74 @@ def gmm_refine(
     return seeds, varr_pv, gmm
 
 
-def pnr_refine(varr, seeds, noise_freq=0.25, thres=1.5, q=(0.1, 99.9), med_wnd=None):
+def pnr_refine(
+    varr: xr.DataArray,
+    seeds: pd.DataFrame,
+    noise_freq=0.25,
+    thres: Union[float, str] = 1.5,
+    q=(0.1, 99.9),
+    med_wnd: Optional[int] = None,
+) -> Tuple[pd.DataFrame, xr.DataArray, Optional[GaussianMixture]]:
     """
-    "peak-to-noise ratio" refine. This function computes the ratio between noise range and the signal range, where signal is defined as the lower half of the frequency range, while noise is the higher half of the frequency range.
+    Filter seeds by thresholding peak-to-noise ratio.
 
-    Args:
-        varr (xarray.DataArray): data array
-        seeds (pandas.core.frame.DataFrame): seeds
-        noise_freq (float, optional): frequency of the noise. Defaults to 0.25.
-        thres (float, optional): threshold. Defaults to 1.5.
-        q (tuple, optional): Defaults to (0.1, 99.9).
-        med_wnd (type, optional): if specified, a median filter with the set window size is applied to the signal from each seeds and subtracted from signal. Useful if there’s a shift in baseline fluorescence that produce lots of false positive seeds. Defaults to None.
+    For each input seed, the noise is defined as high-pass filtered fluorescence
+    trace of the seed. The peak-to-noise ratio (pnr) of that seed is then
+    defined as the ratio between the peak-to-peak value of the originial
+    fluorescence trace and that of the noise trace. Optionally, if abrupt
+    changes in baseline fluorescence is expected, then the baseline can be
+    estimated by median-filtering the fluorescence trace and subtracted from the
+    original trace before computing the peak-to-noise ratio. In addition, if a
+    hard threshold of pnr is not desired, then a Gaussian Mixture Model with 2
+    components can be fitted to the distribution of pnr across all seeds, and
+    only seeds with pnr belonging to the higher-mean Gaussian will be considered
+    valide.
 
-    Returns:
-        [tuple pandas.core.frame.DataFrame, scikit-learn gmm object]: seeds, peak to noise ratio and gaussian mixture model.
+    Parameters
+    ----------
+    varr : xr.DataArray
+        Input movie data, should have dimensions "height", "width" and "frame".
+    seeds : pd.DataFrame
+        The input over-complete set of seeds to be filtered.
+    noise_freq : float, optional
+        Cut-off frequency for the high-pass filter used to define noise,
+        specified as fraction of sampling frequency. By default `0.25`.
+    thres : Union[float, str], optional
+        Threshold of the peak-to-noise ratio. If `"auto"` then a :class:`GMM
+        <sklearn.mixture.GaussianMixture>` will be fit to the distribution of
+        pnr. By default `1.5`.
+    q : tuple, optional
+        Percentile to use to compute the peak-to-peak values. For a given
+        fluorescence fluctuation `f`, the peak-to-peak value for that seed is
+        computed as `np.percentile(f, q[1]) - np.percentile(f, q[0])`. By
+        default `(0.1, 99.9)`.
+    med_wnd : int, optional
+        Size of the median filter window to remove baseline. If `None` then no
+        filtering will be done. By default `None`.
 
+    Returns
+    -------
+    seeds : pd.DataFrame
+        The resulting seeds dataframe with an additional column "mask_pnr",
+        indicating whether the seed is considered valid by this function. If the
+        column already exists in input `seeds` it will be overwritten.
+    pnr : xr.DataArray
+        The computed peak-to-noise ratio for each seeds.
+    gmm : GaussianMixture, optional
+        The GMM model object fitted to the distribution of pnr. Will be `None`
+        unless `thres` is `"auto"`.
     """
     print("selecting seeds")
-    varr_sub = xr.concat(
-        [varr.sel(height=h, width=w) for h, w in seeds[["height", "width"]].values],
-        "index",
-    ).assign_coords({"index": seeds.index.values})
+    # vectorized indexing on dask arrays produce a single chunk.
+    # to memory issue, split seeds into 128 chunks, with chunk size no greater than 100
+    chk_size = min(int(len(seeds) / 128), 100)
+    vsub_ls = []
+    for _, seed_sub in seeds.groupby(np.arange(len(seeds)) // chk_size):
+        vsub = varr.sel(
+            height=seed_sub["height"].to_xarray(), width=seed_sub["width"].to_xarray()
+        )
+        vsub_ls.append(vsub)
+    varr_sub = xr.concat(vsub_ls, "index")
     if med_wnd:
         print("removing baseline")
         varr = xr.apply_ufunc(
@@ -225,11 +380,47 @@ def pnr_refine(varr, seeds, noise_freq=0.25, thres=1.5, q=(0.1, 99.9), med_wnd=N
     return seeds, pnr, gmm
 
 
-def ptp_q(a, q):
+def ptp_q(a: np.ndarray, q: tuple) -> float:
+    """
+    Compute peak-to-peak value of input with percentile values.
+
+    Parameters
+    ----------
+    a : np.ndarray
+        Input array.
+    q : tuple
+        Tuple specifying low and high percentile values.
+
+    Returns
+    -------
+    ptp : float
+        The peak-to-peak value.
+    """
     return np.percentile(a, q[1]) - np.percentile(a, q[0])
 
 
-def pnr_perseed(a, freq, q):
+def pnr_perseed(a: np.ndarray, freq: float, q: tuple) -> float:
+    """
+    Compute peak-to-noise ratio of a given timeseries.
+
+    Parameters
+    ----------
+    a : np.ndarray
+        Input timeseries.
+    freq : float
+        Cut-off frequency of the high-pass filtering used to define noise.
+    q : tuple
+        Percentile used to compute peak-to-peak values.
+
+    Returns
+    -------
+    pnr : float
+        Peak-to-noise ratio.
+
+    See Also
+    -------
+    pnr_refine : for definition of peak-to-noise ratio
+    """
     ptp = ptp_q(a, q)
     but_b, but_a = butter(2, freq, btype="high", analog=False)
     a = lfilter(but_b, but_a, a).real
@@ -237,13 +428,58 @@ def pnr_perseed(a, freq, q):
     return ptp / ptp_noise
 
 
-def med_baseline(a, wnd):
+def med_baseline(a: np.ndarray, wnd: int) -> np.ndarray:
+    """
+    Subtract baseline from a timeseries as estimated by median-filtering the
+    timeseries.
+
+    Parameters
+    ----------
+    a : np.ndarray
+        Input timeseries.
+    wnd : int
+        Window size of the median filter. This parameter is passed as `size` to
+        :func:`scipy.ndimage.filters.median_filter`.
+
+    Returns
+    -------
+    a : np.ndarray
+        Timeseries with baseline subtracted.
+    """
     base = median_filter(a, size=wnd)
     a -= base
     return a
 
 
-def intensity_refine(varr, seeds, thres_mul=2):
+def intensity_refine(
+    varr: xr.DataArray, seeds: pd.DataFrame, thres_mul=2
+) -> pd.DataFrame:
+    """
+    Filter seeds by thresholding the intensity of their corresponding pixels in
+    the max projection of the movie.
+
+    This function generate a histogram of the max projection by spliting the
+    intensity into bins of roughly 10 pixels. Then the intensity threshold is
+    defined as the intensity of the peak of the histogram times `thres_mul`.
+
+    Parameters
+    ----------
+    varr : xr.DataArray
+        Input movie data. Should have dimensions "height", "width" and "frame".
+    seeds : pd.DataFrame
+        The input over-complete set of seeds to be filtered.
+    thres_mul : int, optional
+        Scalar multiplied to the intensity value corresponding to the peak of
+        max projection histogram. By default `2`, which can be interpreted as
+        "seeds are only valid if they are more than twice as bright as the
+        majority of the pixels".
+
+    Returns
+    -------
+    seeds : pd.DataFrame
+        The resulting seeds dataframe with an additional column "mask_int",
+        indicating whether the seed is considered valid by this function.
+    """
     try:
         fm_max = varr.max("frame")
     except ValueError:
@@ -262,23 +498,44 @@ def intensity_refine(varr, seeds, thres_mul=2):
     return seeds
 
 
-def ks_refine(varr, seeds, sig=0.01):
+def ks_refine(varr: xr.DataArray, seeds: pd.DataFrame, sig=0.01) -> pd.DataFrame:
     """
-    This function refines the seeds using Kolmogorov-Smirnov (KS) test. This step is based on the assumption that the seeds’ fluorescence across frames notionally follows a bimodal distribution: with a large normal distribution representing baseline activity, and a second peak representing when the seed/cell is active. KS allows to discard the seeds where the null-hypothesis (i.e. the fluorescence intensity is simply a normal distribution) is rejected ad alpha = 0.05.
+    Filter the seeds using Kolmogorov-Smirnov (KS) test.
 
-    Args:
-        varr (xarray.DataArray): flattened version of the video
-        seeds (dict): seeds
-        sig (float, optional): alpha. Defaults to 0.05.
+    This function assume that the valid seeds’ fluorescence across frames
+    notionally follows a bimodal distribution: with a large normal distribution
+    representing baseline activity, and a second peak representing when the
+    seed/cell is active. KS allows to discard the seeds where the
+    null-hypothesis (i.e. the fluorescence intensity is simply a normal
+    distribution) is rejected at `sig`.
 
-    Returns:
-        dict: seeds
+    Parameters
+    ----------
+    varr : xr.DataArray
+        Input movie data. Should have dimensions "height", "width" and "frame".
+    seeds : pd.DataFrame
+        The input over-complete set of seeds to be filtered.
+    sig : float, optional
+        The significance threshold to reject null-hypothesis. By default `0.01`.
+
+    Returns
+    -------
+    seeds : pd.DataFrame
+        The resulting seeds dataframe with an additional column "mask_ks",
+        indicating whether the seed is considered valid by this function. If the
+        column already exists in input `seeds` it will be overwritten.
     """
     print("selecting seeds")
-    varr_sub = xr.concat(
-        [varr.sel(height=h, width=w) for h, w in seeds[["height", "width"]].values],
-        "index",
-    ).assign_coords({"index": seeds.index.values})
+    # vectorized indexing on dask arrays produce a single chunk.
+    # to memory issue, split seeds into 128 chunks, with chunk size no greater than 100
+    chk_size = min(int(len(seeds) / 128), 100)
+    vsub_ls = []
+    for _, seed_sub in seeds.groupby(np.arange(len(seeds)) // chk_size):
+        vsub = varr.sel(
+            height=seed_sub["height"].to_xarray(), width=seed_sub["width"].to_xarray()
+        )
+        vsub_ls.append(vsub)
+    varr_sub = xr.concat(vsub_ls, "index")
     print("performing KS test")
     ks = xr.apply_ufunc(
         ks_perseed,
@@ -294,59 +551,77 @@ def ks_refine(varr, seeds, sig=0.01):
     return seeds
 
 
-def ks_perseed(a):
+def ks_perseed(a: np.ndarray) -> float:
+    """
+    Perform KS test on input and return the p-value.
+
+    Parameters
+    ----------
+    a : np.ndarray
+        Input data.
+
+    Returns
+    -------
+    p : float
+        The p-value of the KS test.
+
+    See Also
+    -------
+    scipy.stats.kstest
+    """
     a = zscore(a)
     return kstest(a, "norm")[1]
 
 
-def seeds_merge(varr, max_proj, seeds, thres_dist=5, thres_corr=0.6, noise_freq=None):
+def seeds_merge(
+    varr: xr.DataArray,
+    max_proj: xr.DataArray,
+    seeds: pd.DataFrame,
+    thres_dist=5,
+    thres_corr=0.6,
+    noise_freq: Optional[float] = None,
+) -> pd.DataFrame:
     """
-    This function merges neighboring seeds which potentially come from the same cell, based upon their spatial distance and temporal correlation of their activity
+    Merge seeds based on spatial distance and temporal correlation of their
+    activities.
 
-    Args:
-        varr (xarray.DataArray): input data
-        seeds (dict): seeds
-        thres_dist (int, optional): spatial distance threshold. Defaults to 5.
-        thres_corr (float, optional): activity correlation threshold. Defaults to 0.6.
-        noise_freq (str, optional): noise frequency. Defaults to 'envelope'.
+    This function build an adjacency matrix by thresholding spatial distance
+    between seeds and temporal correlation between activities of seeds. It then
+    merge seeds using the adjacency matrix by only keeping the seed with maximum
+    intensity in the max projection within each connected group of seeds. The
+    merge is therefore transitive.
 
-    Returns:
-        dict: seeds
+    Parameters
+    ----------
+    varr : xr.DataArray
+        Input movie data. Should have dimension "height", "width" and "frame".
+    max_proj : xr.DataArray
+        Max projection of the movie data.
+    seeds : pd.DataFrame
+        Dataframe of seeds to be merged.
+    thres_dist : int, optional
+        Threshold of distance between seeds in pixel. By default `5`.
+    thres_corr : float, optional
+        Threshold of temporal correlation between activities of seeds. By
+        default `0.6`.
+    noise_freq : float, optional
+        Cut-off frequency for optional smoothing of activities before computing
+        the correlation. If `None` then no smoothing will be done. By default
+        `None`.
+
+    Returns
+    -------
+    seeds : pd.DataFrame
+        The resulting seeds dataframe with an additional column "mask_mrg",
+        indicating whether the seed should be kept after the merge. If the
+        column already exists in input `seeds` it will be overwritten.
     """
-    if noise_freq:
-        varr = smooth_sig(varr, noise_freq)
     print("computing distance")
-    dist = kneighbors_graph(seeds[["height", "width"]], n_neighbors=1, mode="distance")
+    nng = radius_neighbors_graph(seeds[["height", "width"]], thres_dist)
     print("computing correlations")
-    corr_ls = []
-    row_idx = []
-    col_idx = []
-    varr = varr - varr.mean("frame")
-    std = np.sqrt((varr ** 2).sum("frame"))
-    for i, j in zip(*dist.nonzero()):
-        if dist[i, j] < thres_dist:
-            hi, hj, wi, wj = (
-                seeds.iloc[i]["height"],
-                seeds.iloc[j]["height"],
-                seeds.iloc[i]["width"],
-                seeds.iloc[j]["width"],
-            )
-            varr_i, varr_j, std_i, std_j = (
-                varr.sel(height=hi, width=wi),
-                varr.sel(height=hj, width=wj),
-                std.sel(height=hi, width=wi),
-                std.sel(height=hj, width=wj),
-            )
-            corr = (varr_i * varr_j).sum() / (std_i * std_j)
-            corr_ls.append(corr)
-            row_idx.append(i)
-            col_idx.append(j)
-    corr_ls = dask.compute(corr_ls)[0]
+    adj = adj_corr(varr, nng, seeds[["height", "width"]], noise_freq)
     print("merging seeds")
-    adj = (
-        scipy.sparse.csr_matrix((corr_ls, (row_idx, col_idx)), shape=dist.shape)
-        > thres_corr
-    )
+    adj = adj > thres_corr
     adj = adj + adj.T
     labels = label_connected(adj, only_connected=True)
     iso = np.where(labels < 0)[0]
@@ -370,78 +645,218 @@ def seeds_merge(varr, max_proj, seeds, thres_dist=5, thres_corr=0.6, noise_freq=
     return seeds
 
 
-def initA(varr, seeds, thres_corr=0.8, wnd=10, noise_freq=None):
-    seeds = seeds.sort_values(["height", "width"])
-    if noise_freq:
-        print("smoothing signal")
-        varr = smooth_sig(varr, noise_freq)
-    print("computing correlations")
-    varr = varr - varr.mean("frame")
-    std = np.sqrt((varr ** 2).sum("frame"))
-    res_ls = [
-        initA_perseed(varr, std, h, w, wnd, thres_corr)
-        for h, w in zip(seeds["height"].values, seeds["width"].values)
-    ]
+def initA(
+    varr: xr.DataArray,
+    seeds: pd.DataFrame,
+    thres_corr=0.8,
+    wnd=10,
+    noise_freq: Optional[float] = None,
+) -> xr.DataArray:
+    """
+    Initialize spatial footprints from seeds.
+
+    For each input seed, this function compute the correlation between the
+    fluorescence activity of the seed and those of its neighboring pixels up to
+    `wnd` pixels. It then set all correlation below `thres_corr` to zero, and
+    use the resulting correlation image as the resutling spatial footprint of
+    the seed.
+
+    Parameters
+    ----------
+    varr : xr.DataArray
+        Input movie data. Should have dimension "height", "width" and "frame".
+    seeds : pd.DataFrame
+        Dataframe of seeds.
+    thres_corr : float, optional
+        Threshold of correlation, below which the values will be set to zero in
+        the resulting spatial footprints. By default `0.8`.
+    wnd : int, optional
+        Radius (in pixels) of a disk window within which correlation will be
+        computed for each seed. By default `10`.
+    noise_freq : float, optional
+        Cut-off frequency for optional smoothing of activities before computing
+        the correlation. If `None` then no smoothing will be done. By default
+        `None`.
+
+    Returns
+    -------
+    A : xr.DataArray
+        The initial estimation of spatial footprint for each cell. Should have
+        dimensions ("unit_id", "height", "width").
+
+    See Also
+    -------
+    minian.cnmf.graph_optimize_corr :
+        for how the correlation are computed in an out-of-core fashion
+    """
+    print("optimizing computation graph")
+    nod_df = pd.DataFrame(
+        np.array(
+            list(
+                itt.product(
+                    np.arange(varr.sizes["height"]), np.arange(varr.sizes["width"])
+                )
+            )
+        ),
+        columns=["height", "width"],
+    ).merge(seeds.reset_index(), how="outer", on=["height", "width"])
+    seed_df = nod_df[nod_df["index"].notnull()]
+    nn_tree = KDTree(nod_df[["height", "width"]], leaf_size=(2 * wnd) ** 2)
+    nns_arr = nn_tree.query_radius(seed_df[["height", "width"]], r=wnd)
+    sdg = nx.Graph()
+    sdg.add_nodes_from(
+        [
+            (i, d)
+            for i, d in enumerate(
+                nod_df[["height", "width", "index"]].to_dict("records")
+            )
+        ]
+    )
+    for isd, nns in enumerate(nns_arr):
+        cur_sd = seed_df.index[isd]
+        sdg.add_edges_from([(cur_sd, n) for n in nns if n != cur_sd])
+    sdg.remove_nodes_from(list(nx.isolates(sdg)))
+    sdg = nx.convert_node_labels_to_integers(sdg)
+    corr_df = graph_optimize_corr(varr, sdg, noise_freq)
+    print("building spatial matrix")
+    corr_df = corr_df[corr_df["corr"] > thres_corr]
+    nod_df = pd.DataFrame.from_dict(dict(sdg.nodes(data=True)), orient="index")
+    seed_df = nod_df[nod_df["index"].notnull()].astype({"index": int})
     A_ls = []
-    for i in range(0, len(res_ls), 50):
-        cur_ls = dask.compute(res_ls[i : i + 50])[0]
-        A_ls.extend([a.chunk() for a in cur_ls])
-    A = xr.concat(A_ls, "unit_id")
-    A = A.assign_coords(unit_id=np.arange(A.sizes["unit_id"]))
-    A.data = A.data.map_blocks(lambda a: a.todense(), dtype=float)
-    return A
-
-
-def initA_perseed(varr, std, h, w, wnd, thres_corr):
-    ih = np.where(varr.coords["height"] == h)[0][0]
-    iw = np.where(varr.coords["width"] == w)[0][0]
-    h_sur, w_sur = (
-        np.arange(max(ih - wnd, 0), min(ih + wnd, varr.sizes["height"])),
-        np.arange(max(iw - wnd, 0), min(iw + wnd, varr.sizes["width"])),
-    )
-    sur = varr.isel(height=h_sur, width=w_sur)
-    corr = (
-        varr.isel(height=ih, width=iw).dot(sur) / std.isel(height=ih, width=iw) / std
-    ).data.reshape(-1)
-    corr = da.where(corr > thres_corr, corr, 0)
-    crds = np.array(list(itt.product(h_sur, w_sur))).T
-    corr = delayed(sparse.COO)(
-        crds, corr, shape=(varr.sizes["height"], varr.sizes["width"]),
-    )
-    corr = da.from_delayed(
-        corr, shape=(varr.sizes["height"], varr.sizes["width"]), dtype=float
-    )
-    return xr.DataArray(
-        corr,
-        dims=["height", "width"],
+    Ashape = (varr.sizes["height"], varr.sizes["width"])
+    for seed_id, sd in seed_df.iterrows():
+        src_corr = corr_df[corr_df["target"] == seed_id].copy()
+        src_nods = nod_df.loc[src_corr["source"]]
+        src_corr["height"], src_corr["width"] = (
+            src_nods["height"].values,
+            src_nods["width"].values,
+        )
+        tgt_corr = corr_df[corr_df["source"] == seed_id].copy()
+        tgt_nods = nod_df.loc[tgt_corr["target"]]
+        tgt_corr["height"], tgt_corr["width"] = (
+            tgt_nods["height"].values,
+            tgt_nods["width"].values,
+        )
+        cur_corr = pd.concat([src_corr, tgt_corr]).append(
+            {"corr": 1, "height": sd["height"], "width": sd["width"]}, ignore_index=True
+        )
+        cur_A = darr.array(
+            sparse.COO(cur_corr[["height", "width"]].T, cur_corr["corr"], shape=Ashape)
+        )
+        A_ls.append(cur_A)
+    A = xr.DataArray(
+        darr.stack(A_ls).map_blocks(lambda a: a.todense(), dtype=float),
+        dims=["unit_id", "height", "width"],
         coords={
+            "unit_id": seed_df["index"].values,
             "height": varr.coords["height"].values,
             "width": varr.coords["width"].values,
         },
     )
+    return A
 
 
-def initC(varr, A):
+def initC(varr: xr.DataArray, A: xr.DataArray) -> xr.DataArray:
+    """
+    Initialize temporal component given spatial footprints.
+
+    The spatial footprints of each cell is first normalized to unit sum. Then
+    the temporal component is computed as the tensor dot product between the
+    input movie and the spatial footprints over the "height" and "width"
+    dimensions. In other word, the initial temporal component is a weighted
+    average of fluorescence activities in the input data with weights defined by
+    spatial footprints.
+
+    Parameters
+    ----------
+    varr : xr.DataArray
+        Input movie data. Should have dimensions ("height", "width", "frame").
+    A : xr.DataArray
+        Spatial footprints of cells. Should have dimensions ("unit_id",
+        "height", "width").
+
+    Returns
+    -------
+    C : xr.DataArray
+        The initial estimation of temporal components for each cell. Should have
+        dimensions ("unit_id", "frame").
+    """
     uids = A.coords["unit_id"]
     fms = varr.coords["frame"]
-    A = A.data.map_blocks(sparse.COO).map_blocks(lambda a: a / a.sum()).rechunk(-1)
-    C = da.tensordot(A, varr, axes=[(1, 2), (1, 2)])
+    A = A.data.map_blocks(sparse.COO).map_blocks(lambda a: a / a.sum()).compute()
+    C = darr.tensordot(A, varr, axes=[(1, 2), (1, 2)])
     C = xr.DataArray(
         C, dims=["unit_id", "frame"], coords={"unit_id": uids, "frame": fms}
     )
     return C
 
 
-def initbf(varr, A, C):
+def initbf(
+    varr: xr.DataArray, A: xr.DataArray, C: xr.DataArray
+) -> Tuple[xr.DataArray, xr.DataArray]:
+    """
+    Initialize background terms given spatial and temporal components of cells.
+
+    A movie representation (with dimensions "height" "width" and "frame") of
+    estimated cell activities are computed as the product between the spatial
+    components matrix and the temporal components matrix of cells over the
+    "unit_id" dimension. Then the residule movie is computed by subtracting the
+    estimated cell activity movie from the input movie. Then the spatial
+    footprint of background `b` is the mean of the residule movie over "frame"
+    dimension, and the temporal component of background `f` is the mean of the
+    residule movie over "height" and "width" dimensions.
+
+    Parameters
+    ----------
+    varr : xr.DataArray
+        Input movie data. Should have dimensions ("frame", "height", "width").
+    A : xr.DataArray
+        Estimation of spatial footprints of cells. Should have dimensions
+        ("unit_id", "height", "width").
+    C : xr.DataArray
+        Estimation of temporal activities of cells. Should have dimensions
+        ("unit_id", "frame").
+
+    Returns
+    -------
+    b : xr.DataArray
+        Initial estimation of the spatial footprint of background. Has
+        dimensions ("height", "width").
+    f : xr.DataArray
+        Initial estimation of the temporal activity of background. Has dimension
+        "frame".
+    """
     A = A.data.map_blocks(sparse.COO).compute()
-    Yb = (varr - da.tensordot(C, A, axes=[(0,), (0,)])).clip(0)
-    intpath = os.environ["MINIAN_INTERMEDIATE"]
-    Yb = save_minian(Yb.rename("Yb"), intpath, overwrite=True)
+    Yb = (varr - darr.tensordot(C, A, axes=[(0,), (0,)])).clip(0)
     b = Yb.mean("frame")
     f = Yb.mean(["height", "width"])
+    arr_opt = fct.partial(
+        custom_arr_optimize, rename_dict={"tensordot": "tensordot_restricted"}
+    )
+    with da.config.set(array_optimize=arr_opt):
+        b = da.optimize(b)[0]
+        f = da.optimize(f)[0]
+    b, f = da.compute([b, f])[0]
     return b, f
 
 
-@da.as_gufunc(signature="(h, w)->(h, w)", output_dtypes=int, allow_rechunk=True)
-def da_label(im):
+@darr.as_gufunc(signature="(h, w)->(h, w)", output_dtypes=int, allow_rechunk=True)
+def da_label(im: np.ndarray) -> np.ndarray:
+    """
+    Label connected features in a 2d array.
+
+    Parameters
+    ----------
+    im : np.ndarray
+        Input array.
+
+    Returns
+    -------
+    label : np.ndarray
+        Label array. Should have same shape as input `im`.
+
+    See Also
+    -------
+    scipy.ndimage.label
+    """
     return label(im)[0]
