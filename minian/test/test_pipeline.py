@@ -13,8 +13,8 @@ def test_pipeline_notebook():
         minian_ds["motion"].sum("frame").values.astype(int) == np.array([423, -239])
     ).all()
     assert int(minian_ds["max_proj"].sum().compute()) == 1501505
-    assert int(minian_ds["C"].sum().compute()) == 137240972
-    assert int(minian_ds["S"].sum().compute()) == 1245258
+    assert int(minian_ds["C"].sum().compute()) == 137240727
+    assert int(minian_ds["S"].sum().compute()) == 1245256
     assert int(minian_ds["A"].sum().compute()) == 365
     assert os.path.exists("./demo_movies/minian_mc.mp4")
     assert os.path.exists("./demo_movies/minian.mp4")
