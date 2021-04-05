@@ -51,6 +51,7 @@ extensions = [
     "sphinx.ext.autodoc",
     "toctree",
     "ref_alias",
+    "normalize_html_id",
 ]
 
 napoleon_use_rtype = False
