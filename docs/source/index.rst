@@ -9,6 +9,5 @@ Welcome to minian's documentation!
 .. toctree::
    :maxdepth: 2
 
-   userguide_pipeline
-   userguide_crossregistration
+   pipeline/index
    api/index

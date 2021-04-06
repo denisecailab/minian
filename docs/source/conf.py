@@ -42,6 +42,7 @@ author = "Denise J. Cai"
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
 extensions = [
+    "nbsphinx",
     "sphinx.ext.doctest",
     "sphinx.ext.napoleon",
     "sphinx.ext.intersphinx",
@@ -52,6 +53,7 @@ extensions = [
     "toctree",
     "ref_alias",
     "normalize_html_id",
+    "nbsplit",
 ]
 
 napoleon_use_rtype = False
@@ -97,6 +99,7 @@ ref_aliases = {
     "darr.Array": ("dask.array.Array", "darr.Array"),
 }
 
+nbsplit_dict = {os.path.abspath("../../pipeline_output.ipynb"): "pipeline"}
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ["_templates"]
