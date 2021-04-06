@@ -883,15 +883,17 @@ def update_temporal(
     for cur_YrA, cur_C in zip(YrA.groupby(grp_dim), C.groupby(grp_dim)):
         uid_ls.append(cur_YrA[1].coords["unit_id"].values.reshape(-1))
         cur_YrA, cur_C = cur_YrA[1].data.rechunk(-1), cur_C[1].data.rechunk(-1)
-        # memory demand for cvxpy is roughly 500 times input
-        mem_demand = cur_YrA.nbytes / 1e6 * 500
+        # peak memory demand for cvxpy is roughly 500 times input
+        mem_cvx = cur_YrA.nbytes if concurrent_update else cur_YrA[0].nbytes
+        mem_cvx = mem_cvx * 500
+        mem_demand = max(mem_cvx, cur_YrA.nbytes * 5) / 1e6
         # issue a warning if expected memory demand is larger than 1G
-        if concurrent_update and (mem_demand > 1e3):
+        if mem_demand > 1e3:
             warnings.warn(
-                "{} MB of memory is expected for concurrent update, "
-                "which might be too demanding. "
+                "{} cells will be updated togeter, "
+                "which takes roughly {} MB of memory. "
                 "Consider merging the units "
-                "or changing jaccard threshold".format(cur_YrA.shape[0])
+                "or changing jac_thres".format(cur_YrA.shape[0], mem_demand)
             )
         if not warm_start:
             cur_C = None
