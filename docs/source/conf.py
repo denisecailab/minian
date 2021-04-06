@@ -83,6 +83,8 @@ intersphinx_mapping = {
     "skimage": ("https://scikit-image.org/docs/0.18.x/", None),
     "simpleitk": ("https://simpleitk.readthedocs.io/en/v2.0.0/", None),
     "medpy": ("https://loli.github.io/medpy/", None),
+    "natsort": ("https://natsort.readthedocs.io/en/master/", None),
+    "rechunker": ("https://rechunker.readthedocs.io/en/latest/", None),
 }
 
 ref_aliases = {
