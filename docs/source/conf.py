@@ -99,7 +99,8 @@ ref_aliases = {
     "darr.Array": ("dask.array.Array", "darr.Array"),
 }
 
-nbsplit_dict = {os.path.abspath("../../pipeline_output.ipynb"): "pipeline"}
+nbsplit_dict = {os.path.abspath("../../pipeline_noted.ipynb"): "pipeline"}
+nbsphinx_execute = "never"
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ["_templates"]
