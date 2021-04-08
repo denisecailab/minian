@@ -20,7 +20,7 @@ def is_hv_init(cell):
     return False
 
 
-def split_and_parse(app, config):
+def split_and_parse(app):
     for src_nb, out_dir in app.config.nbsplit_dict.items():
         if not os.path.exists(src_nb):
             warnings.warn("notebook not found: {}".format(src_nb), RuntimeWarning)
@@ -67,4 +67,4 @@ def split_and_parse(app, config):
 
 def setup(app):
     app.add_config_value("nbsplit_dict", dict(), "html")
-    app.connect("config-inited", split_and_parse)
+    app.connect("builder-inited", split_and_parse)
