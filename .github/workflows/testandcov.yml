@@ -15,6 +15,7 @@ jobs:
   test-and-coverage:
     name: Test and Cov py ${{ matrix.python-version }}, ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    continue-on-error: true
     strategy:
       fail-fast: false
       max-parallel: 5
@@ -48,6 +49,7 @@ jobs:
         run: |
           pytest -v --color=yes --cov=minian --pyargs minian
           cp -r img artifact/img
+          ls demo_movies
       - name: Run doctest
         run: |
           pip install -r requirements/requirements-doc.txt
