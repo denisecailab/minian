@@ -42,6 +42,7 @@ author = "Denise J. Cai"
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
 extensions = [
+    "nbsphinx",
     "sphinx.ext.doctest",
     "sphinx.ext.napoleon",
     "sphinx.ext.intersphinx",
@@ -52,6 +53,7 @@ extensions = [
     "toctree",
     "ref_alias",
     "normalize_html_id",
+    "nbsplit",
 ]
 
 napoleon_use_rtype = False
@@ -97,6 +99,16 @@ ref_aliases = {
     "darr.Array": ("dask.array.Array", "darr.Array"),
 }
 
+nbsplit_dict = {os.path.abspath("artifact/pipeline.ipynb"): "pipeline"}
+nbsphinx_execute = "never"
+
+rtds_action_github_token = os.getenv("GITHUB_TOKEN")
+if rtds_action_github_token:
+    extensions.append("rtds_action")
+    rtds_action_github_repo = "denisecailab/minian"
+    rtds_action_path = "artifact"
+    rtds_action_artifact_prefix = "notebooks-"
+    rtds_action_error_if_missing = True
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ["_templates"]

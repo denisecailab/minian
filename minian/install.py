@@ -2,7 +2,7 @@ import argparse
 import os
 import requests
 
-PIPELINE_FILES = ("pipeline.ipynb", "pipeline_noted.ipynb", "cross-registration.ipynb")
+PIPELINE_FILES = ("pipeline.ipynb", "cross-registration.ipynb")
 DEMO_FILES = [f"demo_movies/msCam{i}.avi" for i in range(1, 11)]
 
 
