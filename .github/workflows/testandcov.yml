@@ -13,12 +13,12 @@ on:
 
 jobs:
   test-and-coverage:
-    name: Test and Cov ${{ matrix.python-version }}, ${{ matrix.os }}
+    name: Test and Cov py ${{ matrix.python-version }}, ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       max-parallel: 5
       matrix:
-        os: ["ubuntu-latest"]
+        os: ["ubuntu-latest", "macos-latest", "windows-latest"]
         python-version: ["3.8"]
     defaults:
       run:
@@ -50,10 +50,12 @@ jobs:
           pip install -r requirements/requirements-doc.txt
           sphinx-build -M doctest docs/source docs/build
       - name: Generate xml coverage report
+        if: ${{ runner.os == 'Linux'}}
         run: |
           coverage xml
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v1
+        if: ${{ runner.os == 'Linux'}}
         with:
           fail_ci_if_error: true
       - name: Set up conditional SHA value
@@ -65,11 +67,13 @@ jobs:
           if_false: ${{ github.sha }}
       - name: Upload notebook artifacts
         uses: actions/upload-artifact@v2
+        if: ${{ runner.os == 'Linux'}}
         with:
           name: notebooks-${{ steps.commit_sha.outputs.value }}
           path: artifact
       - name: Trigger RTDs build
         uses: dfm/rtds-action@v1
+        if: ${{ runner.os == 'Linux'}}
         with:
           webhook_url: ${{ secrets.RTDS_WEBHOOK_URL }}
           webhook_token: ${{ secrets.RTDS_WEBHOOK_TOKEN }}
