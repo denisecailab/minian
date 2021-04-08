@@ -67,7 +67,10 @@ instance/
 .scrapy
 
 # Sphinx documentation
-docs/_build/
+docs/build/
+docs/source/artifact
+docs/source/pipeline
+!docs/source/pipeline/index.rst
 
 # PyBuilder
 target/
@@ -129,3 +132,4 @@ build_artifacts
 
 # minian intermediate
 minian_intermediate
+demo_data
