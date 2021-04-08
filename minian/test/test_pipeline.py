@@ -1,9 +1,24 @@
-import numpy as np
 import os
+import subprocess
+
+import numpy as np
+
 from ..utilities import open_minian
 
 
 def test_pipeline_notebook():
+    os.makedirs("artifact")
+    args = [
+        "jupyter",
+        "nbconvert",
+        "--to",
+        "notebook",
+        "--output",
+        "artifact/pipeline.ipynb",
+        "--execute",
+        "pipeline_noted.ipynb",
+    ]
+    subprocess.run(args)
     minian_ds = open_minian("./demo_movies/minian")
     assert minian_ds.sizes["frame"] == 2000
     assert minian_ds.sizes["height"] == 480
