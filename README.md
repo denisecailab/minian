@@ -15,7 +15,7 @@ MiniAn is an analysis pipeline and visualization tool inspired by both [CaImAn](
 1. Install MiniAn: `conda install -c conda-forge minian`
 1. Install the pipeline notebooks: `minian-install --notebooks` for more information about minian-install type `minian-install --help`
 1. Optional install the demo movies: `minian-install --demo`
-1. Fire up jupyter: `jupyter notebook` and open the notebook "pipeline_noted.ipynb"
+1. Fire up jupyter: `jupyter notebook` and open the notebook "pipeline.ipynb"
 
 ## Option #2: virtual env
 1. Create a python virtual env: `python3 -m venv venv`
@@ -35,7 +35,7 @@ MiniAn is an analysis pipeline and visualization tool inspired by both [CaImAn](
 1. Install the MiniAn package: `pip install MiniAn`
 1. Install the pipeline notebooks: `minian-install --notebooks` for more information about minian-install type `minian-install --help`
 1. Optional install the demo movies: `minian-install --demo`
-1. Fire up jupyter: `jupyter notebook` and open the notebook "pipeline_noted.ipynb"
+1. Fire up jupyter: `jupyter notebook` and open the notebook "pipeline.ipynb"
 
 # Quick Start Guide for build and use from source
 
@@ -46,7 +46,7 @@ MiniAn is an analysis pipeline and visualization tool inspired by both [CaImAn](
 1. Go into MiniAn folder you just cloned: `cd minian/`
 1. Create an conda environment: `conda env create -n minian -f environment.yml`
 1. Activate the conda enviornment you created during minian installation: `conda activate minian`
-1. Fire up jupyter: `jupyter notebook` and open the notebook "pipeline_noted.ipynb"
+1. Fire up jupyter: `jupyter notebook` and open the notebook "pipeline.ipynb"
 
 ## Option #2: virtual env
 1. Download the MiniAn package: `git clone https://github.com/DeniseCaiLab/minian.git`
@@ -56,7 +56,7 @@ MiniAn is an analysis pipeline and visualization tool inspired by both [CaImAn](
 1. Install the dependencies: `pip install -r requirements.txt`
 1. Install ffmpeg, for debian based systems: `sudo apt install ffmpeg`
 1. Install required files for AV: `sudo apt install libavformat-dev libavdevice-dev`
-1. Fire up jupyter: `jupyter notebook` and open the notebook "pipeline_noted.ipynb"
+1. Fire up jupyter: `jupyter notebook` and open the notebook "pipeline.ipynb"
 
 ## Option #3: docker
 1. Download and install [docker](https://docs.docker.com/install/).

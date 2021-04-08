@@ -16,7 +16,7 @@ def test_pipeline_notebook():
         "--output",
         "artifact/pipeline.ipynb",
         "--execute",
-        "pipeline_noted.ipynb",
+        "pipeline.ipynb",
     ]
     subprocess.run(args)
     minian_ds = open_minian("./demo_movies/minian")
