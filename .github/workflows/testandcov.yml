@@ -42,6 +42,8 @@ jobs:
         run: |
           black --check minian
       - name: Run tests and collect coverage
+        env:
+          MINIAN_NWORKERS: 2
         run: |
           pytest -v --color=yes --cov=minian --pyargs minian
           cp -r img artifact/img
