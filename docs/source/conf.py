@@ -54,7 +54,6 @@ extensions = [
     "ref_alias",
     "normalize_html_id",
     "nbsplit",
-    "rtds-action",
 ]
 
 napoleon_use_rtype = False
@@ -103,11 +102,13 @@ ref_aliases = {
 nbsplit_dict = {os.path.abspath("artifact/pipeline.ipynb"): "pipeline"}
 nbsphinx_execute = "never"
 
-rtds_action_github_repo = "denisecailab/minian"
-rtds_action_path = "artifact"
-rtds_action_artifact_prefix = "notebooks-"
-rtds_action_github_token = os.environ["GITHUB_TOKEN"]
-rtds_action_error_if_missing = True
+rtds_action_github_token = os.getenv("GITHUB_TOKEN")
+if rtds_action_github_token:
+    extensions.append("rtds_action")
+    rtds_action_github_repo = "denisecailab/minian"
+    rtds_action_path = "artifact"
+    rtds_action_artifact_prefix = "notebooks-"
+    rtds_action_error_if_missing = True
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ["_templates"]

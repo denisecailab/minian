@@ -2,6 +2,7 @@ import json
 import os
 import re
 import shutil
+import warnings
 
 import numpy as np
 
@@ -21,11 +22,16 @@ def is_hv_init(cell):
 
 def split_and_parse(app, config):
     for src_nb, out_dir in app.config.nbsplit_dict.items():
+        if not os.path.exists(src_nb):
+            warnings.warn("notebook not found: {}".format(src_nb), RuntimeWarning)
+            continue
         srcpath = os.path.split(src_nb)[0]
         outpath = os.path.join(os.path.abspath(app.srcdir), out_dir)
         os.makedirs(outpath, exist_ok=True)
         # copy images
-        shutil.copytree(os.path.join(srcpath, "img"), os.path.join(outpath, "img"))
+        img_path = os.path.join(srcpath, "img")
+        if os.path.exists(img_path):
+            shutil.copytree(img_path, os.path.join(outpath, "img"))
         # read source notebook
         with open(src_nb, mode="r") as notebook:
             jnote = json.load(notebook)
