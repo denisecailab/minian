@@ -44,6 +44,7 @@ jobs:
       - name: Run tests and collect coverage
         run: |
           pytest -v --color=yes --cov=minian --pyargs minian
+          cp -r img artifact/img
       - name: Run doctest
         run: |
           pip install -r requirements/requirements-doc.txt
