@@ -18,7 +18,7 @@ def test_pipeline_notebook():
         "--execute",
         "pipeline.ipynb",
     ]
-    subprocess.run(args)
+    subprocess.run(args, check=True)
     minian_ds = open_minian("./demo_movies/minian")
     assert minian_ds.sizes["frame"] == 2000
     assert minian_ds.sizes["height"] == 480
