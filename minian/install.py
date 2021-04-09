@@ -3,7 +3,9 @@ import os
 import requests
 
 PIPELINE_FILES = ("pipeline.ipynb", "cross-registration.ipynb")
-DEMO_FILES = [f"demo_movies/msCam{i}.avi" for i in range(1, 11)]
+DEMO_FILES = [f"demo_movies/msCam{i}.avi" for i in range(1, 11)] + [
+    f"demo_data/session{i}/minian.nc" for i in range(1, 3)
+]
 
 
 def _get_file(filename: str, branch: str):
