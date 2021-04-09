@@ -48,7 +48,6 @@ jobs:
         run: |
           pytest -v --color=yes --cov=minian --pyargs minian
           cp -r img artifact/img
-          ls demo_movies
       - name: Run doctest
         run: |
           pip install -r requirements/requirements-doc.txt
@@ -71,7 +70,7 @@ jobs:
           if_false: ${{ github.sha }}
       - name: Upload notebook artifacts
         uses: actions/upload-artifact@v2
-        if: ${{ runner.os == 'macOS'}}
+        if: ${{ runner.os == 'Linux'}}
         with:
           name: notebooks-${{ steps.commit_sha.outputs.value }}
           path: artifact
