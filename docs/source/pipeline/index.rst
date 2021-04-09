@@ -5,4 +5,4 @@ Pipeline
    :maxdepth: 1
    :glob:
 
-   pipeline_*
+   notebook_*

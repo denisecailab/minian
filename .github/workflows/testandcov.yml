@@ -53,7 +53,7 @@ jobs:
         env:
           MINIAN_NWORKERS: ${{ steps.n_workers.outputs.value }}
         run: |
-          pytest -v --color=yes --cov=minian --pyargs minian
+          pytest -v --color=yes --exitfirst --cov=minian --pyargs minian
           cp -r img artifact/img
       - name: Run doctest
         run: |

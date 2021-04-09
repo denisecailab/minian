@@ -10,4 +10,5 @@ Welcome to minian's documentation!
    :maxdepth: 2
 
    pipeline/index
+   cross_reg/index
    api/index

@@ -7,7 +7,7 @@ from ..utilities import open_minian
 
 
 def test_pipeline_notebook():
-    os.makedirs("artifact")
+    os.makedirs("artifact", exist_ok=True)
     args = [
         "jupyter",
         "nbconvert",
