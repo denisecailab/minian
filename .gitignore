@@ -67,7 +67,12 @@ instance/
 .scrapy
 
 # Sphinx documentation
-docs/_build/
+docs/build/
+docs/source/artifact
+docs/source/pipeline
+!docs/source/pipeline/index.rst
+docs/source/cross_reg
+!docs/source/cross_reg/index.rst
 
 # PyBuilder
 target/
@@ -115,3 +120,17 @@ demo_movies/minian
 
 # dask worker space
 dask-worker-space
+
+# history
+.history
+*.pyc
+
+build_artifacts
+# conda smithy ci-skeleton start
+*.pyc
+
+build_artifacts
+# conda smithy ci-skeleton end
+
+# minian intermediate
+minian_intermediate
