@@ -11,7 +11,6 @@ def test_pipeline_notebook():
     args = [
         "jupyter",
         "nbconvert",
-        "--ExecutePreprocessor.timeout=-1",
         "--to",
         "notebook",
         "--output",
