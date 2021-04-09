@@ -1364,7 +1364,9 @@ def generate_videos(
         AC = compute_AtC(A, C)
     print("normalizing")
     Y = Y * 255 / Y.max().compute().values * gain
-    norm_idx = np.random.randint(0, Y.sizes["frame"], nfm_norm)
+    norm_idx = np.sort(
+        np.random.choice(np.arange(Y.sizes["frame"]), size=nfm_norm, replace=False)
+    )
     Y_sub = Y.isel(frame=norm_idx).values.reshape(-1)
     AC_sub = scisps.csc_matrix(AC.isel(frame=norm_idx).values.reshape((-1, 1)))
     lsqr = scisps.linalg.lsqr(AC_sub, Y_sub)

@@ -16,6 +16,7 @@ jobs:
     name: Test and Cov py ${{ matrix.python-version }}, ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       max-parallel: 5
       matrix:
         os: ["ubuntu-latest", "macos-latest", "windows-latest"]
@@ -41,7 +42,16 @@ jobs:
       - name: Lint with black
         run: |
           black --check minian
+      - name: Set up n_workers
+        uses: haya14busa/action-cond@v1
+        id: n_workers
+        with:
+          cond: ${{ runner.os == 'macOS' }}
+          if_true: 3
+          if_false: 2
       - name: Run tests and collect coverage
+        env:
+          MINIAN_NWORKERS: ${{ steps.n_workers.outputs.value }}
         run: |
           pytest -v --color=yes --cov=minian --pyargs minian
           cp -r img artifact/img
