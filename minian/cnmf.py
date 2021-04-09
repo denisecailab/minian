@@ -1678,6 +1678,11 @@ def compute_AtC(A: xr.DataArray, C: xr.DataArray) -> xr.DataArray:
     AtC = darr.tensordot(C, A, axes=(1, 0)).map_blocks(
         lambda a: a.todense(), dtype=A.dtype
     )
+    arr_opt = fct.partial(
+        custom_arr_optimize, rename_dict={"tensordot": "tensordot_restricted"}
+    )
+    with da.config.set(array_optimize=arr_opt):
+        AtC = da.optimize(AtC)[0]
     return xr.DataArray(
         AtC,
         dims=["frame", "height", "width"],
