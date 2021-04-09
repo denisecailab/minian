@@ -18,6 +18,8 @@ cleanup:
 	-rm -rf build
 	-rm -rf source/pipeline/img
 	-rm -f source/pipeline/*.ipynb
+	-rm -rf source/cross_reg/img
+	-rm -f source/cross_reg/*.ipynb
 
 # Catch-all target: route all unknown targets to Sphinx using the new
 # "make mode" option.  $(O) is meant as a shortcut for $(SPHINXOPTS).

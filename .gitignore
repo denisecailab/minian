@@ -71,6 +71,8 @@ docs/build/
 docs/source/artifact
 docs/source/pipeline
 !docs/source/pipeline/index.rst
+docs/source/cross_reg
+!docs/source/cross_reg/index.rst
 
 # PyBuilder
 target/
