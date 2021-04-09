@@ -507,7 +507,7 @@ def save_minian(
     Path(dpath).mkdir(parents=True, exist_ok=True)
     ds = var.to_dataset()
     if meta_dict is not None:
-        pathlist = os.path.abspath(dpath).split(os.sep)
+        pathlist = os.path.split(os.path.abspath(dpath))[0].split(os.sep)
         ds = ds.assign_coords(
             **dict([(dn, pathlist[di]) for dn, di in meta_dict.items()])
         )

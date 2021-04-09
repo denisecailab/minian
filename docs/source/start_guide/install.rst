@@ -56,6 +56,8 @@ Finally, you can install MiniAn with:
 
 and Done!
 
+.. _clone-source:
+
 Install from source
 -------------------
 
@@ -72,6 +74,7 @@ Run the following to obtain a full copy of MiniAn repo and setup necessary depen
 You can then activate the environment and start running the notebooks.
 Note that if you install in this way you will have a local copy of MiniAn scripts, and any modification made to those scripts will be reflect in your pipeline.
 
+.. _download-notebook:
 
 Getting notebooks and demos
 ---------------------------
@@ -97,10 +100,10 @@ Run the following script to get demo data:
 
     minian-install --demo
 
-The script can also help you get from different branch.
+The script can also help you get files from different branchs.
 See ``minian-install --help`` for more detail.
 
-Note that if you chose to `Install from source`_ you would already have a local copy of everything and you can also checkou different version of them using `git`.
+Note that if you choose to `Install from source`_ you would already have a local copy of everything and you can also checkou different version of them using `git`.
 You can skip this step altogether.
 
 Start the pipeline

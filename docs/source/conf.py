@@ -12,6 +12,7 @@
 #
 import os
 import sys
+import datetime
 
 sys.path.insert(0, os.path.abspath("../../"))
 sys.path.append(os.path.abspath("ext"))
@@ -32,8 +33,7 @@ dask.array.as_gufunc = custom_as_gufunc
 # -- Project information -----------------------------------------------------
 
 project = "MiniAn"
-copyright = "2020, Denise J. Cai"
-author = "Denise J. Cai"
+copyright = "2018-%s, MiniAn Developers" % datetime.datetime.now().year
 
 
 # -- General configuration ---------------------------------------------------
@@ -104,6 +104,12 @@ nbsplit_dict = {
     os.path.abspath("artifact/cross-registration.ipynb"): "cross_reg",
 }
 nbsphinx_execute = "never"
+nbsphinx_prolog = r"""
+.. note::
+    This page was generated from a Jupyter notebook.
+    Not all interactive visualization will work on this web page.
+    Consider :ref:`downloading the notebooks <download-notebook>` for full Python-backed interactivity.
+"""
 
 rtds_action_github_token = os.getenv("GITHUB_TOKEN")
 if rtds_action_github_token:
@@ -119,7 +125,7 @@ templates_path = ["_templates"]
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
 # This pattern also affects html_static_path and html_extra_path.
-exclude_patterns = []
+exclude_patterns = ["artifact"]
 
 
 # -- Options for HTML output -------------------------------------------------
