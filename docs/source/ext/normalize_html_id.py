@@ -19,6 +19,8 @@ def normalize_id(app, exception):
     ID_dict = {i: i.replace(".", "-") for i in IDs}
 
     for root, dirs, files in os.walk(build_dir):
+        if root != "api":
+            continue
         for html in list(filter(lambda fn: fn.endswith(".html"), files)):
             with open(os.path.join(root, html)) as html_doc:
                 soup = BeautifulSoup(html_doc, "html.parser")
