@@ -17,7 +17,7 @@ da.config.set(
         "optimization.fuse.ave-width": 3,
         # "optimization.fuse.subgraphs": False,
         # "distributed.scheduler.allowed-failures": 1,
-        # "array.slicing.split_large_chunks": False,
+        "array.slicing.split_large_chunks": False,
     }
 )
 # ref: https://github.com/dask/dask/issues/3530
