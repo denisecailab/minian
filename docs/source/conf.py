@@ -104,6 +104,12 @@ nbsplit_dict = {
     os.path.abspath("artifact/cross-registration.ipynb"): "cross_reg",
 }
 nbsphinx_execute = "never"
+nbsphinx_prolog = r"""
+.. note::
+    This page was generated from a Jupyter notebook.
+    Not all interactive visualization will work on this web page.
+    Consider :ref:`downloading the notebooks <download-notebook>` for full Python-backed interactivity.
+"""
 
 rtds_action_github_token = os.getenv("GITHUB_TOKEN")
 if rtds_action_github_token:

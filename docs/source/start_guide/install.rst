@@ -72,6 +72,7 @@ Run the following to obtain a full copy of MiniAn repo and setup necessary depen
 You can then activate the environment and start running the notebooks.
 Note that if you install in this way you will have a local copy of MiniAn scripts, and any modification made to those scripts will be reflect in your pipeline.
 
+.. _download-notebook:
 
 Getting notebooks and demos
 ---------------------------
