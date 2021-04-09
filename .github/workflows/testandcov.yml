@@ -42,9 +42,16 @@ jobs:
       - name: Lint with black
         run: |
           black --check minian
+      - name: Set up n_workers
+        uses: haya14busa/action-cond@v1
+        id: n_workers
+        with:
+          cond: ${{ runner.os == 'macOS' }}
+          if_true: 3
+          if_false: 2
       - name: Run tests and collect coverage
         env:
-          MINIAN_NWORKERS: 2
+          MINIAN_NWORKERS: ${{ steps.n_workers.outputs.value }}
         run: |
           pytest -v --color=yes --cov=minian --pyargs minian
           cp -r img artifact/img
