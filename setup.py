@@ -9,6 +9,7 @@ with open("VERSION") as f:
 with open("README.md", "r") as fh:
     long_description = fh.read()
 
+
 def _get_requirements(requirement_file):
     with open(requirement_file) as f:
         reqs = []
@@ -16,11 +17,12 @@ def _get_requirements(requirement_file):
             reqs.append(l)
         return reqs
 
+
 setuptools.setup(
     name=NAME,
     version=VERSION,
-    author="Denise Cai",
-    author_email="denisecai@gmail.com",
+    author="MiniAn Developers",
+    author_email="denisecailab@gmail.com",
     description="MiniAn is an analysis pipeline and visualization tool inspired by both CaImAn and MIN1PIPE package specifically for Miniscope data.",
     long_description=long_description,
     long_description_content_type="text/markdown",
@@ -28,7 +30,8 @@ setuptools.setup(
     install_requires=_get_requirements(REQUIREMENTS),
     packages=setuptools.find_packages(),
     project_urls={
-        "Documentation": "https://github.com/DeniseCaiLab/minian",
+        "Github": "https://github.com/DeniseCaiLab/minian",
+        "Documentation": "https://minian.readthedocs.io/en/latest/",
     },
     classifiers=[
         "Programming Language :: Python :: 3",
@@ -39,5 +42,5 @@ setuptools.setup(
             "minian-install = minian.install:main",
         ],
     },
-    python_requires='>=3.7',
+    python_requires=">=3.7",
 )

@@ -12,6 +12,7 @@
 #
 import os
 import sys
+import datetime
 
 sys.path.insert(0, os.path.abspath("../../"))
 sys.path.append(os.path.abspath("ext"))
@@ -32,8 +33,7 @@ dask.array.as_gufunc = custom_as_gufunc
 # -- Project information -----------------------------------------------------
 
 project = "MiniAn"
-copyright = "2020, Denise J. Cai"
-author = "Denise J. Cai"
+copyright = "2018-%s, MiniAn Developers" % datetime.datetime.now().year
 
 
 # -- General configuration ---------------------------------------------------
