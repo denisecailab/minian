@@ -100,10 +100,10 @@ Run the following script to get demo data:
 
     minian-install --demo
 
-The script can also help you get from different branch.
+The script can also help you get files from different branchs.
 See ``minian-install --help`` for more detail.
 
-Note that if you chose to `Install from source`_ you would already have a local copy of everything and you can also checkou different version of them using `git`.
+Note that if you choose to `Install from source`_ you would already have a local copy of everything and you can also checkou different version of them using `git`.
 You can skip this step altogether.
 
 Start the pipeline
