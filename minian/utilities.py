@@ -5,7 +5,7 @@ import shutil
 import warnings
 from copy import deepcopy
 from os import listdir
-from os.path import isdir
+from os.path import isdir, isfile
 from os.path import join as pjoin
 from pathlib import Path
 from typing import Callable, List, Optional, Union
@@ -278,12 +278,17 @@ def open_minian(
     """
     Load an existing minian dataset.
 
-    This function will iterate through all the directories under input `dpath`
-    and load them as `xr.DataArray` with `zarr` backend, so it is important that
-    the user make sure every directory under `dpath` can be load this way. The
-    loaded arrays will be combined as either a `xr.Dataset` or a `dict`.
-    Optionally a user-supplied custom function can be used to post process the
-    resulting `xr.Dataset`.
+    If `dpath` is a file, then it is assumed that the full dataset is saved as a
+    single file, and this function will directly call
+    :func:`xarray.open_dataset` on `dpath`. Otherwise if `dpath` is a directory,
+    then it is assumed that the dataset is saved as a directory of `zarr`
+    arrays, as produced by :func:`save_minian`. This function will then iterate
+    through all the directories under input `dpath` and load them as
+    `xr.DataArray` with `zarr` backend, so it is important that the user make
+    sure every directory under `dpath` can be load this way. The loaded arrays
+    will be combined as either a `xr.Dataset` or a `dict`. Optionally a
+    user-supplied custom function can be used to post process the resulting
+    `xr.Dataset`.
 
     Parameters
     ----------
@@ -301,7 +306,8 @@ def open_minian(
         using `xr.merge(..., compat="no_conflicts")`, which will implicitly
         align the DataArray over all dimensions, so it is important to make sure
         the coordinates are compatible and will not result in creation of large
-        NaN-padded results. By default `False`.
+        NaN-padded results. Only used if `dpath` is a directory, otherwise a
+        `xr.Dataset` is always returned. By default `False`.
 
     Returns
     -------
@@ -314,19 +320,22 @@ def open_minian(
     xarray.open_zarr : for how each directory will be loaded as `xr.DataArray`
     xarray.merge : for how the `xr.DataArray` will be merged as `xr.Dataset`
     """
-    dslist = []
-    for d in listdir(dpath):
-        arr_path = pjoin(dpath, d)
-        if isdir(arr_path):
-            arr = list(xr.open_zarr(arr_path).values())[0]
-            arr.data = darr.from_zarr(
-                os.path.join(arr_path, arr.name), inline_array=True
-            )
-            dslist.append(arr)
-    if return_dict:
-        ds = {d.name: d for d in dslist}
-    else:
-        ds = xr.merge(dslist, compat="no_conflicts")
+    if isfile(dpath):
+        ds = xr.open_dataset(dpath).chunk()
+    elif isdir(dpath):
+        dslist = []
+        for d in listdir(dpath):
+            arr_path = pjoin(dpath, d)
+            if isdir(arr_path):
+                arr = list(xr.open_zarr(arr_path).values())[0]
+                arr.data = darr.from_zarr(
+                    os.path.join(arr_path, arr.name), inline_array=True
+                )
+                dslist.append(arr)
+        if return_dict:
+            ds = {d.name: d for d in dslist}
+        else:
+            ds = xr.merge(dslist, compat="no_conflicts")
     if (not return_dict) and post_process:
         ds = post_process(ds, dpath)
     return ds
@@ -586,7 +595,7 @@ def xrconcat_recursive(var: Union[dict, list], dims: List[str]) -> xr.Dataset:
         return xr.concat(xr_ls, dim=dims[0])
     else:
         if type(var) is dict:
-            var = var.values()
+            var = list(var.values())
         return xr.concat(var, dim=dims[0])
 
 
