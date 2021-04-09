@@ -56,6 +56,8 @@ Finally, you can install MiniAn with:
 
 and Done!
 
+.. _clone-source:
+
 Install from source
 -------------------
 
