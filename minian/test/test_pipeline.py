@@ -33,4 +33,4 @@ def test_pipeline_notebook():
     assert int(minian_ds["S"].sum().compute()) == 1245256
     assert int(minian_ds["A"].sum().compute()) == 365
     assert os.path.exists("./demo_movies/minian_mc.mp4")
-    assert os.path.exists("./demo_movies/minian.mp4")
+    # assert os.path.exists("./demo_movies/minian.mp4")
