@@ -9,5 +9,6 @@ Welcome to minian's documentation!
 .. toctree::
    :maxdepth: 2
 
+   start_guide/index
    pipeline/index
    api/index
