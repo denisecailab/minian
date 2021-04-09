@@ -99,7 +99,10 @@ ref_aliases = {
     "darr.Array": ("dask.array.Array", "darr.Array"),
 }
 
-nbsplit_dict = {os.path.abspath("artifact/pipeline.ipynb"): "pipeline"}
+nbsplit_dict = {
+    os.path.abspath("artifact/pipeline.ipynb"): "pipeline",
+    os.path.abspath("artifact/cross-registration.ipynb"): "cross_reg",
+}
 nbsphinx_execute = "never"
 
 rtds_action_github_token = os.getenv("GITHUB_TOKEN")

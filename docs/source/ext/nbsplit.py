@@ -46,7 +46,7 @@ def split_and_parse(app):
         hv_init["execution_count"] = None
         # write notebooks
         for isplit, start in enumerate(split):
-            fname = "pipeline_{}.ipynb".format(isplit)
+            fname = "notebook_{}.ipynb".format(isplit)
             meta = jnote["metadata"].copy()
             meta["name"] = fname
             try:

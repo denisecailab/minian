@@ -1,5 +1,5 @@
-Pipeline
-========
+Cross-registration
+==================
 
 .. toctree::
    :maxdepth: 1
