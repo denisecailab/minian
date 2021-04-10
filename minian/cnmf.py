@@ -1004,11 +1004,7 @@ def update_temporal(
     YrA_new = YrA.sel(unit_id=mask)
     if post_scal and len(sig_new) > 0:
         print("post-hoc scaling")
-        scal = (
-            lstsq_vec(sig_new.data.rechunk((1, -1)), YrA_new.data)
-            .compute()
-            .reshape((-1, 1))
-        )
+        scal = lstsq_vec(sig_new.data, YrA_new.data).compute().reshape((-1, 1))
         C_new, S_new, b0_new, c0_new = (
             C_new * scal,
             S_new * scal,
