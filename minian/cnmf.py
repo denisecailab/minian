@@ -1918,5 +1918,8 @@ def idx_corr(X: np.ndarray, ridx: np.ndarray, cidx: np.ndarray) -> np.ndarray:
         X[i, :] -= X[i, :].mean()
         std[i] = np.sqrt((X[i, :] ** 2).sum())
     for i, (r, c) in enumerate(zip(ridx, cidx)):
-        res[i] = (X[r, :] * X[c, :]).sum() / (std[r] * std[c])
+        try:
+            res[i] = (X[r, :] * X[c, :]).sum() / (std[r] * std[c])
+        except ZeroDivisionError:
+            res[i] = 0
     return res
