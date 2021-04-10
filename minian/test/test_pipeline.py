@@ -1,5 +1,6 @@
 import os
 import subprocess
+import sys
 
 import numpy as np
 import pytest
@@ -7,7 +8,7 @@ import pytest
 from ..utilities import open_minian
 
 
-@pytest.mark.flaky(reruns=3)
+@pytest.mark.flaky(reruns=3, condition=sys.platform.startswith("win32"))
 def test_pipeline_notebook():
     os.makedirs("artifact", exist_ok=True)
     args = [
