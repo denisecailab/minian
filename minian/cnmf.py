@@ -1001,6 +1001,7 @@ def update_temporal(
         g[mask],
     )
     sig_new = C_new + b0_new + c0_new
+    sig_new = da.optimize(sig_new)[0]
     YrA_new = YrA.sel(unit_id=mask)
     if post_scal and len(sig_new) > 0:
         print("post-hoc scaling")
