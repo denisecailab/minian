@@ -1001,14 +1001,11 @@ def update_temporal(
         g[mask],
     )
     sig_new = C_new + b0_new + c0_new
+    sig_new = da.optimize(sig_new)[0]
     YrA_new = YrA.sel(unit_id=mask)
     if post_scal and len(sig_new) > 0:
         print("post-hoc scaling")
-        scal = (
-            lstsq_vec(sig_new.data.rechunk((1, -1)), YrA_new.data)
-            .compute()
-            .reshape((-1, 1))
-        )
+        scal = lstsq_vec(sig_new.data, YrA_new.data).compute().reshape((-1, 1))
         C_new, S_new, b0_new, c0_new = (
             C_new * scal,
             S_new * scal,
@@ -1921,5 +1918,9 @@ def idx_corr(X: np.ndarray, ridx: np.ndarray, cidx: np.ndarray) -> np.ndarray:
         X[i, :] -= X[i, :].mean()
         std[i] = np.sqrt((X[i, :] ** 2).sum())
     for i, (r, c) in enumerate(zip(ridx, cidx)):
-        res[i] = (X[r, :] * X[c, :]).sum() / (std[r] * std[c])
+        cur_std = std[r] * std[c]
+        if cur_std > 0:
+            res[i] = (X[r, :] * X[c, :]).sum() / cur_std
+        else:
+            res[i] = 0
     return res
