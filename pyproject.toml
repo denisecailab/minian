@@ -9,6 +9,7 @@ build-backend = "setuptools.build_meta"
 name = "cz_conventional_commits"
 version = "0.1.1"
 tag_format = "v$version"
+update_changelog_on_bump = true
 version_files = [
     "minian/__init__.py:__version__",
     "setup.py:version"
