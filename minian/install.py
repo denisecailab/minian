@@ -13,7 +13,7 @@ NOTEBOOK_FILES = [
 DEMO_FILES = [f"demo_movies/msCam{i}.avi" for i in range(1, 11)] + [
     f"demo_data/session{i}/minian.nc" for i in range(1, 3)
 ]
-VERSION = "master"
+VERSION = "0.1.1"
 
 
 def _get_file(filename: str, version: str):
@@ -55,7 +55,7 @@ def main():
         "-v",
         action="store",
         default=VERSION,
-        help="Git repo branch name, default {}".format(VERSION),
+        help="Git repo branch or tag name, default {}".format(VERSION),
     )
     args = parser.parse_args()
 

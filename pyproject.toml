@@ -12,5 +12,6 @@ tag_format = "v$version"
 changelog_incremental = true
 version_files = [
     "minian/__init__.py:__version__",
-    "setup.py:version"
+    "setup.py:version",
+    "minian/install.py:VERSION"
 ]
