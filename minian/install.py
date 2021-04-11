@@ -22,17 +22,15 @@ def _get_file(filename: str, branch: str):
 
 
 def demo(branch: str):
-    try:
-        os.mkdir("demo_movies")
-        print("Installing demo movies")
-        for file in DEMO_FILES:
-            _get_file(file, branch)
-    except OSError:
-        print("Creation of the directory demo_movies failed, not installing.")
+    os.makedirs("demo_movies", exist_ok=True)
+    os.makedirs("demo_data", exist_ok=True)
+    print("Installing demo data")
+    for file in DEMO_FILES:
+        _get_file(file, branch)
 
 
 def pipeline(branch: str):
-    print("Installing pipeline notebooks")
+    print("Installing notebooks")
     for file in PIPELINE_FILES:
         _get_file(file, branch)
 
@@ -40,9 +38,9 @@ def pipeline(branch: str):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--notebooks", action="store_true", help="Installs the pipeline notebooks"
+        "--notebooks", action="store_true", help="Installs the notebooks"
     )
-    parser.add_argument("--demo", action="store_true", help="Installs the demo movies")
+    parser.add_argument("--demo", action="store_true", help="Installs the demo data")
     parser.add_argument(
         "-b",
         action="store",
