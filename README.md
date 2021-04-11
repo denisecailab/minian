@@ -19,9 +19,9 @@ MiniAn is an analysis pipeline and visualization tool inspired by both [CaImAn](
 
 # Documentation
 
-MiniAn documentation is hosted on Readthedoc at:
+MiniAn documentation is hosted on ReadtheDocs at:
 
-https://minian.readthedocs.io/en/latest/
+https://minian.readthedocs.io/
 
 # Contributing to MiniAn
 
