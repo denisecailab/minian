@@ -21,9 +21,7 @@ def _get_file(filename: str, version: str):
         print(f"File {filename} already exists, skipping install of this file.")
         return
     for vv in [version, "v" + version]:
-        r = requests.get(
-            f"https://raw.github.com/DeniseCaiLab/minian/{version}/{filename}"
-        )
+        r = requests.get(f"https://raw.github.com/DeniseCaiLab/minian/{vv}/{filename}")
         if r.status_code == 200:
             os.makedirs(os.path.dirname(filename), exist_ok=True)
             with open(f"{filename}", "wb") as f:
