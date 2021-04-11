@@ -23,7 +23,9 @@ def _get_file(filename: str, version: str):
     for vv in [version, "v" + version]:
         r = requests.get(f"https://raw.github.com/DeniseCaiLab/minian/{vv}/{filename}")
         if r.status_code == 200:
-            os.makedirs(os.path.dirname(filename), exist_ok=True)
+            parent_dir = os.path.dirname(filename)
+            if parent_dir:
+                os.makedirs(parent_dir, exist_ok=True)
             with open(f"{filename}", "wb") as f:
                 for chunk in r.iter_content(2048):
                     f.write(chunk)
