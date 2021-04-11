@@ -2,7 +2,14 @@ import argparse
 import os
 import requests
 
-PIPELINE_FILES = ("pipeline.ipynb", "cross-registration.ipynb")
+NOTEBOOK_FILES = [
+    "pipeline.ipynb",
+    "cross-registration.ipynb",
+    "img/workflow.png",
+    "img/param_pnr.png",
+    "img/param_spatial_update.png",
+    "img/param_temporal_update.png",
+]
 DEMO_FILES = [f"demo_movies/msCam{i}.avi" for i in range(1, 11)] + [
     f"demo_data/session{i}/minian.nc" for i in range(1, 3)
 ]
@@ -22,27 +29,26 @@ def _get_file(filename: str, branch: str):
 
 
 def demo(branch: str):
-    try:
-        os.mkdir("demo_movies")
-        print("Installing demo movies")
-        for file in DEMO_FILES:
-            _get_file(file, branch)
-    except OSError:
-        print("Creation of the directory demo_movies failed, not installing.")
+    os.makedirs("demo_movies", exist_ok=True)
+    os.makedirs("demo_data", exist_ok=True)
+    print("Installing demo data")
+    for file in DEMO_FILES:
+        _get_file(file, branch)
 
 
-def pipeline(branch: str):
-    print("Installing pipeline notebooks")
-    for file in PIPELINE_FILES:
+def notebook(branch: str):
+    os.makedirs("img", exist_ok=True)
+    print("Installing notebooks")
+    for file in NOTEBOOK_FILES:
         _get_file(file, branch)
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--notebooks", action="store_true", help="Installs the pipeline notebooks"
+        "--notebooks", action="store_true", help="Installs the notebooks"
     )
-    parser.add_argument("--demo", action="store_true", help="Installs the demo movies")
+    parser.add_argument("--demo", action="store_true", help="Installs the demo data")
     parser.add_argument(
         "-b",
         action="store",
@@ -55,7 +61,7 @@ def main():
     print(f"Using branch: {branch}")
 
     if args.notebooks:
-        pipeline(branch)
+        notebook(branch)
 
     if args.demo:
         demo(branch)

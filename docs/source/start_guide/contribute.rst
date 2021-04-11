@@ -20,10 +20,20 @@ MiniAn use the `black coding style <https://black.readthedocs.io/en/stable/the_b
 We also use a github action to enforce the style.
 So watch out for automatic commits and avoid headache in confilicting history.
 
+Creating release
+----------------
+
+#. ``pip install commitizen``
+#. ``cz bump --dry-run`` and make note of new release tag
+#. ``cz changelog --unreleased-version <TAG>`` with the tag noted in last step
+#. edit `CHANGELOG.md` as desired
+#. ``cz bump``
+
 Packaging for PyPi
 ------------------
 
-#. ``python3 setup.py sdist bdist_wheel``
+#. ``pip install --upgrade build``
+#. ``python3 -m build``
 #. ``pip install --upgrade twine``
 #. ``python3 -m twine upload dist/*``
 
