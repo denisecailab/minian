@@ -17,7 +17,7 @@ def _get_requirements(requirement_file):
 
 setuptools.setup(
     name=NAME,
-    version="0.1.1",
+    version="1.0.0rc0",
     author="MiniAn Developers",
     author_email="denisecailab@gmail.com",
     description="MiniAn is an analysis pipeline and visualization tool inspired by both CaImAn and MIN1PIPE package specifically for Miniscope data.",
