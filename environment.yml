@@ -1,7 +1,8 @@
 name: minian
 channels:
-  - conda-forge
+  - bioconda
   - simpleitk
+  - conda-forge
   - defaults
 dependencies:
   - bokeh=1.4.0
@@ -49,5 +50,4 @@ dependencies:
   - sparse=0.11.2
   - pymetis=2020.1
   - rechunker=0.3.3
-  - pip:
-      - medpy==0.4.0
+  - medpy=0.4.0
