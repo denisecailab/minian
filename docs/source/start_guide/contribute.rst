@@ -5,19 +5,20 @@ We'd love feedback and contribution from the community!
 :ref:`Fork and clone MiniAn from source <clone-source>`, make you changes and submit a PR!
 Below are some book-keeping notes.
 
+Commit Messages
+---------------
+
+MiniAn is adopting `conventional commit <https://www.conventionalcommits.org>`_.
+You can use `commitizen <https://commitizen-tools.github.io/commitizen/>`_ to check for the style or setup pre-commit hooks.
+We also use `commitizen <https://commitizen-tools.github.io/commitizen/>`_ to automate the releasing process.
+All development should be done on separate branches and squash-merge to `master`.
+
 Code Style
 ----------
 
 MiniAn use the `black coding style <https://black.readthedocs.io/en/stable/the_black_code_style.html>`_.
-
-Create Release
---------------
-
-#. Merge all branches for the release into `master`.
-#. ``git checkout master``
-#. ``bash scripts/create_release.sh x.x.x`` where ``x.x.x`` is version number
-
-The script will do some checks on the Git repo, creates a new tag and updates the VERSION file with the new release number.
+We also use a github action to enforce the style.
+So watch out for automatic commits and avoid headache in confilicting history.
 
 Packaging for PyPi
 ------------------

@@ -3,9 +3,6 @@ import setuptools
 NAME = "MiniAn"
 REQUIREMENTS = "requirements/requirements-base.txt"
 
-with open("VERSION") as f:
-    VERSION = f.read().splitlines()[0]
-
 with open("README.md", "r") as fh:
     long_description = fh.read()
 
@@ -20,7 +17,7 @@ def _get_requirements(requirement_file):
 
 setuptools.setup(
     name=NAME,
-    version=VERSION,
+    version="0.1.1",
     author="MiniAn Developers",
     author_email="denisecailab@gmail.com",
     description="MiniAn is an analysis pipeline and visualization tool inspired by both CaImAn and MIN1PIPE package specifically for Miniscope data.",
