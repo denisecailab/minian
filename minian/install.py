@@ -2,7 +2,14 @@ import argparse
 import os
 import requests
 
-PIPELINE_FILES = ("pipeline.ipynb", "cross-registration.ipynb")
+NOTEBOOK_FILES = [
+    "pipeline.ipynb",
+    "cross-registration.ipynb",
+    "img/workflow.png",
+    "img/param_pnr.png",
+    "img/param_spatial_update.png",
+    "img/param_temporal_update.png",
+]
 DEMO_FILES = [f"demo_movies/msCam{i}.avi" for i in range(1, 11)] + [
     f"demo_data/session{i}/minian.nc" for i in range(1, 3)
 ]
@@ -29,9 +36,10 @@ def demo(branch: str):
         _get_file(file, branch)
 
 
-def pipeline(branch: str):
+def notebook(branch: str):
+    os.makedirs("img", exist_ok=True)
     print("Installing notebooks")
-    for file in PIPELINE_FILES:
+    for file in NOTEBOOK_FILES:
         _get_file(file, branch)
 
 
@@ -53,7 +61,7 @@ def main():
     print(f"Using branch: {branch}")
 
     if args.notebooks:
-        pipeline(branch)
+        notebook(branch)
 
     if args.demo:
         demo(branch)
