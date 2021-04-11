@@ -27,8 +27,7 @@ setuptools.setup(
     install_requires=_get_requirements(REQUIREMENTS),
     packages=setuptools.find_packages(),
     project_urls={
-        "Github": "https://github.com/DeniseCaiLab/minian",
-        "Documentation": "https://minian.readthedocs.io/en/latest/",
+        "Documentation": "https://minian.readthedocs.io/",
     },
     classifiers=[
         "Programming Language :: Python :: 3",
