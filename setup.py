@@ -1,6 +1,6 @@
 import setuptools
 
-NAME = "MiniAn"
+NAME = "minian"
 REQUIREMENTS = "requirements/requirements-base.txt"
 
 with open("README.md", "r") as fh:
