@@ -15,7 +15,7 @@ dependencies:
   - fftw
   - holoviews=1.12.7
   - jupyter
-  - matplotlib-base
+  - matplotlib-base=3.2
   - natsort
   - netcdf4
   - networkx=2.4
