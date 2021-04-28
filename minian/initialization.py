@@ -692,11 +692,7 @@ def initA(
     print("optimizing computation graph")
     nod_df = pd.DataFrame(
         np.array(
-            list(
-                itt.product(
-                    np.arange(varr.sizes["height"]), np.arange(varr.sizes["width"])
-                )
-            )
+            list(itt.product(varr.coords["height"].values, varr.coords["width"].values))
         ),
         columns=["height", "width"],
     ).merge(seeds.reset_index(), how="outer", on=["height", "width"])
@@ -723,6 +719,22 @@ def initA(
     nod_df = pd.DataFrame.from_dict(dict(sdg.nodes(data=True)), orient="index")
     seed_df = nod_df[nod_df["index"].notnull()].astype({"index": int})
     A_ls = []
+    ih_dict = (
+        varr.coords["height"]
+        .to_series()
+        .reset_index(drop=True)
+        .reset_index()
+        .set_index("height")["index"]
+        .to_dict()
+    )
+    iw_dict = (
+        varr.coords["width"]
+        .to_series()
+        .reset_index(drop=True)
+        .reset_index()
+        .set_index("width")["index"]
+        .to_dict()
+    )
     Ashape = (varr.sizes["height"], varr.sizes["width"])
     for seed_id, sd in seed_df.iterrows():
         src_corr = corr_df[corr_df["target"] == seed_id].copy()
@@ -740,8 +752,12 @@ def initA(
         cur_corr = pd.concat([src_corr, tgt_corr]).append(
             {"corr": 1, "height": sd["height"], "width": sd["width"]}, ignore_index=True
         )
+        cur_corr["iheight"] = cur_corr["height"].map(ih_dict)
+        cur_corr["iwidth"] = cur_corr["width"].map(iw_dict)
         cur_A = darr.array(
-            sparse.COO(cur_corr[["height", "width"]].T, cur_corr["corr"], shape=Ashape)
+            sparse.COO(
+                cur_corr[["iheight", "iwidth"]].T, cur_corr["corr"], shape=Ashape
+            )
         )
         A_ls.append(cur_A)
     A = xr.DataArray(
