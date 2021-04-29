@@ -369,7 +369,7 @@ def resolve_mapping(mapping: pd.DataFrame, mode="majority") -> pd.DataFrame:
     >>> resolve_mapping(mapping) # doctest: +NORMALIZE_WHITESPACE
         meta  session                                             group
       animal session1 session2 session3                           group
-    0     m1        0        1        2  (session1, session2, session3)
+    0     m1      0.0      1.0      2.0  (session1, session2, session3)
 
     However, if our mappings contains an additional entry that conflicts with
     the extended mapping like the following:
@@ -395,7 +395,7 @@ def resolve_mapping(mapping: pd.DataFrame, mode="majority") -> pd.DataFrame:
     >>> resolve_mapping(mapping) # doctest: +NORMALIZE_WHITESPACE
         meta  session                                   group
       animal session1 session2 session3                 group
-    0     m1        0        1      NaN  (session1, session2)
+    0     m1      0.0      1.0      NaN  (session1, session2)
 
     Furthermore, if we have more mappings such that some cells in the
     conflicting session are more consistent than other, i.e they are involved in
@@ -426,7 +426,7 @@ def resolve_mapping(mapping: pd.DataFrame, mode="majority") -> pd.DataFrame:
     >>> resolve_mapping(mapping, mode='majority') # doctest: +NORMALIZE_WHITESPACE
         meta  session                                                                group
       animal session1 session2 session3 session4                                     group
-    0     m1        0        1        2        3  (session1, session2, session3, session4)
+    0     m1      0.0      1.0      2.0      3.0  (session1, session2, session3, session4)
 
     While the strict mode would drop any cells in the conflicting session
     regardless:
@@ -434,7 +434,7 @@ def resolve_mapping(mapping: pd.DataFrame, mode="majority") -> pd.DataFrame:
     >>> resolve_mapping(mapping, mode='strict') # doctest: +NORMALIZE_WHITESPACE
         meta  session                                                      group
       animal session1 session2 session3 session4                           group
-    0     m1        0        1      NaN        3  (session1, session2, session4)
+    0     m1      0.0      1.0      NaN      3.0  (session1, session2, session4)
 
     """
     map_list = []
@@ -531,6 +531,7 @@ def resolve(mapping: pd.DataFrame, mode: str) -> pd.DataFrame:
     except KeyError:
         pass
     mapping_new = mapping_new.reindex(columns=mapping.columns)
+    mapping_new["session"] = mapping_new["session"].astype(float)
     return group_by_session(mapping_new)
 
 
