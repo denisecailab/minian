@@ -66,6 +66,7 @@ doctest_global_setup = """
 import numpy as np
 import pandas as pd
 from minian.cross_registration import *
+pd.set_option("display.width", 200)
 """
 
 intersphinx_mapping = {
