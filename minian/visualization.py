@@ -1267,6 +1267,7 @@ def write_video(
     w, h = arr.sizes["width"], arr.sizes["height"]
     process = (
         ffmpeg.input("pipe:", format="rawvideo", pix_fmt="gray", s="{}x{}".format(w, h))
+        .filter("pad", int(np.ceil(w / 2) * 2), int(np.ceil(h / 2) * 2))
         .output(fname, pix_fmt="yuv420p", vcodec="libx264", r=30, **options)
         .overwrite_output()
         .run_async(pipe_stdin=True)
