@@ -67,6 +67,7 @@ import numpy as np
 import pandas as pd
 from minian.cross_registration import *
 pd.set_option("display.width", 200)
+pd.set_option("display.max_columns", 20)
 """
 
 intersphinx_mapping = {
