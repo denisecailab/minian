@@ -1,10 +1,11 @@
 import itertools as itt
+from typing import Iterable
 
 import dask as da
+import networkx as nx
 import numpy as np
 import pandas as pd
 import xarray as xr
-from typing import Iterable
 
 from .visualization import centroid
 
@@ -310,16 +311,20 @@ def cal_mapping(dist: pd.DataFrame) -> pd.DataFrame:
     return map_list
 
 
-def resolve_mapping(mapping: pd.DataFrame) -> pd.DataFrame:
+def resolve_mapping(mapping: pd.DataFrame, mode="majority") -> pd.DataFrame:
     """
     Extend and resolve mappings of pairs of sessions into mappings across
     multiple sessions.
 
     This function try to transitively extend any mappings that share common
-    cells. If such mappings are consistent with each other, they will be merged
-    into a single mapping that maps a single cell across all sessions. Otherwise
-    if any of the mappings introduce conflicts, then all of the relevant
-    mappings will be dropped.
+    cells. It do so by constructing an undirected unweighted graph with each
+    cell in each session as unique nodes. An edge will be created for each pair
+    of nodes mapped in the input pairwise `mapping`. It then walk through all
+    connected components of the graph and examine whether conflict exists, i.e.
+    when the component include multiple cells from same session. Depending on
+    `mode`, either all cells in the conflicting session would be dropped, or the
+    one mapped most of the times would be kept. Finally each connected component
+    would result in one multi-session mapping.
 
     Parameters
     ----------
@@ -327,6 +332,12 @@ def resolve_mapping(mapping: pd.DataFrame) -> pd.DataFrame:
         Input mappings dataframe. Should be in two-level column format as
         returned by :func:`calculate_mapping`, and should also contains a
         ("group", "group") column as returned by :func:`group_by_session`.
+    mode : str
+        Mode used to handle sessions containing conflicting mappings. Should be
+        either `"strict"` or `"majority"`. If `"strict"`, then all the cells in
+        the conflicting session would be dropped. If `"majority"`, then the cell
+        that was mapped most of times will be kept, while a tie would result in
+        dropping of all cells.
 
     Returns
     -------
@@ -356,9 +367,9 @@ def resolve_mapping(mapping: pd.DataFrame) -> pd.DataFrame:
     Then they will be extended and merged as a single mapping:
 
     >>> resolve_mapping(mapping) # doctest: +NORMALIZE_WHITESPACE
-        meta  session                                             group variable
-      animal session1 session2 session3                           group distance
-    0     m1      0.0        1      2.0  (session1, session2, session3)      NaN
+        meta  session                                             group
+      animal session1 session2 session3                           group
+    0     m1        0        1        2  (session1, session2, session3)
 
     However, if our mappings contains an additional entry that conflicts with
     the extended mapping like the following:
@@ -379,24 +390,75 @@ def resolve_mapping(mapping: pd.DataFrame) -> pd.DataFrame:
     1     m1      NaN      1.0      2.0  (session2, session3)
     2     m1      0.0      NaN      5.0  (session1, session3)
 
-    Then all of them will be dropped:
+    Then mappings on the conflicting session will be dropped:
 
-    >>> resolve_mapping(mapping) # doctest: +NORMALIZE_WHITESPACE +ELLIPSIS
-    Empty DataFrame
-    Columns: [(meta, animal), ... (variable, distance)]
-    Index: []
+    >>> resolve_mapping(mapping) # doctest: +NORMALIZE_WHITESPACE
+        meta  session                                   group
+      animal session1 session2 session3                 group
+    0     m1        0        1      NaN  (session1, session2)
+
+    Furthermore, if we have more mappings such that some cells in the
+    conflicting session are more consistent than other, i.e they are involved in
+    more mappings overall, like the following:
+
+    >>> mapping = pd.DataFrame(
+    ...     {
+    ...         ("meta", "animal"): ["m1", "m1", "m1", "m1", "m1"],
+    ...         ("session", "session1"): [0, None, 0, None, None],
+    ...         ("session", "session2"): [1, 1, None, 1, None],
+    ...         ("session", "session3"): [None, 2, 5, None, 2],
+    ...         ("session", "session4"): [None, None, None, 3, 3],
+    ...     }
+    ... )
+    >>> mapping = group_by_session(mapping)
+    >>> mapping # doctest: +NORMALIZE_WHITESPACE
+        meta  session                                            group
+      animal session1 session2 session3 session4                 group
+    0     m1      0.0      1.0      NaN      NaN  (session1, session2)
+    1     m1      NaN      1.0      2.0      NaN  (session2, session3)
+    2     m1      0.0      NaN      5.0      NaN  (session1, session3)
+    3     m1      NaN      1.0      NaN      3.0  (session2, session4)
+    4     m1      NaN      NaN      2.0      3.0  (session3, session4)
+
+    Then, the majority mode would keep the cell in the conflicting session that
+    matched to most number of mappings (in this case, cell 2 in session3):
+
+    >>> resolve_mapping(mapping, mode='majority') # doctest: +NORMALIZE_WHITESPACE
+        meta  session                                                                group
+      animal session1 session2 session3 session4                                     group
+    0     m1        0        1        2        3  (session1, session2, session3, session4)
+
+    While the strict mode would drop any cells in the conflicting session
+    regardless:
+
+    >>> resolve_mapping(mapping, mode='strict') # doctest: +NORMALIZE_WHITESPACE
+        meta  session                                                      group
+      animal session1 session2 session3 session4                           group
+    0     m1        0        1      NaN        3  (session1, session2, session4)
+
     """
     map_list = []
     meta_cols = list(filter(lambda c: c[0] == "meta", mapping.columns))
     if meta_cols:
         for _, grp in mapping.groupby(meta_cols):
-            map_list.append(resolve(grp))
+            map_list.append(resolve(grp, mode=mode))
     else:
-        map_list = [resolve(mapping)]
+        map_list = [resolve(mapping, mode=mode)]
     return pd.concat(map_list, ignore_index=True)
 
 
-def resolve(mapping: pd.DataFrame) -> pd.DataFrame:
+mapping = pd.DataFrame(
+    {
+        ("meta", "animal"): ["m1", "m1", "m1", "m1", "m1"],
+        ("session", "session1"): [0, None, 0, None, None],
+        ("session", "session2"): [1, 1, None, 1, None],
+        ("session", "session3"): [None, 2, 5, None, 2],
+        ("session", "session4"): [None, None, None, 3, 3],
+    }
+)
+
+
+def resolve(mapping: pd.DataFrame, mode: str) -> pd.DataFrame:
     """
     Extend and resolve mappings.
 
@@ -407,6 +469,9 @@ def resolve(mapping: pd.DataFrame) -> pd.DataFrame:
     ----------
     mapping : pd.DataFrame
         Input mappings dataframe. Should be in two-level column format.
+    mode : str
+        How to handle conflicted mappings. Should be either `"strict"` or
+        `"majority"`.
 
     Returns
     -------
@@ -418,29 +483,66 @@ def resolve(mapping: pd.DataFrame) -> pd.DataFrame:
     --------
     resolve_mapping
     """
-    mapping = mapping.reset_index(drop=True)
-    map_ss = mapping["session"]
-    for ss in map_ss.columns:
-        del_idx = []
-        for ss_uid, ss_grp in mapping.groupby(mapping["session", ss]):
-            if ss_grp.shape[0] > 1:
-                del_idx.extend(ss_grp.index)
-                new_sess = []
-                for s in ss_grp["session"]:
-                    uval = ss_grp["session", s].dropna().unique()
-                    if len(uval) == 0:
-                        new_sess.append(np.nan)
-                    elif len(uval) == 1:
-                        new_sess.append(uval[0])
-                    elif len(uval) > 1:
-                        break
-                else:
-                    new_row = ss_grp.iloc[0].copy()
-                    new_row["session"] = new_sess
-                    new_row["variable", "distance"] = np.nan
-                    mapping = mapping.append(new_row, ignore_index=True)
-        mapping = mapping.drop(del_idx).reset_index(drop=True)
-    return group_by_session(mapping)
+
+    def to_eg(row):
+        row = row.dropna()
+        assert len(row) == 2
+        ss = row.index
+        uid = row.values
+        return pd.Series(
+            {
+                "src": ss[0] + "-" + str(int(uid[0])),
+                "dst": ss[1] + "-" + str(int(uid[1])),
+            }
+        )
+
+    def maj_deg(df):
+        is_max = df["deg"] == df["deg"].max()
+        if is_max.sum() > 1:
+            return df
+        else:
+            df["dup"] = df["dup"].where(~is_max, False)
+            return df
+
+    eg_ls = mapping["session"].apply(to_eg, axis="columns")
+    G = nx.from_pandas_edgelist(eg_ls, source="src", target="dst")
+    for comp in nx.connected_components(G):
+        subg = G.subgraph(comp)
+        node_df = pd.DataFrame({"node": list(comp)})
+        node_df["session"] = node_df["node"].map(lambda n: n.split("-")[0])
+        node_df["dup"] = node_df["session"].duplicated(keep=False)
+        if mode == "majority":
+            node_df = node_df.set_index("node")
+            node_df["deg"] = pd.Series({k: v for k, v in subg.degree})
+            node_df = node_df.reset_index()
+            node_df = node_df.groupby("session").apply(maj_deg)
+        rm_dict = node_df.set_index("node")["dup"].to_dict()
+        for eg in subg.edges:
+            if rm_dict[eg[0]] or rm_dict[eg[1]]:
+                G.remove_edge(*eg)
+    G.remove_nodes_from(list(nx.isolates(G)))
+    map_ls = []
+    for comp in nx.connected_components(G):
+        node_df = pd.DataFrame({"node": list(comp)})
+        node_df["session"] = node_df["node"].map(lambda n: n.split("-")[0])
+        node_df["uid"] = node_df["node"].map(lambda n: n.split("-")[1])
+        assert not node_df["session"].duplicated().any()
+        map_ls.append(node_df.set_index("session")["uid"])
+    if map_ls:
+        mapping_new = pd.concat(map_ls, axis="columns", ignore_index=True).T
+    else:
+        return pd.DataFrame()
+    mapping_new.columns = pd.MultiIndex.from_tuples(
+        [("session", s) for s in mapping_new.columns]
+    )
+    try:
+        for mc in mapping["meta"]:
+            val = mapping["meta", mc].unique().item()
+            mapping_new[("meta", mc)] = val
+    except KeyError:
+        pass
+    mapping_new = mapping_new.reindex(columns=mapping.columns)
+    return group_by_session(mapping_new)
 
 
 def fill_mapping(mappings: pd.DataFrame, cents: pd.DataFrame) -> pd.DataFrame:
