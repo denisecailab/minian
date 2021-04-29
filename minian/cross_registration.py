@@ -447,17 +447,6 @@ def resolve_mapping(mapping: pd.DataFrame, mode="majority") -> pd.DataFrame:
     return pd.concat(map_list, ignore_index=True)
 
 
-mapping = pd.DataFrame(
-    {
-        ("meta", "animal"): ["m1", "m1", "m1", "m1", "m1"],
-        ("session", "session1"): [0, None, 0, None, None],
-        ("session", "session2"): [1, 1, None, 1, None],
-        ("session", "session3"): [None, 2, 5, None, 2],
-        ("session", "session4"): [None, None, None, 3, 3],
-    }
-)
-
-
 def resolve(mapping: pd.DataFrame, mode: str) -> pd.DataFrame:
     """
     Extend and resolve mappings.
