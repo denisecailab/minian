@@ -18,7 +18,7 @@ After you have created and activated an environment, you can install MiniAn with
 
 .. code-block:: console
 
-    conda install -c conda-forge minian
+    conda install -y -c conda-forge minian
 
 and Done!
 
