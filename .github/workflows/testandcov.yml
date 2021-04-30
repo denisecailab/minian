@@ -49,16 +49,16 @@ jobs:
           cond: ${{ runner.os == 'macOS' }}
           if_true: 3
           if_false: 2
+      - name: Run doctest
+        run: |
+          pip install -r requirements/requirements-doc.txt
+          sphinx-build -M doctest docs/source docs/build
       - name: Run tests and collect coverage
         env:
           MINIAN_NWORKERS: ${{ steps.n_workers.outputs.value }}
         run: |
           pytest -v --color=yes --exitfirst --cov=minian --pyargs minian
           cp -r img artifact/img
-      - name: Run doctest
-        run: |
-          pip install -r requirements/requirements-doc.txt
-          sphinx-build -M doctest docs/source docs/build
       - name: Generate xml coverage report
         if: ${{ runner.os == 'Linux'}}
         run: |
