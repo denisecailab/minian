@@ -2,7 +2,7 @@ import dask as da
 import os
 from .utilities import custom_arr_optimize, custom_delay_optimize
 
-__version__ = "1.0.0rc0"
+__version__ = "1.0.0rc1"
 
 da.config.set(
     array_optimize=custom_arr_optimize, delayed_optimize=custom_delay_optimize
