@@ -18,41 +18,7 @@ After you have created and activated an environment, you can install MiniAn with
 
 .. code-block:: console
 
-    conda install -c conda-forge minian
-
-and Done!
-
-Install using pip
------------------
-
-MiniAn can also be installed through `pip`.
-However, you need to make sure you have `ffmpeg <https://ffmpeg.org/download.html>`_ installed on your system.
-The following instructions might vary based on your OS.
-
-* Windows
-    Check out `this guide <https://www.wikihow.com/Install-FFmpeg-on-Windows>`_.
-
-* macOS
-    You can install in two steps:
-
-    #. Install `Homebrew <https://brew.sh>`_.
-    #. ``brew install ffmpeg``.
-
-* Linux
-    ``sudo apt install ffmpeg``.
-
-Then, it's recommended to create an virtual environment for MiniAn:
-
-.. code-block:: console
-    
-    python3 -m venv minian
-    source minian/bin/activate
-
-Finally, you can install MiniAn with:
-
-.. code-block:: console
-
-    pip install MiniAn
+    conda install -y -c conda-forge minian
 
 and Done!
 
