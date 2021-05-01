@@ -12,4 +12,5 @@ Welcome to MiniAn Documentation!
    start_guide/index
    pipeline/index
    cross_reg/index
+   tips/index
    api/index
