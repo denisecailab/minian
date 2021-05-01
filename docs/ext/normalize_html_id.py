@@ -9,7 +9,7 @@ def normalize_id(app, exception):
     IDs = set()
 
     for root, dirs, files in os.walk(build_dir):
-        if os.path.basename(root) != "api":
+        if os.path.basename(root) in ["pipeline", "cross_reg"]:
             continue
         for html in list(filter(lambda fn: fn.endswith(".html"), files)):
             with open(os.path.join(root, html)) as html_doc:
@@ -21,7 +21,7 @@ def normalize_id(app, exception):
     ID_dict = {i: i.replace(".", "-") for i in IDs}
 
     for root, dirs, files in os.walk(build_dir):
-        if os.path.basename(root) != "api":
+        if os.path.basename(root) in ["pipeline", "cross_reg"]:
             continue
         for html in list(filter(lambda fn: fn.endswith(".html"), files)):
             with open(os.path.join(root, html)) as html_doc:
