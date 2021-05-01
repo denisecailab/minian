@@ -2,6 +2,7 @@
 [![codecov](https://codecov.io/gh/DeniseCaiLab/minian/branch/master/graph/badge.svg)](https://codecov.io/gh/DeniseCaiLab/minian)
 [![conda version](https://img.shields.io/conda/vn/conda-forge/minian.svg)](https://anaconda.org/conda-forge/minian)
 [![documentation status](https://readthedocs.org/projects/minian/badge/?version=latest)](https://minian.readthedocs.io/en/latest/?badge=latest)
+[![license](https://img.shields.io/github/license/denisecailab/minian)](https://www.gnu.org/licenses/gpl-3.0)
 [![code style](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 [![commit style](https://img.shields.io/badge/commit_style-conventional-orange)](https://conventionalcommits.org)
 
