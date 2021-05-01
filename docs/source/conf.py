@@ -50,6 +50,7 @@ extensions = [
     "sphinx.ext.todo",
     "sphinx.ext.mathjax",
     "sphinx.ext.autodoc",
+    "sphinx.ext.autosectionlabel",
     "toctree",
     "ref_alias",
     "normalize_html_id",
@@ -61,6 +62,7 @@ napoleon_use_ivar = True
 autodoc_typehints = "none"
 autodoc_member_order = "groupwise"
 autoclass_content = "both"
+autosectionlabel_prefix_document = True
 
 doctest_global_setup = """
 import numpy as np
