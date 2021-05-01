@@ -13,7 +13,7 @@ MiniAn is an analysis pipeline and visualization tool inspired by both [CaImAn](
 
 # Quick Start Guide
 
-1. Create a new conda env: `conda create --name minian`
+1. Create a new conda env: `conda create -y --name minian`
 1. Activate the environment: `conda activate minian`
 1. Install MiniAn: `conda install -y -c conda-forge minian`
 1. Install the pipeline notebooks: `minian-install --notebooks`
