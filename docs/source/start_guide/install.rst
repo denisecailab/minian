@@ -9,7 +9,7 @@ Before you start though, we highly recommend creating an empty environment for M
 
 .. code-block:: console
 
-    conda create -n minian
+    conda create -y -n minian
     conda activate minian
 
 See `conda start guide <https://conda.io/projects/conda/en/latest/user-guide/getting-started.html>`_ for more detail.
