@@ -1,9 +1,11 @@
 [![pytest status](https://github.com/denisecailab/minian/workflows/pytest/badge.svg?branch=master)](https://github.com/DeniseCaiLab/minian/actions?query=workflow%3Apytest)
 [![codecov](https://codecov.io/gh/DeniseCaiLab/minian/branch/master/graph/badge.svg)](https://codecov.io/gh/DeniseCaiLab/minian)
-[![Conda Version](https://img.shields.io/conda/vn/conda-forge/minian.svg)](https://anaconda.org/conda-forge/minian)
-[![Documentation Status](https://readthedocs.org/projects/minian/badge/?version=latest)](https://minian.readthedocs.io/en/latest/?badge=latest)
-[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
-[![Conventional Commits](https://img.shields.io/badge/Conventional%20Commits-1.0.0-yellow.svg)](https://conventionalcommits.org)
+[![conda version](https://img.shields.io/conda/vn/conda-forge/minian.svg)](https://anaconda.org/conda-forge/minian)
+[![documentation status](https://readthedocs.org/projects/minian/badge/?version=latest)](https://minian.readthedocs.io/en/latest/?badge=latest)
+
+[![license](https://img.shields.io/github/license/denisecailab/minian)](https://www.gnu.org/licenses/gpl-3.0)
+[![code style](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+[![commit style](https://img.shields.io/badge/commit_style-conventional-orange)](https://conventionalcommits.org)
 
 
 # MiniAn
@@ -12,7 +14,7 @@ MiniAn is an analysis pipeline and visualization tool inspired by both [CaImAn](
 
 # Quick Start Guide
 
-1. Create a new conda env: `conda create --name minian`
+1. Create a new conda env: `conda create -y --name minian`
 1. Activate the environment: `conda activate minian`
 1. Install MiniAn: `conda install -y -c conda-forge minian`
 1. Install the pipeline notebooks: `minian-install --notebooks`
