@@ -1,6 +1,9 @@
 Understanding Performance
 =========================
 
+MiniAn heavily use the `dask <https://dask.org>`_ package to carry out all computations in parallel.
+Here are some tips on working with this setup. 
+
 Dask cluster
 ------------
 
@@ -9,7 +12,7 @@ The relevant line reads like the following:
 
 .. code-block:: python
 
-    cluster = LocalCluster(n_workers=4, memory_limit="2GB", ...)
+    cluster = LocalCluster(..., n_workers=4, memory_limit="2GB")
 
 The argument ``n_workers`` controls the number of parallel processes (workers) that will be used for computation.
 Almost all computations in MiniAn can benefit from parallel processing, so the more ``n_workers`` you have, the better performance in general.
