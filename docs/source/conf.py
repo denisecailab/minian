@@ -15,7 +15,7 @@ import sys
 import datetime
 
 sys.path.insert(0, os.path.abspath("../../"))
-sys.path.append(os.path.abspath("ext"))
+sys.path.append(os.path.abspath("../ext"))
 
 # -- Custom scripts ----------------------------------------------------------
 import dask.array
@@ -50,6 +50,8 @@ extensions = [
     "sphinx.ext.todo",
     "sphinx.ext.mathjax",
     "sphinx.ext.autodoc",
+    "sphinx.ext.autosectionlabel",
+    "m2r2",
     "toctree",
     "ref_alias",
     "normalize_html_id",
@@ -61,6 +63,7 @@ napoleon_use_ivar = True
 autodoc_typehints = "none"
 autodoc_member_order = "groupwise"
 autoclass_content = "both"
+autosectionlabel_prefix_document = True
 
 doctest_global_setup = """
 import numpy as np
@@ -110,7 +113,7 @@ nbsphinx_prolog = r"""
 .. note::
     This page was generated from a Jupyter notebook.
     Not all interactive visualization will work on this web page.
-    Consider :ref:`downloading the notebooks <download-notebook>` for full Python-backed interactivity.
+    Consider :ref:`downloading the notebooks <start_guide/install:Getting notebooks and demos>` for full Python-backed interactivity.
 """
 
 rtds_action_github_token = os.getenv("GITHUB_TOKEN")

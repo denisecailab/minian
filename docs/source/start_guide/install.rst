@@ -22,8 +22,6 @@ After you have created and activated an environment, you can install MiniAn with
 
 and Done!
 
-.. _clone-source:
-
 Install from source
 -------------------
 
@@ -40,16 +38,16 @@ Run the following to obtain a full copy of MiniAn repo and setup necessary depen
 You can then activate the environment and start running the notebooks.
 Note that if you install in this way you will have a local copy of MiniAn scripts, and any modification made to those scripts will be reflect in your pipeline.
 
-.. _download-notebook:
-
 Getting notebooks and demos
 ---------------------------
 
 The main features of Minian are exposed through `pipeline.ipynb` and `cross-registration.ipynb` `notebooks <https://jupyter.org/>`_.
-You can use the following links to get the latest stable version of the two notebooks:
+You can use the following links to get the latest version of the two notebooks:
 
 * Download `pipeline.ipynb <https://github.com/DeniseCaiLab/minian/raw/master/pipeline.ipynb>`_
 * Download `cross-registration.ipynb <https://github.com/DeniseCaiLab/minian/raw/master/cross-registration.ipynb>`_
+
+If you'd prefer specific version of them, head to `github release page <https://github.com/denisecailab/minian/releases>`_ to see all the released versions.
 
 Alternatively, MiniAn also come with convenient scripts to help you download notebooks and demos into your current folder.
 Run the following (in your activated environment if any) to get the notebooks:
