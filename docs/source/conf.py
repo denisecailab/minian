@@ -51,6 +51,7 @@ extensions = [
     "sphinx.ext.mathjax",
     "sphinx.ext.autodoc",
     "sphinx.ext.autosectionlabel",
+    "m2r2",
     "toctree",
     "ref_alias",
     "normalize_html_id",
