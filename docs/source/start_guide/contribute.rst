@@ -2,7 +2,7 @@ Contributing to MiniAn
 ======================
 
 We'd love feedback and contribution from the community!
-:ref:`Fork and clone MiniAn from source <clone-source>`, make you changes and submit a PR!
+:ref:`Fork and clone MiniAn from source <start_guide/install:Install from source>`, make you changes and submit a PR!
 Below are some book-keeping notes.
 
 Commit Messages
