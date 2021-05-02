@@ -77,7 +77,7 @@ There are some additional "gotcha":
         minian_ds = open_minian(intpath)
         A = minian_ds["A"]
         C = minian_ds["C"]
-        C = C.sel(unit_id=A.coords["unit_id"].values
+        C = C.sel(unit_id=A.coords["unit_id"].values)
 
 Saving to other formats
 -----------------------
