@@ -2,7 +2,7 @@ Understanding Performance
 =========================
 
 MiniAn heavily use the `dask <https://dask.org>`_ package to carry out all computations in parallel.
-Here are some tips on working with this setup. 
+Here are some tips on working with this setup:
 
 Dask cluster
 ------------
@@ -89,7 +89,7 @@ Is it related to the size of input data?
 Depending on the conditions the solution are usually one of the following:
 
 #. Sometimes all you need is to try running the step again.
-#. If there is no particular step that would result in the exception but you tend to get it once you have run several steps, then that usually indicate some build up in the cache, and you might need some custom checkpoints.
+#. If there is no particular step that would result in the exception but you tend to get it once you have run several steps, then that usually indicate some build up in the cache, and you might need some :ref:`custom checkpoints <tips/variables:Custom checkpoints>`.
 #. If you have free RAM to spare then increasing ``memory_limit`` would almost certainly solve the problem.
 #. Otherwise you might have to limit the chunk size.
 
