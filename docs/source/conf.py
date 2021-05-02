@@ -112,7 +112,7 @@ nbsphinx_prolog = r"""
 .. note::
     This page was generated from a Jupyter notebook.
     Not all interactive visualization will work on this web page.
-    Consider :ref:`downloading the notebooks <download-notebook>` for full Python-backed interactivity.
+    Consider :ref:`downloading the notebooks <start_guide/install:Getting notebooks and demos>` for full Python-backed interactivity.
 """
 
 rtds_action_github_token = os.getenv("GITHUB_TOKEN")
