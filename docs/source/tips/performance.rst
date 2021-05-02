@@ -73,6 +73,8 @@ This is why :py:func:`minian.utilities.get_optimal_chk` is only executed once in
 If for some reason you have to restart the python kernel and the ``chk`` dictionary is lost, you can execute :py:func:`minian.utilities.get_optimal_chk` again to get the same chunk size.
 You can also note down or save the ``chk`` dictionary for future uses.
 
+.. _killedworker:
+
 Dealing with ``KilledWorker``
 -----------------------------
 
