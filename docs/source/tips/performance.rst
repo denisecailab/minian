@@ -63,14 +63,14 @@ Hence, usually the chunk size should be several folds smaller than ``memory_limi
 The downside of having too small chunk size is that your data would be divided into more number of chunks.
 Since each chunk produce some overhead when reading/writing to disk as well as when generating computation graph, having too many chunks would hurt performance.
 
-MiniAn try to find the best chunk size for you using :py:func:`minian.utilities.get_optimal_chk` under the :ref:`pipeline/notebook_2:loading videos and visualization` part of the pipeline.
+MiniAn try to find the best chunk size for you using :py:func:`get_optimal_chk <minian.utilities.get_optimal_chk>` under the :ref:`pipeline/notebook_2:loading videos and visualization` part of the pipeline.
 The default is to produce chunks that use around *256MB* of memory (controlled by ``csize`` argument), which is roughly 1/10 of the default ``memory_limit`` for each worker.
 Hence, if you find your workers struggling with memory, and you don't have more physical RAM to spare to increase ``memory_limit``, you may consider decreasing the chunk size.
 Conversely, if you have lots of RAM to spare and you believe you have too many chunks than necessary, you may consider increasing the chunk size (this is rarely necessary though).
 
 Note that it's important to have consistent chunk size across different variables in a single run of the pipeline.
-This is why :py:func:`minian.utilities.get_optimal_chk` is only executed once in the beginning of the pipeline and everything afterwards use the same ``chk`` dictionary.
-If for some reason you have to restart the python kernel and the ``chk`` dictionary is lost, you can execute :py:func:`minian.utilities.get_optimal_chk` again to get the same chunk size.
+This is why :py:func:`get_optimal_chk <minian.utilities.get_optimal_chk>` is only executed once in the beginning of the pipeline and everything afterwards use the same ``chk`` dictionary.
+If for some reason you have to restart the python kernel and the ``chk`` dictionary is lost, you can execute :py:func:`get_optimal_chk <minian.utilities.get_optimal_chk>` again to get the same chunk size.
 You can also note down or save the ``chk`` dictionary for future uses.
 
 .. _killedworker:
