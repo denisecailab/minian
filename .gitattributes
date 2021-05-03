@@ -1,0 +1,6 @@
+demo_data export-ignore
+demo_movies export-ignore
+.gitignore export-ignore
+.readthedocs.yaml export-ignore
+codecov.yml export-ignore
+.github export-ignore
