@@ -2,6 +2,7 @@ Pipeline
 ========
 
 .. toctree::
+   :numbered:
    :maxdepth: 1
    :glob:
 
