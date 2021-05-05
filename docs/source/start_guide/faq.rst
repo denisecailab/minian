@@ -1,6 +1,36 @@
 Frequently Asked Questions
 ==========================
 
+I don't know Python, can I still use the pipeline?
+--------------------------------------------------
+
+Although we like Python and we recommend gaining some understanding of the foundations, we do think it's possible to use pipeline as-is with minimal knowledge of python.
+For start, you can just change ``dpath`` under :ref:`pipeline/notebook_1:set path and parameters` to point it to your data.
+Then you should be able to run all the cells in the pipeline without modifying anything.
+
+However, chances are you will like to tweak some parameters.
+In order to do this all you need to know is how Python dictionary works.
+`Here <https://www.tutorialspoint.com/python/python_dictionary.htm>`_ is a quick tutorial.
+The general syntax is:
+
+.. code-block:: python
+
+    param_stepX["parameter_name"] = value
+
+where ``value`` maybe string, numbers, lists or in some cases another dictionary by itself, depending on the parameter you are changing.
+Once you run this line the ``param_stepX`` dictionary will be updated and you can proceed to the step that use this dictionary.
+The pipeline also has a quick real-world example under :ref:`pipeline/notebook_2:loading videos and visualization`.
+
+Can I get a table of content for the pipeline?
+----------------------------------------------
+
+Yes! Jupyter has a `toc2 <https://jupyter-contrib-nbextensions.readthedocs.io/en/latest/nbextensions/toc2/README.html>`_ extension that should work well with the notebook.
+You can install it with:
+
+.. cod-block:: console
+
+    conda install -c conda-forge jupyter_contrib_nbextensions
+
 Can I have a version of pipeline without all the notes?
 -------------------------------------------------------
 
