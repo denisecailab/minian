@@ -27,7 +27,7 @@ Can I get a table of content for the pipeline?
 Yes! Jupyter has a `toc2 <https://jupyter-contrib-nbextensions.readthedocs.io/en/latest/nbextensions/toc2/README.html>`_ extension that should work well with the notebook.
 You can install it with:
 
-.. cod-block:: console
+.. code-block:: console
 
     conda install -c conda-forge jupyter_contrib_nbextensions
 
