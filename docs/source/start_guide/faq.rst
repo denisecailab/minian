@@ -48,6 +48,13 @@ For example, the following command will give you a clean pipeline:
 
 Just note that since this is a different copy of the pipeline, there might be extra work if you want to merge you edits on this clean copy with updates in the default pipeline notebook.
 
+How can I monitor the progress of some time consuming steps?
+------------------------------------------------------------
+
+Dask provide a dash board which contains realtime information about all ongoing computations and cache.
+By default you can access it by navigating to `http://localhost:8787/status` in your browser once you have :ref:`started the cluster <pipeline/notebook_1:start cluster>`.
+See :ref:`tips/performance:Monitoring cluster` for more detail.
+
 ``KilledWorker`` dammit, what do I do?
 --------------------------------------
 
