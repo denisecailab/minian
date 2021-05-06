@@ -1,3 +1,9 @@
+## v1.0.1 (2021-05-05)
+
+### Fix
+
+- fix various typo and improve instructions in notebook
+
 ## v1.0.0 (2021-05-03)
 
 ### Highlight
