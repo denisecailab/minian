@@ -699,7 +699,7 @@ def apply_transform(
         Movie data after transform.
     """
     sh_dim = trans.coords["shift_dim"].values.tolist()
-    if trans.ndim > 2:
+    if "grid0" in trans.dims:
         fm0 = varr.isel(frame=0).values
         if mesh_size is None:
             mesh_size = get_mesh_size(fm0)
