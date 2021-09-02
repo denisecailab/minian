@@ -585,8 +585,11 @@ def xrconcat_recursive(var: Union[dict, list], dims: List[str]) -> xr.Dataset:
             var_dict = {k: v.to_dataset() for k, v in var_dict.items()}
         except AttributeError:
             pass
-        var_ps = pd.Series(var_dict)
-        var_ps.index.set_names(dims, inplace=True)
+        data = np.empty(len(var_dict), dtype=object)
+        for iv, ds in enumerate(var_dict.values()):
+            data[iv] = ds
+        index = pd.MultiIndex.from_tuples(list(var_dict.keys()), names=dims)
+        var_ps = pd.Series(data=data, index=index)
         xr_ls = []
         for idx, v in var_ps.groupby(level=dims[0]):
             v.index = v.index.droplevel(dims[0])
