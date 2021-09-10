@@ -1,7 +1,7 @@
 import functools as fct
 import itertools as itt
 import os
-from typing import Union, Tuple, Optional
+from typing import Optional, Tuple, Union
 
 import cv2
 import dask as da
@@ -11,7 +11,6 @@ import numpy as np
 import pandas as pd
 import sparse
 import xarray as xr
-from scipy.ndimage.filters import median_filter
 from scipy.ndimage.measurements import label
 from scipy.signal import butter, lfilter
 from scipy.stats import kstest, zscore
@@ -20,7 +19,7 @@ from sklearn.mixture import GaussianMixture
 from sklearn.neighbors import KDTree, radius_neighbors_graph
 
 from .cnmf import adj_corr, graph_optimize_corr, label_connected
-from .utilities import custom_arr_optimize, local_extreme, save_minian
+from .utilities import custom_arr_optimize, local_extreme, save_minian, med_baseline
 
 
 def seeds_init(
@@ -426,29 +425,6 @@ def pnr_perseed(a: np.ndarray, freq: float, q: tuple) -> float:
     a = lfilter(but_b, but_a, a).real
     ptp_noise = ptp_q(a, q)
     return ptp / ptp_noise
-
-
-def med_baseline(a: np.ndarray, wnd: int) -> np.ndarray:
-    """
-    Subtract baseline from a timeseries as estimated by median-filtering the
-    timeseries.
-
-    Parameters
-    ----------
-    a : np.ndarray
-        Input timeseries.
-    wnd : int
-        Window size of the median filter. This parameter is passed as `size` to
-        :func:`scipy.ndimage.filters.median_filter`.
-
-    Returns
-    -------
-    a : np.ndarray
-        Timeseries with baseline subtracted.
-    """
-    base = median_filter(a, size=wnd)
-    a -= base
-    return a
 
 
 def intensity_refine(

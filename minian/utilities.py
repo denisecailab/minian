@@ -28,6 +28,7 @@ from dask.utils import ensure_dict
 from distributed.diagnostics.plugin import SchedulerPlugin
 from distributed.scheduler import SchedulerState, cast
 from natsort import natsorted
+from scipy.ndimage.filters import median_filter
 from tifffile import TiffFile, imread
 
 
@@ -1276,3 +1277,26 @@ def local_extreme(fm: np.ndarray, k: np.ndarray, etype="max", diff=0) -> np.ndar
     else:
         raise ValueError("Don't understand {}".format(etype))
     return cv2.bitwise_and(fm_ext, fm_diff).astype(np.uint8)
+
+
+def med_baseline(a: np.ndarray, wnd: int) -> np.ndarray:
+    """
+    Subtract baseline from a timeseries as estimated by median-filtering the
+    timeseries.
+
+    Parameters
+    ----------
+    a : np.ndarray
+        Input timeseries.
+    wnd : int
+        Window size of the median filter. This parameter is passed as `size` to
+        :func:`scipy.ndimage.filters.median_filter`.
+
+    Returns
+    -------
+    a : np.ndarray
+        Timeseries with baseline subtracted.
+    """
+    base = median_filter(a, size=wnd)
+    a -= base
+    return a
