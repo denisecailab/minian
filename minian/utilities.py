@@ -1299,4 +1299,4 @@ def med_baseline(a: np.ndarray, wnd: int) -> np.ndarray:
     """
     base = median_filter(a, size=wnd)
     a -= base
-    return a
+    return a.clip(0, None)
