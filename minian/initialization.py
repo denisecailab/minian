@@ -19,7 +19,7 @@ from skimage.morphology import disk
 from sklearn.mixture import GaussianMixture
 from sklearn.neighbors import KDTree, radius_neighbors_graph
 
-from .cnmf import adj_corr, graph_optimize_corr, label_connected
+from .cnmf import adj_corr, graph_optimize_corr, label_connected, filt_fft
 from .utilities import custom_arr_optimize, local_extreme, save_minian
 
 
@@ -422,8 +422,7 @@ def pnr_perseed(a: np.ndarray, freq: float, q: tuple) -> float:
     pnr_refine : for definition of peak-to-noise ratio
     """
     ptp = ptp_q(a, q)
-    but_b, but_a = butter(2, freq, btype="high", analog=False)
-    a = lfilter(but_b, but_a, a).real
+    a = filt_fft(a, freq, btype="high")
     ptp_noise = ptp_q(a, q)
     return ptp / ptp_noise
 
