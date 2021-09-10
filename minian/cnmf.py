@@ -32,6 +32,7 @@ from .utilities import (
     open_minian,
     rechunk_like,
     save_minian,
+    med_baseline,
 )
 
 
@@ -672,6 +673,7 @@ def update_temporal(
     jac_thres=0.1,
     sparse_penal=1,
     bseg: Optional[np.ndarray] = None,
+    med_wd: Optional[int] = None,
     zero_thres=1e-8,
     max_iters=200,
     use_smooth=True,
@@ -757,6 +759,12 @@ def update_temporal(
         estimated for frames corresponding to each unique label in this vector.
         If `None` then a single scalar baseline will be estimated for each cell.
         By default `None`.
+    med_wd : int, optional
+        Window size for the median filter used for baseline correction. For each
+        cell, the baseline flurescence is estimated by median-filtering the
+        temporal activity. Then the baseline is subtracted from the temporal
+        activity right before the optimization step. If `None` then no baseline
+        correction will be performed. By default `None`.
     zero_thres : float, optional
         Threshold to filter out small values in the result. Any values smaller
         than this threshold will be set to zero. By default `1e-8`.
@@ -915,6 +923,7 @@ def update_temporal(
                     use_smooth=use_smooth,
                     c_last=cur_C,
                     bseg=bseg,
+                    med_wd=med_wd,
                     sparse_penal=sparse_penal,
                     max_iters=max_iters,
                     scs_fallback=scs_fallback,
@@ -1095,6 +1104,7 @@ def update_temporal_block(
     add_lag="p",
     normalize=True,
     use_smooth=True,
+    med_wd=None,
     concurrent=False,
     **kwargs
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
@@ -1123,6 +1133,8 @@ def update_temporal_block(
     use_smooth : bool, optional
         Whether to smooth the `YrA` for the estimation of AR coefficients. By
         default `True`.
+    med_wd : int, optional
+        Median window used for baseline correction.
     concurrent : bool, optional
         Whether to update a group of cells as a single optimization problem. By
         default `False`.
@@ -1179,6 +1191,9 @@ def update_temporal_block(
     pmax = np.max(p)
     g = vec_get_ar_coef(YrA_ar, tn_ar, p, pad=pmax, add_lag=add_lag)
     del YrA_ar, tn_ar
+    if med_wd is not None:
+        for i, cur_yra in enumerate(YrA):
+            YrA[i, :] = med_baseline(cur_yra, med_wd)
     if concurrent:
         c, s, b, c0 = update_temporal_cvxpy(YrA, g, tn, **kwargs)
     else:
