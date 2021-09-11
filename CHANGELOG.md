@@ -1,3 +1,15 @@
+## v1.1.0 (2021-09-10)
+
+### Fix
+
+- pin jinja2 version to avoid doc build fail
+- use fft filter for peak-to-noise ratio computation
+- avoid conversion in `xrconcat_recursive`
+
+### Feat
+
+- baseline fluorescence correction in temporal update with median filter
+
 ## v1.0.1 (2021-05-05)
 
 ### Fix
