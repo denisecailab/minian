@@ -679,7 +679,7 @@ def update_temporal(
     use_smooth=True,
     normalize=True,
     warm_start=False,
-    post_scal=True,
+    post_scal=False,
     scs_fallback=False,
     concurrent_update=False,
 ) -> Tuple[
@@ -791,7 +791,7 @@ def update_temporal(
         estimated with least square for each cell to scale the amplitude of
         temporal component to `YrA`. Useful to get around unwanted dampening of
         result values caused by high `sparse_penal` or to revert the per-cell
-        normalization. By default `True`.
+        normalization. By default `False`.
     scs_fallback : bool, optional
         Whether to fall back to `scs` solver if the default `ecos` solver fails.
         By default `False`.
