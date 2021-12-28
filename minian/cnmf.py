@@ -1176,8 +1176,10 @@ def update_temporal_block(
     )
     if normalize:
         amean = YrA.sum(axis=1).mean()
-        YrA /= amean
-        YrA *= YrA.shape[1]
+        norm_factor = YrA.shape[1] / amean
+        YrA *= norm_factor
+    else:
+        norm_factor = np.ones(YrA.shape[0])
     tn = vec_get_noise(YrA, noise_range=(noise_freq, 1))
     if use_smooth:
         YrA_ar = filt_fft_vec(YrA, noise_freq, "low")
@@ -1201,10 +1203,10 @@ def update_temporal_block(
         for cur_yra, cur_g, cur_tn in zip(YrA, g, tn):
             res = update_temporal_cvxpy(cur_yra, cur_g, cur_tn, **kwargs)
             res_ls.append(res)
-        c = np.concatenate([r[0] for r in res_ls], axis=0)
-        s = np.concatenate([r[1] for r in res_ls], axis=0)
-        b = np.concatenate([r[2] for r in res_ls], axis=0)
-        c0 = np.concatenate([r[3] for r in res_ls], axis=0)
+        c = np.concatenate([r[0] for r in res_ls], axis=0) / norm_factor
+        s = np.concatenate([r[1] for r in res_ls], axis=0) / norm_factor
+        b = np.concatenate([r[2] for r in res_ls], axis=0) / norm_factor
+        c0 = np.concatenate([r[3] for r in res_ls], axis=0) / norm_factor
     return c, s, b, c0, g
 
 
