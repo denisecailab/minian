@@ -679,7 +679,7 @@ def update_temporal(
     use_smooth=True,
     normalize=True,
     warm_start=False,
-    post_scal=True,
+    post_scal=False,
     scs_fallback=False,
     concurrent_update=False,
 ) -> Tuple[
@@ -791,7 +791,7 @@ def update_temporal(
         estimated with least square for each cell to scale the amplitude of
         temporal component to `YrA`. Useful to get around unwanted dampening of
         result values caused by high `sparse_penal` or to revert the per-cell
-        normalization. By default `True`.
+        normalization. By default `False`.
     scs_fallback : bool, optional
         Whether to fall back to `scs` solver if the default `ecos` solver fails.
         By default `False`.
@@ -1176,8 +1176,10 @@ def update_temporal_block(
     )
     if normalize:
         amean = YrA.sum(axis=1).mean()
-        YrA /= amean
-        YrA *= YrA.shape[1]
+        norm_factor = YrA.shape[1] / amean
+        YrA *= norm_factor
+    else:
+        norm_factor = np.ones(YrA.shape[0])
     tn = vec_get_noise(YrA, noise_range=(noise_freq, 1))
     if use_smooth:
         YrA_ar = filt_fft_vec(YrA, noise_freq, "low")
@@ -1201,10 +1203,10 @@ def update_temporal_block(
         for cur_yra, cur_g, cur_tn in zip(YrA, g, tn):
             res = update_temporal_cvxpy(cur_yra, cur_g, cur_tn, **kwargs)
             res_ls.append(res)
-        c = np.concatenate([r[0] for r in res_ls], axis=0)
-        s = np.concatenate([r[1] for r in res_ls], axis=0)
-        b = np.concatenate([r[2] for r in res_ls], axis=0)
-        c0 = np.concatenate([r[3] for r in res_ls], axis=0)
+        c = np.concatenate([r[0] for r in res_ls], axis=0) / norm_factor
+        s = np.concatenate([r[1] for r in res_ls], axis=0) / norm_factor
+        b = np.concatenate([r[2] for r in res_ls], axis=0) / norm_factor
+        c0 = np.concatenate([r[3] for r in res_ls], axis=0) / norm_factor
     return c, s, b, c0, g
 
 
