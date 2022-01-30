@@ -29,6 +29,8 @@ from distributed.diagnostics.plugin import SchedulerPlugin
 from distributed.scheduler import SchedulerState, cast
 from natsort import natsorted
 from scipy.ndimage.filters import median_filter
+from scipy.sparse import csc_matrix
+from scipy.sparse.linalg import lsqr
 from tifffile import TiffFile, imread
 
 
@@ -1300,3 +1302,11 @@ def med_baseline(a: np.ndarray, wnd: int) -> np.ndarray:
     base = median_filter(a, size=wnd)
     a -= base
     return a.clip(0, None)
+
+
+@darr.as_gufunc(signature="(m,n),(m)->(n)", output_dtypes=float)
+def sps_lstsq(a: csc_matrix, b: np.ndarray, **kwargs):
+    out = np.zeros((b.shape[0], a.shape[1]))
+    for i in range(b.shape[0]):
+        out[i, :] = lsqr(a, b[i, :].squeeze(), **kwargs)[0]
+    return out

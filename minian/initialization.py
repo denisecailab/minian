@@ -13,13 +13,20 @@ import sparse
 import xarray as xr
 from scipy.ndimage.measurements import label
 from scipy.signal import butter, lfilter
+from scipy.sparse import csc_matrix
 from scipy.stats import kstest, zscore
 from skimage.morphology import disk
 from sklearn.mixture import GaussianMixture
 from sklearn.neighbors import KDTree, radius_neighbors_graph
 
-from .cnmf import adj_corr, graph_optimize_corr, label_connected, filt_fft
-from .utilities import custom_arr_optimize, local_extreme, save_minian, med_baseline
+from .cnmf import adj_corr, filt_fft, graph_optimize_corr, label_connected
+from .utilities import (
+    custom_arr_optimize,
+    local_extreme,
+    med_baseline,
+    save_minian,
+    sps_lstsq,
+)
 
 
 def seeds_init(
@@ -751,12 +758,9 @@ def initC(varr: xr.DataArray, A: xr.DataArray) -> xr.DataArray:
     """
     Initialize temporal component given spatial footprints.
 
-    The spatial footprints of each cell is first normalized to unit sum. Then
-    the temporal component is computed as the tensor dot product between the
+    The temporal component is computed as the least-square solution between the
     input movie and the spatial footprints over the "height" and "width"
-    dimensions. In other word, the initial temporal component is a weighted
-    average of fluorescence activities in the input data with weights defined by
-    spatial footprints.
+    dimensions.
 
     Parameters
     ----------
@@ -774,11 +778,18 @@ def initC(varr: xr.DataArray, A: xr.DataArray) -> xr.DataArray:
     """
     uids = A.coords["unit_id"]
     fms = varr.coords["frame"]
-    A = A.data.map_blocks(sparse.COO).map_blocks(lambda a: a / a.sum()).compute()
-    C = darr.tensordot(A, varr, axes=[(1, 2), (1, 2)])
-    C = xr.DataArray(
-        C, dims=["unit_id", "frame"], coords={"unit_id": uids, "frame": fms}
+    A = (
+        A.stack(spatial=["height", "width"])
+        .transpose("spatial", "unit_id")
+        .data.map_blocks(csc_matrix)
+        .rechunk(-1)
+        .persist()
     )
+    varr = varr.stack(spatial=["height", "width"]).transpose("frame", "spatial").data
+    C = sps_lstsq(A, varr)
+    C = xr.DataArray(
+        C, dims=["frame", "unit_id"], coords={"unit_id": uids, "frame": fms}
+    ).transpose("unit_id", "frame")
     return C
 
 
