@@ -20,13 +20,7 @@ from sklearn.mixture import GaussianMixture
 from sklearn.neighbors import KDTree, radius_neighbors_graph
 
 from .cnmf import adj_corr, filt_fft, graph_optimize_corr, label_connected
-from .utilities import (
-    custom_arr_optimize,
-    local_extreme,
-    med_baseline,
-    save_minian,
-    sps_lstsq,
-)
+from .utilities import local_extreme, med_baseline, save_minian, sps_lstsq
 
 
 def seeds_init(
@@ -791,55 +785,6 @@ def initC(varr: xr.DataArray, A: xr.DataArray) -> xr.DataArray:
         C, dims=["frame", "unit_id"], coords={"unit_id": uids, "frame": fms}
     ).transpose("unit_id", "frame")
     return C
-
-
-def initbf(
-    varr: xr.DataArray, A: xr.DataArray, C: xr.DataArray
-) -> Tuple[xr.DataArray, xr.DataArray]:
-    """
-    Initialize background terms given spatial and temporal components of cells.
-
-    A movie representation (with dimensions "height" "width" and "frame") of
-    estimated cell activities are computed as the product between the spatial
-    components matrix and the temporal components matrix of cells over the
-    "unit_id" dimension. Then the residule movie is computed by subtracting the
-    estimated cell activity movie from the input movie. Then the spatial
-    footprint of background `b` is the mean of the residule movie over "frame"
-    dimension, and the temporal component of background `f` is the mean of the
-    residule movie over "height" and "width" dimensions.
-
-    Parameters
-    ----------
-    varr : xr.DataArray
-        Input movie data. Should have dimensions ("frame", "height", "width").
-    A : xr.DataArray
-        Estimation of spatial footprints of cells. Should have dimensions
-        ("unit_id", "height", "width").
-    C : xr.DataArray
-        Estimation of temporal activities of cells. Should have dimensions
-        ("unit_id", "frame").
-
-    Returns
-    -------
-    b : xr.DataArray
-        Initial estimation of the spatial footprint of background. Has
-        dimensions ("height", "width").
-    f : xr.DataArray
-        Initial estimation of the temporal activity of background. Has dimension
-        "frame".
-    """
-    A = A.data.map_blocks(sparse.COO).compute()
-    Yb = (varr - darr.tensordot(C, A, axes=[(0,), (0,)])).clip(0)
-    b = Yb.mean("frame")
-    f = Yb.mean(["height", "width"])
-    arr_opt = fct.partial(
-        custom_arr_optimize, rename_dict={"tensordot": "tensordot_restricted"}
-    )
-    with da.config.set(array_optimize=arr_opt):
-        b = da.optimize(b)[0]
-        f = da.optimize(f)[0]
-    b, f = da.compute([b, f])[0]
-    return b, f
 
 
 @darr.as_gufunc(signature="(h, w)->(h, w)", output_dtypes=int, allow_rechunk=True)

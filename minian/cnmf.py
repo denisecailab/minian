@@ -1941,3 +1941,64 @@ def idx_corr(X: np.ndarray, ridx: np.ndarray, cidx: np.ndarray) -> np.ndarray:
         else:
             res[i] = 0
     return res
+
+
+def update_background(
+    Y: xr.DataArray, A: xr.DataArray, C: xr.DataArray, b: xr.DataArray = None
+) -> Tuple[xr.DataArray, xr.DataArray]:
+    """
+    Update background terms given spatial and temporal components of cells.
+
+    A movie representation (with dimensions "height" "width" and "frame") of
+    estimated cell activities are computed as the product between the spatial
+    components matrix and the temporal components matrix of cells over the
+    "unit_id" dimension. Then the residule movie is computed by subtracting the
+    estimated cell activity movie from the input movie. Then the spatial
+    footprint of background `b` is the mean of the residule movie over "frame"
+    dimension, and the temporal component of background `f` is the least-square
+    solution between the residule movie and the spatial footprint `b`.
+
+    Parameters
+    ----------
+    Y : xr.DataArray
+        Input movie data. Should have dimensions ("frame", "height", "width").
+    A : xr.DataArray
+        Estimation of spatial footprints of cells. Should have dimensions
+        ("unit_id", "height", "width").
+    C : xr.DataArray
+        Estimation of temporal activities of cells. Should have dimensions
+        ("unit_id", "frame").
+    b : xr.DataArray, optional
+        Previous estimation of spatial footprint of background. If provided it
+        will be returned as-is, and only temporal activity of background will be
+        updated
+
+    Returns
+    -------
+    b_new : xr.DataArray
+        New estimation of the spatial footprint of background. Has
+        dimensions ("height", "width").
+    f_new : xr.DataArray
+        New estimation of the temporal activity of background. Has dimension
+        "frame".
+    """
+    intpath = os.environ["MINIAN_INTERMEDIATE"]
+    AtC = compute_AtC(A, C)
+    Yb = (Y - AtC).clip(0)
+    Yb = save_minian(Yb.rename("Yb"), intpath, overwrite=True)
+    if b is None:
+        b_new = Yb.mean("frame").persist()
+    else:
+        b_new = b.persist()
+    b_stk = (
+        b_new.stack(spatial=["height", "width"])
+        .transpose("spatial")
+        .expand_dims("dummy", axis=-1)
+        .chunk(-1)
+    )
+    Yb_stk = Yb.stack(spatial=["height", "width"]).transpose("spatial", "frame")
+    f_new = darr.linalg.lstsq(b_stk.data, Yb_stk.data)[0]
+    f_new = xr.DataArray(
+        f_new.squeeze(), dims=["frame"], coords={"frame": Yb.coords["frame"]}
+    ).persist()
+    return b_new, f_new
