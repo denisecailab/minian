@@ -786,7 +786,7 @@ def initC(varr: xr.DataArray, A: xr.DataArray) -> xr.DataArray:
         .persist()
     )
     varr = varr.stack(spatial=["height", "width"]).transpose("frame", "spatial").data
-    C = sps_lstsq(A, varr)
+    C = sps_lstsq(A, varr, iter_lim=10)
     C = xr.DataArray(
         C, dims=["frame", "unit_id"], coords={"unit_id": uids, "frame": fms}
     ).transpose("unit_id", "frame")
