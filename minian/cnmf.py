@@ -225,13 +225,13 @@ def noise_welch(
 def update_spatial(
     Y: xr.DataArray,
     A: xr.DataArray,
-    b: xr.DataArray,
     C: xr.DataArray,
-    f: xr.DataArray,
     sn: xr.DataArray,
+    b: xr.DataArray = None,
+    f: xr.DataArray = None,
     dl_wnd=5,
     sparse_penal=0.5,
-    update_background=True,
+    update_background=False,
     normalize=True,
     size_thres=(9, None),
     in_memory=False,
@@ -264,18 +264,18 @@ def update_spatial(
     A : xr.DataArray
         Previous estimation of spatial footprints. Should have dimension
         "height", "width" and "unit_id".
-    b : xr.DataArray
-        Previous estimation of spatial footprint of background. Fhould have
-        dimension "height" and "width".
     C : xr.DataArray
         Estimation of temporal component for each cell. Should have dimension
         "frame" and "unit_id".
-    f : xr.DataArray
-        Estimation of temporal dynamic of background. Should have dimension
-        "frame".
     sn : xr.DataArray
         Estimation of noise level for each pixel. Should have dimension "height"
         and "width".
+    b : xr.DataArray, optional
+        Previous estimation of spatial footprint of background. Fhould have
+        dimension "height" and "width".
+    f : xr.DataArray, optional
+        Estimation of temporal dynamic of background. Should have dimension
+        "frame".
     dl_wnd : int, optional
         Window of morphological dilation in pixel when computing the subsetting
         matrix. By default `5`.
@@ -283,8 +283,8 @@ def update_spatial(
         Global scalar controlling sparsity of the result. The higher the value,
         the sparser the spatial footprints. By default `0.5`.
     update_background : bool, optional
-        Whether to update the spatial footprint of background. By default
-        `True`.
+        Whether to update the spatial footprint of background. If `True`, then
+        both `b` and `f` need to be provided. By default `False`.
     normalize : bool, optional
         Whether to normalize resulting spatial footprints of each cell to unit
         sum. By default `True`
@@ -300,15 +300,13 @@ def update_spatial(
     A_new : xr.DataArray
         New estimation of spatial footprints. Same shape as `A` except the
         "unit_id" dimension might be smaller due to filtering.
-    b_new : xr.DataArray
-        New estimation of spatial footprint of background. Same shape as `b`.
-    f_new : xr.DataArray
-        New estimation of temporal dynamic of background. Computed as the
-        `Y.tensordot(b_new)`. Same shape as `f`.
     mask : xr.DataArray
         Boolean mask of whether a cell passed size filtering. Has dimension
         "unit_id" that is same as input `A`. Useful for subsetting other
         variables based on the result of spatial update.
+    b_new : xr.DataArray
+        New estimation of spatial footprint of background. Only returned if
+        `update_background` is `True`. Same shape as `b`.
 
     Notes
     -------
@@ -354,6 +352,8 @@ def update_spatial(
     sub = sub > 0
     sub.data = sub.data.map_blocks(sparse.COO)
     if update_background:
+        assert b is not None, "`b` must be provided when updating background"
+        assert f is not None, "`f` must be provided when updating background"
         b_in = rechunk_like(b > 0, Y).assign_coords(unit_id=-1).expand_dims("unit_id")
         b_in.data = b_in.data.map_blocks(sparse.COO)
         b_in = b_in.compute()
@@ -415,24 +415,11 @@ def update_spatial(
         overwrite=True,
         chunks={"unit_id": 1, "height": -1, "width": -1},
     )
+    add_rets = []
     if update_background:
-        print("updating background")
-        b_new = A_new.sel(unit_id=-1)
-        f_new = xr.apply_ufunc(
-            darr.tensordot,
-            Y,
-            b_new,
-            input_core_dims=[["frame", "height", "width"], ["height", "width"]],
-            output_core_dims=[["frame"]],
-            kwargs={"axes": [(1, 2), (0, 1)]},
-            dask="allowed",
-        )
-        b_new = b_new.compute()
-        f_new = f_new.compute()
+        b_new = A_new.sel(unit_id=-1).compute()
         A_new = A_new[:-1, :, :]
-    else:
-        b_new = b.compute()
-        f_new = f.compute()
+        add_rets.append(b_new)
     if size_thres:
         low, high = size_thres
         A_bin = A_new > 0
@@ -452,7 +439,7 @@ def update_spatial(
         mask = (A_new.sum(["height", "width"]) > 0).compute()
     print("{} out of {} units dropped".format(len(mask) - mask.sum().values, len(mask)))
     A_new = A_new.sel(unit_id=mask)
-    return A_new, b_new, f_new, mask
+    return A_new, mask, *add_rets
 
 
 def sps_any(x: sparse.COO) -> np.ndarray:
