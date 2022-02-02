@@ -307,7 +307,9 @@ def update_spatial(
     b_new : xr.DataArray
         New estimation of spatial footprint of background. Only returned if
         `update_background` is `True`. Same shape as `b`.
-
+    norm_fac : xr.DataArray
+        Normalizing factor. Userful to scale temporal activity of cells. Only
+        returned if `normalize` is `True`.
     Notes
     -------
     During spatial update, the algorithm solve the following optimization
@@ -398,8 +400,6 @@ def update_spatial(
         )
     with da.config.set(**{"optimization.fuse.ave-width": 6}):
         A_new = da.optimize(A_new)[0]
-    if normalize:
-        A_new = A_new / A_new.sum(axis=(0, 1))
     A_new = xr.DataArray(
         darr.moveaxis(A_new, -1, 0).map_blocks(lambda a: a.todense(), dtype=A.dtype),
         dims=["unit_id", "height", "width"],
@@ -439,6 +439,10 @@ def update_spatial(
         mask = (A_new.sum(["height", "width"]) > 0).compute()
     print("{} out of {} units dropped".format(len(mask) - mask.sum().values, len(mask)))
     A_new = A_new.sel(unit_id=mask)
+    if normalize:
+        norm_fac = A_new.max(["height", "width"]).compute()
+        A_new = A_new / norm_fac
+        add_rets.append(norm_fac)
     return A_new, mask, *add_rets
 
 
