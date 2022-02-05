@@ -225,13 +225,13 @@ def noise_welch(
 def update_spatial(
     Y: xr.DataArray,
     A: xr.DataArray,
-    b: xr.DataArray,
     C: xr.DataArray,
-    f: xr.DataArray,
     sn: xr.DataArray,
+    b: xr.DataArray = None,
+    f: xr.DataArray = None,
     dl_wnd=5,
     sparse_penal=0.5,
-    update_background=True,
+    update_background=False,
     normalize=True,
     size_thres=(9, None),
     in_memory=False,
@@ -264,18 +264,18 @@ def update_spatial(
     A : xr.DataArray
         Previous estimation of spatial footprints. Should have dimension
         "height", "width" and "unit_id".
-    b : xr.DataArray
-        Previous estimation of spatial footprint of background. Fhould have
-        dimension "height" and "width".
     C : xr.DataArray
         Estimation of temporal component for each cell. Should have dimension
         "frame" and "unit_id".
-    f : xr.DataArray
-        Estimation of temporal dynamic of background. Should have dimension
-        "frame".
     sn : xr.DataArray
         Estimation of noise level for each pixel. Should have dimension "height"
         and "width".
+    b : xr.DataArray, optional
+        Previous estimation of spatial footprint of background. Fhould have
+        dimension "height" and "width".
+    f : xr.DataArray, optional
+        Estimation of temporal dynamic of background. Should have dimension
+        "frame".
     dl_wnd : int, optional
         Window of morphological dilation in pixel when computing the subsetting
         matrix. By default `5`.
@@ -283,8 +283,8 @@ def update_spatial(
         Global scalar controlling sparsity of the result. The higher the value,
         the sparser the spatial footprints. By default `0.5`.
     update_background : bool, optional
-        Whether to update the spatial footprint of background. By default
-        `True`.
+        Whether to update the spatial footprint of background. If `True`, then
+        both `b` and `f` need to be provided. By default `False`.
     normalize : bool, optional
         Whether to normalize resulting spatial footprints of each cell to unit
         sum. By default `True`
@@ -300,16 +300,16 @@ def update_spatial(
     A_new : xr.DataArray
         New estimation of spatial footprints. Same shape as `A` except the
         "unit_id" dimension might be smaller due to filtering.
-    b_new : xr.DataArray
-        New estimation of spatial footprint of background. Same shape as `b`.
-    f_new : xr.DataArray
-        New estimation of temporal dynamic of background. Computed as the
-        `Y.tensordot(b_new)`. Same shape as `f`.
     mask : xr.DataArray
         Boolean mask of whether a cell passed size filtering. Has dimension
         "unit_id" that is same as input `A`. Useful for subsetting other
         variables based on the result of spatial update.
-
+    b_new : xr.DataArray
+        New estimation of spatial footprint of background. Only returned if
+        `update_background` is `True`. Same shape as `b`.
+    norm_fac : xr.DataArray
+        Normalizing factor. Userful to scale temporal activity of cells. Only
+        returned if `normalize` is `True`.
     Notes
     -------
     During spatial update, the algorithm solve the following optimization
@@ -354,6 +354,8 @@ def update_spatial(
     sub = sub > 0
     sub.data = sub.data.map_blocks(sparse.COO)
     if update_background:
+        assert b is not None, "`b` must be provided when updating background"
+        assert f is not None, "`f` must be provided when updating background"
         b_in = rechunk_like(b > 0, Y).assign_coords(unit_id=-1).expand_dims("unit_id")
         b_in.data = b_in.data.map_blocks(sparse.COO)
         b_in = b_in.compute()
@@ -398,8 +400,6 @@ def update_spatial(
         )
     with da.config.set(**{"optimization.fuse.ave-width": 6}):
         A_new = da.optimize(A_new)[0]
-    if normalize:
-        A_new = A_new / A_new.sum(axis=(0, 1))
     A_new = xr.DataArray(
         darr.moveaxis(A_new, -1, 0).map_blocks(lambda a: a.todense(), dtype=A.dtype),
         dims=["unit_id", "height", "width"],
@@ -415,24 +415,11 @@ def update_spatial(
         overwrite=True,
         chunks={"unit_id": 1, "height": -1, "width": -1},
     )
+    add_rets = []
     if update_background:
-        print("updating background")
-        b_new = A_new.sel(unit_id=-1)
-        f_new = xr.apply_ufunc(
-            darr.tensordot,
-            Y,
-            b_new,
-            input_core_dims=[["frame", "height", "width"], ["height", "width"]],
-            output_core_dims=[["frame"]],
-            kwargs={"axes": [(1, 2), (0, 1)]},
-            dask="allowed",
-        )
-        b_new = b_new.compute()
-        f_new = f_new.compute()
+        b_new = A_new.sel(unit_id=-1).compute()
         A_new = A_new[:-1, :, :]
-    else:
-        b_new = b.compute()
-        f_new = f.compute()
+        add_rets.append(b_new)
     if size_thres:
         low, high = size_thres
         A_bin = A_new > 0
@@ -452,7 +439,11 @@ def update_spatial(
         mask = (A_new.sum(["height", "width"]) > 0).compute()
     print("{} out of {} units dropped".format(len(mask) - mask.sum().values, len(mask)))
     A_new = A_new.sel(unit_id=mask)
-    return A_new, b_new, f_new, mask
+    if normalize:
+        norm_fac = A_new.max(["height", "width"]).compute()
+        A_new = A_new / norm_fac
+        add_rets.append(norm_fac)
+    return A_new, mask, *add_rets
 
 
 def sps_any(x: sparse.COO) -> np.ndarray:
@@ -1941,3 +1932,64 @@ def idx_corr(X: np.ndarray, ridx: np.ndarray, cidx: np.ndarray) -> np.ndarray:
         else:
             res[i] = 0
     return res
+
+
+def update_background(
+    Y: xr.DataArray, A: xr.DataArray, C: xr.DataArray, b: xr.DataArray = None
+) -> Tuple[xr.DataArray, xr.DataArray]:
+    """
+    Update background terms given spatial and temporal components of cells.
+
+    A movie representation (with dimensions "height" "width" and "frame") of
+    estimated cell activities are computed as the product between the spatial
+    components matrix and the temporal components matrix of cells over the
+    "unit_id" dimension. Then the residule movie is computed by subtracting the
+    estimated cell activity movie from the input movie. Then the spatial
+    footprint of background `b` is the mean of the residule movie over "frame"
+    dimension, and the temporal component of background `f` is the least-square
+    solution between the residule movie and the spatial footprint `b`.
+
+    Parameters
+    ----------
+    Y : xr.DataArray
+        Input movie data. Should have dimensions ("frame", "height", "width").
+    A : xr.DataArray
+        Estimation of spatial footprints of cells. Should have dimensions
+        ("unit_id", "height", "width").
+    C : xr.DataArray
+        Estimation of temporal activities of cells. Should have dimensions
+        ("unit_id", "frame").
+    b : xr.DataArray, optional
+        Previous estimation of spatial footprint of background. If provided it
+        will be returned as-is, and only temporal activity of background will be
+        updated
+
+    Returns
+    -------
+    b_new : xr.DataArray
+        New estimation of the spatial footprint of background. Has
+        dimensions ("height", "width").
+    f_new : xr.DataArray
+        New estimation of the temporal activity of background. Has dimension
+        "frame".
+    """
+    intpath = os.environ["MINIAN_INTERMEDIATE"]
+    AtC = compute_AtC(A, C)
+    Yb = (Y - AtC).clip(0)
+    Yb = save_minian(Yb.rename("Yb"), intpath, overwrite=True)
+    if b is None:
+        b_new = Yb.mean("frame").persist()
+    else:
+        b_new = b.persist()
+    b_stk = (
+        b_new.stack(spatial=["height", "width"])
+        .transpose("spatial")
+        .expand_dims("dummy", axis=-1)
+        .chunk(-1)
+    )
+    Yb_stk = Yb.stack(spatial=["height", "width"]).transpose("spatial", "frame")
+    f_new = darr.linalg.lstsq(b_stk.data, Yb_stk.data)[0]
+    f_new = xr.DataArray(
+        f_new.squeeze(), dims=["frame"], coords={"frame": Yb.coords["frame"]}
+    ).persist()
+    return b_new, f_new

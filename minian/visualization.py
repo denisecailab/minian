@@ -1302,7 +1302,7 @@ def generate_videos(
     A: Optional[xr.DataArray] = None,
     C: Optional[xr.DataArray] = None,
     AC: Optional[xr.DataArray] = None,
-    nfm_norm=200,
+    nfm_norm: int = None,
     gain=1.5,
     vpath=".",
     vname="minian.mp4",
@@ -1343,7 +1343,7 @@ def generate_videos(
         By default `None`.
     nfm_norm : int, optional
         Number of frames to randomly draw from `Y` and `AC` to compute the
-        normalizing factor with least square. By default `200`.
+        normalizing factor with least square. By default `None`.
     gain : float, optional
         A gain factor multiplied to `Y`. Useful to make the results visually
         brighter. By default `1.5`.
@@ -1364,15 +1364,19 @@ def generate_videos(
         print("generating traces")
         AC = compute_AtC(A, C)
     print("normalizing")
-    Y = Y * 255 / Y.max().compute().values * gain
-    norm_idx = np.sort(
-        np.random.choice(np.arange(Y.sizes["frame"]), size=nfm_norm, replace=False)
-    )
-    Y_sub = Y.isel(frame=norm_idx).values.reshape(-1)
-    AC_sub = scisps.csc_matrix(AC.isel(frame=norm_idx).values.reshape((-1, 1)))
-    lsqr = scisps.linalg.lsqr(AC_sub, Y_sub)
-    norm_factor = lsqr[0].item()
-    del Y_sub, AC_sub
+    gain = 255 / Y.max().compute().values * gain
+    Y = Y * gain
+    if nfm_norm is not None:
+        norm_idx = np.sort(
+            np.random.choice(np.arange(Y.sizes["frame"]), size=nfm_norm, replace=False)
+        )
+        Y_sub = Y.isel(frame=norm_idx).values.reshape(-1)
+        AC_sub = scisps.csc_matrix(AC.isel(frame=norm_idx).values.reshape((-1, 1)))
+        lsqr = scisps.linalg.lsqr(AC_sub, Y_sub)
+        norm_factor = lsqr[0].item()
+        del Y_sub, AC_sub
+    else:
+        norm_factor = gain
     AC = AC * norm_factor
     res = Y - AC
     print("writing videos")
