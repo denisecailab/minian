@@ -1,3 +1,14 @@
+## v1.2.0 (2022-02-09)
+
+### Feat
+
+- use least square to produce proper scaling in temporal components and background terms
+
+### Fix
+
+- rescale with normalizing factor when using `normalize` parameter in spatial and temporal update
+- fix unit id mismatch in spatial parameter exploration
+
 ## v1.1.0 (2021-09-10)
 
 ### Fix
