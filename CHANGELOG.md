@@ -1,3 +1,9 @@
+## v1.2.1 (2022-02-10)
+
+### Fix
+
+- avoid syntax error in `update_spatial` returns
+
 ## v1.2.0 (2022-02-09)
 
 ### Feat
