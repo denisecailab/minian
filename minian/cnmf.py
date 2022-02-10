@@ -443,7 +443,7 @@ def update_spatial(
         norm_fac = A_new.max(["height", "width"]).compute()
         A_new = A_new / norm_fac
         add_rets.append(norm_fac)
-    return A_new, mask, *add_rets
+    return (A_new, mask, *add_rets)
 
 
 def sps_any(x: sparse.COO) -> np.ndarray:
