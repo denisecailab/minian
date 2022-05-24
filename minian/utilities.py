@@ -640,7 +640,9 @@ def update_meta(dpath, pattern=r"^minian$", meta_dict=None):
 
             # Save each variable.
             for varname, da in ds.data_vars.items():
-                da.to_dataset().to_zarr(os.path.join(f_path, varname+".zarr"), mode="w")
+                da.to_dataset().to_zarr(
+                    os.path.join(f_path, varname + ".zarr"), mode="w"
+                )
             print("updated: {}".format(f_path))
 
 
@@ -1164,11 +1166,7 @@ def custom_delay_optimize(
     if inline_patterns:
         dsk = inline_pattern(dsk, inline_patterns, inline_constants=False)
     if fast_functions:
-        dsk = inline_functions(
-            dsk,
-            [],
-            fast_functions=fast_functions,
-        )
+        dsk = inline_functions(dsk, [], fast_functions=fast_functions,)
     return dsk
 
 
