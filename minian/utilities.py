@@ -605,30 +605,42 @@ def xrconcat_recursive(var: Union[dict, list], dims: List[str]) -> xr.Dataset:
         return xr.concat(var, dim=dims[0])
 
 
-def update_meta(dpath, pattern=r"^minian\.nc$", meta_dict=None, backend="netcdf"):
+def update_meta(dpath, pattern=r"^minian$", meta_dict=None):
+    """
+    Searches dpath for all folders that follow the regexp pattern and overwrites the metadata
+    according to meta_dict.
+
+    Parameters
+    ----------
+    dpath : str
+        A path containing any number of minian datasets.
+    pattern : regexp, optional
+        Pattern of minian dataset directory names. By default `r"minian$"`.
+    meta_dict : dict, optional
+        How metadata should be retrieved from directory hierarchy. The keys
+        should be negative integers representing directory level relative to
+        `dpath` (so `-1` means the immediate parent directory of `dpath`), and
+        values should be the name of dimensions represented by the corresponding
+        level of directory. The actual coordinate value of the dimensions will
+        be the directory name of corresponding level. By default `None`.
+    """
     for dirpath, dirnames, fnames in os.walk(dpath):
-        if backend == "netcdf":
-            fnames = filter(lambda fn: re.search(pattern, fn), fnames)
-        elif backend == "zarr":
-            fnames = filter(lambda fn: re.search(pattern, fn), dirnames)
-        else:
-            raise NotImplementedError("backend {} not supported".format(backend))
+        fnames = filter(lambda fn: re.search(pattern, fn), dirnames)
+
         for fname in fnames:
+            # Open dataset.
             f_path = os.path.join(dirpath, fname)
-            pathlist = os.path.normpath(dirpath).split(os.sep)
-            new_ds = xr.Dataset()
-            old_ds = open_minian(f_path, f_path, backend)
-            new_ds.attrs = deepcopy(old_ds.attrs)
-            old_ds.close()
-            new_ds = new_ds.assign_coords(
-                **dict(
-                    [(cdname, pathlist[cdval]) for cdname, cdval in meta_dict.items()]
-                )
+            ds = open_minian(f_path)
+            pathlist = os.path.split(os.path.abspath(f_path))[0].split(os.sep)
+
+            # Assign new metadata.
+            ds = ds.assign_coords(
+                **dict([(dn, pathlist[di]) for dn, di in meta_dict.items()])
             )
-            if backend == "netcdf":
-                new_ds.to_netcdf(f_path, mode="a")
-            elif backend == "zarr":
-                new_ds.to_zarr(f_path, mode="w")
+
+            # Save each variable.
+            for varname, da in ds.data_vars.items():
+                da.to_dataset().to_zarr(os.path.join(f_path, varname+".zarr"), mode="w")
             print("updated: {}".format(f_path))
 
 
