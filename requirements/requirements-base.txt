@@ -31,3 +31,4 @@ sparse==0.11.2
 pymetis==2020.1
 rechunker==0.3.3
 medpy==0.4.0
+jinja2<3
