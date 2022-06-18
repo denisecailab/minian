@@ -41,3 +41,4 @@ dependencies:
   - pymetis=2020.1
   - rechunker=0.3.3
   - medpy=0.4.0
+  - jinja2=2.11.3
