@@ -34,6 +34,7 @@ jobs:
         with:
           auto-update-conda: true
           python-version: ${{ matrix.python-version }}
+          mamba-version: "*"
           activate-environment: minian
           environment-file: environment.yml
       - name: Install test dependencies
