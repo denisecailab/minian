@@ -22,6 +22,19 @@ After you have created and activated an environment, you can install MiniAn with
 
 and Done!
 
+Alternatively, you can use `mamba <https://mamba.readthedocs.io/en/latest/>`_ to install minian, which usually provides faster speed when solving the dependencies.
+To do so, you first need to install `mamba`, either in minian environment or in your base environment.
+
+.. code-block:: console
+
+    conda install -y -c conda-forge mamba
+
+After this, you can use `mamba` as a drop-in replacement command for `conda` to install minian:
+
+.. code-block:: console
+
+    mamba install -y -c conda-forge minian
+
 Install from source
 -------------------
 
