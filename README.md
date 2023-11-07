@@ -1,3 +1,8 @@
+<p align="center">
+  <img src="https://github.com/denisecailab/minian/assets/844306/358d9a24-bc0d-40d0-8747-4c43693ce270" alt="image">
+</p>
+
+
 [![pytest status](https://github.com/denisecailab/minian/workflows/pytest/badge.svg?branch=master)](https://github.com/DeniseCaiLab/minian/actions?query=workflow%3Apytest)
 [![codecov](https://codecov.io/gh/DeniseCaiLab/minian/branch/master/graph/badge.svg)](https://codecov.io/gh/DeniseCaiLab/minian)
 [![conda version](https://img.shields.io/conda/vn/conda-forge/minian.svg)](https://anaconda.org/conda-forge/minian)
