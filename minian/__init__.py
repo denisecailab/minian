@@ -1,5 +1,5 @@
 import os
-from importlib.metadata import version
+from importlib.metadata import PackageNotFoundError, version
 
 import dask as da
 
@@ -7,7 +7,7 @@ from .utilities import custom_delay_optimize
 
 try:
     __version__ = version("minian")
-except:  # noqa: E722
+except PackageNotFoundError:  # noqa: E722
     __version__ = "0.0.0"
 
 da.config.set(delayed_optimize=custom_delay_optimize)
